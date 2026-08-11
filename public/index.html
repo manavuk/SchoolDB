@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>England & Greater London High Schools Directory & Database</title>
+  <!-- Google Fonts & FontAwesome Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="nav-container">
+      <div class="brand">
+        <i class="fa-solid fa-graduation-cap brand-icon"></i>
+        <div class="brand-text">
+          <span class="brand-title">EduLondon DB</span>
+          <span class="brand-tagline">England & Greater London High Schools Directory</span>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="nav-tabs">
+        <button id="tab-directory-btn" class="nav-tab-btn active">
+          <i class="fa-solid fa-building-columns"></i> Directory View
+        </button>
+        <button id="tab-admin-btn" class="nav-tab-btn admin-only" style="display: none;">
+          <i class="fa-solid fa-user-shield"></i> Admin Portal
+        </button>
+      </nav>
+
+      <div class="nav-actions">
+        <!-- Role Selector Switcher -->
+        <div class="role-selector-box">
+          <label for="role-select"><i class="fa-solid fa-user-gear"></i> Role:</label>
+          <select id="role-select" class="role-dropdown">
+            <option value="admin" selected>Admin (Manager)</option>
+            <option value="user">User (Standard)</option>
+          </select>
+        </div>
+
+        <button id="compare-bar-btn" class="btn btn-outline" style="display:none;">
+          <i class="fa-solid fa-code-compare"></i> Compare (<span id="compare-count">0</span>)
+        </button>
+        <button id="add-school-btn" class="btn btn-primary admin-only" style="display: none;">
+          <i class="fa-solid fa-plus"></i> Add School Entry
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- DIRECTORY TAB VIEW CONTENT -->
+  <div id="directory-tab-content">
+
+    <!-- Main Workspace Layout -->
+    <main class="main-layout">
+
+      
+      <!-- Sidebar Filters -->
+      <aside class="sidebar-filters">
+        <div class="filter-header">
+          <h3><i class="fa-solid fa-sliders"></i> Filter Database</h3>
+          <button id="reset-filters-btn" class="btn-text">Reset All</button>
+        </div>
+
+        <div class="filter-group">
+          <label><i class="fa-solid fa-magnifying-glass"></i> Search Keyword</label>
+          <input type="text" id="search-input" placeholder="School name, URN, keyword...">
+        </div>
+
+        <div class="filter-group">
+          <label><i class="fa-solid fa-map-location-dot"></i> Local Authority / Borough</label>
+          <select id="la-select">
+            <option value="">All Boroughs / Local Authorities</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label><i class="fa-solid fa-fire" style="color: #ef4444;"></i> Status / Tier</label>
+          <select id="hot-select">
+            <option value="">All Schools</option>
+            <option value="hot">🔥 Hot Schools Only</option>
+            <option value="official">✓ Official DfE Only</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+
+          <label><i class="fa-solid fa-school"></i> School Type</label>
+          <select id="type-select">
+            <option value="">All Types</option>
+            <option value="Grammar">Grammar (All)</option>
+            <option value="Independent">Independent</option>
+            <option value="Comprehensive">Comprehensive</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label><i class="fa-solid fa-users"></i> Gender Intake</label>
+          <select id="gender-select">
+            <option value="">All (Boys, Girls, Mixed)</option>
+            <option value="Girls">Girls Only</option>
+            <option value="Boys">Boys Only</option>
+            <option value="Mixed">Mixed Intake</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label><i class="fa-solid fa-star"></i> Ofsted Rating</label>
+          <select id="ofsted-select">
+            <option value="">All Ratings</option>
+            <option value="Outstanding">Outstanding</option>
+            <option value="Good">Good</option>
+            <option value="Requires Improvement">Requires Improvement</option>
+            <option value="Independent (ISI Excellent)">ISI Excellent</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label><i class="fa-solid fa-pen-nib"></i> Entrance Exam Type</label>
+          <select id="exam-select">
+            <option value="">All Exam Types</option>
+            <option value="GL Assessment">11+ GL Assessment</option>
+            <option value="SET">Selective Eligibility Test (SET)</option>
+            <option value="Stage">Two-Stage 11+</option>
+            <option value="ISEB">ISEB / Common Entrance</option>
+            <option value="Banding">Banding Assessment</option>
+          </select>
+        </div>
+      </aside>
+
+      <!-- Content Workspace -->
+      <section class="content-workspace">
+        
+        <!-- Toolbar -->
+        <div class="workspace-toolbar">
+          <div class="results-count">
+            Showing <span id="results-num">0</span> matching schools
+          </div>
+          <div class="view-toggles">
+            <button id="view-cards-btn" class="toggle-btn" title="Card View"><i class="fa-solid fa-border-all"></i></button>
+            <button id="view-table-btn" class="toggle-btn active" title="Table View"><i class="fa-solid fa-list"></i></button>
+          </div>
+        </div>
+
+        <!-- School Cards Container (Hidden by default, Table View is default) -->
+        <div id="schools-container" class="schools-grid" style="display:none;">
+          <!-- Rendered via JS -->
+        </div>
+
+        <!-- School Table View Container (Default View) -->
+        <div id="schools-table-container" class="table-responsive">
+          <table class="data-table">
+
+            <thead>
+              <tr>
+                <th>School Name</th>
+                <th>Local Authority</th>
+                <th style="text-align: center;">Type</th>
+                <th style="text-align: center;">Gender</th>
+                <th>Ofsted</th>
+                <th>Exam Type</th>
+                <th>Attainment 8</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="schools-table-body">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+  <!-- ADMIN TAB VIEW CONTENT (Shown when Admin tab is active) -->
+  <div id="admin-tab-content" style="display: none;">
+    <section class="admin-portal-container">
+      <div class="admin-header-box">
+        <h2><i class="fa-solid fa-user-shield"></i> Admin Management & Bulk Import Center</h2>
+        <p>Perform bulk data verification, automatic de-duplication, and dataset cleanup prior to committing school records.</p>
+      </div>
+
+      <div class="admin-grid">
+        <!-- Step 1: Bulk Data Paste / Upload & AI Prompt Generator -->
+        <div class="admin-card">
+          <div class="card-title-bar">
+            <h3><i class="fa-solid fa-file-import"></i> Step 1: Input Bulk Schools Data (JSON)</h3>
+            <div>
+              <button id="show-ai-prompt-btn" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.35rem 0.7rem; color: #7c3aed; border-color: #ddd6fe; background: #f5f3ff;">
+                <i class="fa-solid fa-robot"></i> Copy AI Prompt Format
+              </button>
+              <button id="load-sample-bulk-btn" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.35rem 0.7rem;">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> Load Sample Bulk Batch
+              </button>
+            </div>
+          </div>
+          
+          <!-- Collapsible AI Prompt Helper Box -->
+          <div id="ai-prompt-box" class="ai-prompt-callout" style="display: none;">
+            <div class="prompt-box-header">
+              <span><i class="fa-solid fa-sparkles"></i> <strong>AI Prompt Generator for ChatGPT / Gemini / Claude</strong></span>
+              <button id="copy-prompt-btn" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;">
+                <i class="fa-solid fa-copy"></i> Copy Prompt to Clipboard
+              </button>
+            </div>
+            <p style="font-size: 0.8rem; color: #475569; margin: 0.4rem 0;">Copy this prompt to request additional high school datasets from any LLM in the exact JSON schema required by EduLondon DB:</p>
+            <pre id="prompt-template-text">Please generate a valid JSON array of high schools in [Region/Borough] in England formatted strictly according to this JSON schema:
+
+[
+  {
+    "name": "School Name",
+    "urn": "123456",
+    "la": "Local Authority Name",
+    "region": "Greater London",
+    "postcode": "Postcode",
+    "address": "Full Address",
+    "schoolType": "Grammar (Academy) | Comprehensive (Academy) | Independent",
+    "gender": "Boys | Girls | Mixed",
+    "ageRange": "11-18 | 11-16",
+    "pupilCount": 1200,
+    "ofstedRating": "Outstanding | Good | Requires Improvement | Independent (ISI Excellent)",
+    "gcseProgress8": 0.85,
+    "gcseAttainment8": 65.4,
+    "ebaccAveragePointScore": 5.80,
+    "entranceExamType": "11+ GL Assessment | Sutton SET | Non-selective | ISEB Pre-test",
+    "entranceExamDates": {
+      "registrationOpen": "1 May 2026",
+      "registrationDeadline": "31 October 2026",
+      "examDate": "September 2026",
+      "resultsDate": "October 2026"
+    },
+    "gcseSubjects": ["Mathematics", "English Language", "Biology", "Chemistry", "Physics", "History"],
+    "admissionsPolicy": "Brief summary of admissions criteria",
+    "website": "https://schoolwebsite.sch.uk",
+    "phone": "020 8123 4567",
+    "email": "info@school.sch.uk",
+    "description": "Brief description of the school"
+  }
+]
+
+IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or text wrappers so it can be directly imported.</pre>
+          </div>
+
+          <p class="helper-text">Paste an array of school JSON objects below. The system will run verification and de-duplication against existing records before final confirmation.</p>
+          <textarea id="bulk-json-input" rows="12" placeholder='[
+  {
+    "name": "Harris Academy Southwark",
+    "la": "Southwark",
+    "schoolType": "Comprehensive (Academy)",
+    "gender": "Mixed",
+    "ofstedRating": "Outstanding",
+    "pupilCount": 1100,
+    "entranceExamType": "Non-selective",
+    "gcseSubjects": ["Mathematics", "English", "Science", "History"]
+  }
+]'></textarea>
+
+          <div class="card-footer-action">
+            <button id="verify-bulk-btn" class="btn btn-primary">
+              <i class="fa-solid fa-magnifying-glass-chart"></i> Run Verification & De-duplication
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 2: Verification & De-duplication Results Summary -->
+        <div id="verification-results-section" class="admin-card" style="display: none;">
+          <div class="card-title-bar">
+            <h3><i class="fa-solid fa-shield-halved"></i> Step 2: Verification & De-duplication Preview</h3>
+          </div>
+          
+          <div class="stats-pills-row">
+            <div class="stat-pill valid"><i class="fa-solid fa-circle-check"></i> Clean & Ready: <strong id="preview-valid-count">0</strong></div>
+            <div class="stat-pill dup"><i class="fa-solid fa-clone"></i> Duplicate Skipped: <strong id="preview-dup-count">0</strong></div>
+            <div class="stat-pill err"><i class="fa-solid fa-triangle-exclamation"></i> Invalid Skipped: <strong id="preview-invalid-count">0</strong></div>
+          </div>
+
+          <!-- Preview Tabs -->
+          <div class="preview-tabs-row">
+            <button id="tab-clean-preview" class="preview-tab active">Clean Data to Import (<span id="count-tab-clean">0</span>)</button>
+            <button id="tab-dup-preview" class="preview-tab">Duplicates Detected (<span id="count-tab-dup">0</span>)</button>
+          </div>
+
+          <div id="preview-clean-view" class="preview-table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>School Name</th>
+                  <th>Borough</th>
+                  <th>Type</th>
+                  <th>Gender</th>
+                  <th>Ofsted</th>
+                  <th>Attainment 8</th>
+                </tr>
+              </thead>
+              <tbody id="preview-clean-table-body">
+                <!-- JS populated -->
+              </tbody>
+            </table>
+          </div>
+
+          <div id="preview-dup-view" class="preview-table-container" style="display: none;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Row</th>
+                  <th>School Name</th>
+                  <th>URN</th>
+                  <th>De-duplication Reason</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="preview-dup-table-body">
+                <!-- JS populated -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Final Confirmation Action -->
+          <div class="admin-commit-bar">
+            <div class="commit-msg">
+              <i class="fa-solid fa-circle-info"></i> Review the cleaned records above. Click confirm to commit clean dataset to live database.
+            </div>
+            <button id="confirm-commit-btn" class="btn btn-primary" style="background-color: #059669; border-color: #059669;">
+              <i class="fa-solid fa-cloud-arrow-up"></i> Confirm & Import Cleaned Schools
+            </button>
+          </div>
+
+        </div>
+
+
+        <!-- Merge & De-duplicate Scanner Card -->
+        <div class="admin-card" id="merge-dedup-card">
+          <div class="card-title-bar">
+            <h3><i class="fa-solid fa-code-merge" style="color:#7c3aed;"></i> Merge &amp; De-duplicate Database</h3>
+            <button id="run-dedup-scan-btn" class="btn btn-primary" style="background:#7c3aed; border-color:#7c3aed; font-size:0.85rem; padding:0.45rem 1rem;">
+              <i class="fa-solid fa-magnifying-glass"></i> Scan for Duplicates
+            </button>
+          </div>
+          <p class="helper-text">Scan the entire school database for potential duplicate entries. The scanner compares school names and URNs using fuzzy matching to surface likely matches side-by-side.</p>
+
+          <!-- Scan Summary Pills -->
+          <div id="dedup-scan-summary" style="display:none;" class="stats-pills-row">
+            <div class="stat-pill dup"><i class="fa-solid fa-clone"></i> Duplicate Pairs Found: <strong id="dedup-pair-count">0</strong></div>
+            <div class="stat-pill valid"><i class="fa-solid fa-database"></i> Total Records Scanned: <strong id="dedup-total-count">0</strong></div>
+          </div>
+
+          <!-- Scan Results Panel -->
+          <div id="dedup-scan-results" style="display:none; margin-top: 1rem;">
+
+            <!-- Empty State -->
+            <div id="dedup-empty-state" style="display:none; text-align:center; padding: 2.5rem 1rem; background: #f0fdf4; border-radius: 10px; border: 1px solid #bbf7d0;">
+              <i class="fa-solid fa-circle-check" style="font-size:2.5rem; color:#22c55e; display:block; margin-bottom:0.75rem;"></i>
+              <strong style="font-size:1.05rem; color:#166534;">No Duplicate Records Found</strong>
+              <p style="color:#4ade80; margin-top:0.35rem; font-size:0.88rem;">All school records appear to be unique based on name and URN matching.</p>
+            </div>
+
+            <!-- Duplicate Pairs Table -->
+            <div id="dedup-pairs-container">
+              <!-- Each duplicate pair is a collapsible row group rendered by JS -->
+            </div>
+
+          </div>
+
+          <!-- Loading Spinner -->
+          <div id="dedup-loading" style="display:none; text-align:center; padding:2rem 1rem;">
+            <i class="fa-solid fa-circle-notch fa-spin" style="font-size:2rem; color:#7c3aed;"></i>
+            <p style="color:#64748b; margin-top:0.75rem; font-size:0.9rem;">Scanning database for duplicate school records…</p>
+          </div>
+        </div>
+
+        <!-- Step 3 / Export Center: Database Export Box -->
+
+        <div class="admin-card">
+          <div class="card-title-bar">
+            <h3><i class="fa-solid fa-file-export"></i> Export Schools Database</h3>
+          </div>
+          <p class="helper-text">Export the complete active high schools database in your choice of industry-standard format (JSON, CSV, TSV, XML).</p>
+          
+          <div class="export-buttons-grid">
+            <a href="/api/admin/export?format=json" class="btn btn-outline export-btn" download="london_schools_database.json" onclick="triggerDownload(event, '/api/admin/export?format=json', 'london_schools_database.json')">
+              <i class="fa-solid fa-file-code" style="color: #3b82f6;"></i>
+              <div class="export-btn-text">
+                <strong>JSON Format</strong>
+                <span>Full structured schema</span>
+              </div>
+            </a>
+            <a href="/api/admin/export?format=csv" class="btn btn-outline export-btn" download="london_schools_database.csv" onclick="triggerDownload(event, '/api/admin/export?format=csv', 'london_schools_database.csv')">
+              <i class="fa-solid fa-file-csv" style="color: #10b981;"></i>
+              <div class="export-btn-text">
+                <strong>CSV Format</strong>
+                <span>Excel & spreadsheets</span>
+              </div>
+            </a>
+            <a href="/api/admin/export?format=tsv" class="btn btn-outline export-btn" download="london_schools_database.tsv" onclick="triggerDownload(event, '/api/admin/export?format=tsv', 'london_schools_database.tsv')">
+              <i class="fa-solid fa-file-lines" style="color: #f59e0b;"></i>
+              <div class="export-btn-text">
+                <strong>TSV Format</strong>
+                <span>Tab separated data</span>
+              </div>
+            </a>
+            <a href="/api/admin/export?format=xml" class="btn btn-outline export-btn" download="london_schools_database.xml" onclick="triggerDownload(event, '/api/admin/export?format=xml', 'london_schools_database.xml')">
+              <i class="fa-solid fa-code" style="color: #8b5cf6;"></i>
+              <div class="export-btn-text">
+                <strong>XML Format</strong>
+                <span>Enterprise XML markup</span>
+              </div>
+            </a>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+  </div>
+
+
+  <!-- School Detail Modal -->
+  <div id="detail-modal" class="modal-overlay">
+    <div class="modal-card extra-large">
+      <button class="modal-close-btn" id="modal-close-detail">&times;</button>
+      <div id="detail-modal-content">
+        <!-- Dynamic content via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Merge & De-duplicate Comparison Modal -->
+  <div id="merge-modal" class="modal-overlay">
+    <div class="modal-card extra-large">
+
+      <button class="modal-close-btn" id="modal-close-merge">&times;</button>
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-code-merge" style="color: #7c3aed;"></i> Merge & De-duplicate School Records</h2>
+        <p>Highlighting commonalities and conflicting field values between existing database entry and incoming bulk record.</p>
+      </div>
+
+      <div id="merge-modal-content">
+        <!-- JS populated side-by-side comparison table -->
+      </div>
+
+      <div class="modal-footer" style="justify-content: space-between; margin-top: 1.5rem; background: #f8fafc; padding: 1rem; border-radius: 8px;">
+        <div style="font-size: 0.85rem; color: #64748b;">
+          <i class="fa-solid fa-circle-info"></i> Select preferred fields above or click <strong>Keep Existing Record</strong> / <strong>Use Incoming Record</strong> to batch apply.
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" id="modal-cancel-merge">Cancel</button>
+          <button type="button" class="btn btn-primary" id="modal-confirm-merge" style="background: #7c3aed; border-color: #7c3aed;">
+            <i class="fa-solid fa-check-double"></i> Save Merged Record to DB
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add / Edit School Modal (Expandable DB) -->
+  <div id="add-modal" class="modal-overlay">
+
+    <div class="modal-card large">
+      <button class="modal-close-btn" id="modal-close-add">&times;</button>
+      <div class="modal-header">
+        <h2 id="modal-title-text"><i class="fa-solid fa-plus-circle"></i> Add New High School Entry</h2>
+        <p id="modal-subtitle-text">Expand database records with new school data in England / Greater London</p>
+      </div>
+      <form id="add-school-form">
+        <input type="hidden" id="edit-school-id" value="">
+
+        <div class="form-grid">
+          <div class="form-group col-2">
+            <label>School Name *</label>
+            <input type="text" id="add-name" required placeholder="e.g. St Michael's Catholic Grammar School">
+          </div>
+          <div class="form-group">
+            <label>URN (Unique Reference Num)</label>
+            <input type="text" id="add-urn" placeholder="e.g. 136280">
+          </div>
+          <div class="form-group">
+            <label>Local Authority (Borough) *</label>
+            <input type="text" id="add-la" required placeholder="e.g. Barnet">
+          </div>
+          <div class="form-group">
+            <label>Postcode</label>
+            <input type="text" id="add-postcode" placeholder="e.g. N12 7NJ">
+          </div>
+          <div class="form-group">
+            <label>School Type *</label>
+            <select id="add-type" required>
+              <option value="Grammar (Academy)">Grammar (Academy)</option>
+              <option value="Grammar (Voluntary Aided)">Grammar (Voluntary Aided)</option>
+              <option value="Independent">Independent</option>
+              <option value="Comprehensive (Academy)">Comprehensive (Academy)</option>
+              <option value="Comprehensive (Voluntary Aided)">Comprehensive (Voluntary Aided)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Gender Intake</label>
+            <select id="add-gender">
+              <option value="Girls">Girls</option>
+              <option value="Boys">Boys</option>
+              <option value="Mixed">Mixed</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Pupil Count</label>
+            <input type="number" id="add-pupils" placeholder="e.g. 850">
+          </div>
+          <div class="form-group">
+            <label>Ofsted Rating</label>
+            <select id="add-ofsted">
+              <option value="Outstanding">Outstanding</option>
+              <option value="Good">Good</option>
+              <option value="Requires Improvement">Requires Improvement</option>
+              <option value="Independent (ISI Excellent)">Independent (ISI Excellent)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>GCSE Progress 8 Score</label>
+            <input type="number" step="0.01" id="add-progress8" placeholder="e.g. 1.05">
+          </div>
+          <div class="form-group">
+            <label>GCSE Attainment 8 Score</label>
+            <input type="number" step="0.1" id="add-attainment8" placeholder="e.g. 84.5">
+          </div>
+          <div class="form-group col-2">
+            <label>Entrance Exam Type</label>
+            <input type="text" id="add-exam-type" placeholder="e.g. 11+ GL Assessment / Sutton SET">
+          </div>
+          <div class="form-group col-2">
+            <label>GCSE Subjects Offered (Comma separated)</label>
+            <input type="text" id="add-subjects" placeholder="Mathematics, Biology, Chemistry, Physics, French, History, Computer Science">
+          </div>
+          <div class="form-group col-2">
+            <label>Admissions Policy Summary</label>
+            <textarea id="add-policy" rows="2" placeholder="Detail selective scoring criteria, banding rules, distance catchments..."></textarea>
+          </div>
+          <div class="form-group">
+            <label>Website URL</label>
+            <input type="url" id="add-website" placeholder="https://...">
+          </div>
+          <div class="form-group">
+            <label>Phone Number</label>
+            <input type="text" id="add-phone" placeholder="020 8123 4567">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="modal-cancel-add">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> Save School Record</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Comparison Modal Matrix -->
+  <div id="compare-modal" class="modal-overlay">
+    <div class="modal-card extra-large">
+      <button class="modal-close-btn" id="modal-close-compare">&times;</button>
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-code-compare"></i> School Comparison Matrix</h2>
+        <p>Compare key specifications, entrance exams, and GCSE performance side by side.</p>
+      </div>
+      <div id="compare-table-container" class="compare-container">
+        <!-- Dynamic comparison matrix rendered via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Non-Blocking Toast Notification Banner -->
+  <div id="toast-notification" class="toast-banner" style="display: none;">
+    <div class="toast-content">
+      <i id="toast-icon" class="fa-solid fa-circle-check"></i>
+      <span id="toast-message">Notification message</span>
+    </div>
+    <button id="toast-close-btn" class="toast-close">&times;</button>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
+
