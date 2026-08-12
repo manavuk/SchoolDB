@@ -221,5 +221,54 @@
     "selectedSchools": [],
     "removedSchoolIds": [],
     "savedAt": "2026-08-11T22:06:15.145Z"
+  },
+  "usr-admin-1": {
+    "userId": "usr-admin-1",
+    "targetLocation": "London",
+    "selectedSchools": [
+      {
+        "id": "sch-517326",
+        "name": "Notting Hill and Ealing High School GDST",
+        "urn": "101938",
+        "la": "Ealing",
+        "region": "Greater London",
+        "postcode": "W13 8AX",
+        "address": "2 Cleveland Road, Ealing, London, W13 8HT",
+        "schoolType": "Independent",
+        "gender": "Girls",
+        "ageRange": "11-18",
+        "pupilCount": 921,
+        "ofstedRating": "Independent (ISI Excellent)",
+        "gcseProgress8": null,
+        "gcseAttainment8": null,
+        "ebaccAveragePointScore": null,
+        "entranceExamType": "ISEB Pre-test",
+        "entranceExamDates": {
+          "registrationOpen": "",
+          "registrationDeadline": "",
+          "examDate": "",
+          "resultsDate": ""
+        },
+        "gcseSubjects": [
+          "Mathematics",
+          "English Language",
+          "English Literature",
+          "Biology",
+          "Chemistry",
+          "Physics",
+          "History",
+          "Geography",
+          "French",
+          "Spanish"
+        ],
+        "admissionsPolicy": "Selective girls' day school with entry principally at 11+ and sixth form.",
+        "website": "https://www.nhehs.gdst.net",
+        "phone": "020 8799 8400",
+        "email": "enquiries@nhehs.gdst.net",
+        "description": "Independent day and/or boarding school providing secondary education in Ealing."
+      }
+    ],
+    "removedSchoolIds": [],
+    "savedAt": "2026-08-12T11:02:45.883Z"
   }
 }

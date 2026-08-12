@@ -56,8 +56,8 @@ async function loadUserPortfolio(userId) {
   }
 }
 
-// Save Current User Portfolio to Backend
-async function saveUserPortfolio() {
+// Save Current User Portfolio to Backend (Silent Auto-Save)
+async function saveUserPortfolio(silent = false) {
   const targetLocation = document.getElementById('rec-location-input') ? document.getElementById('rec-location-input').value : '';
   try {
     const res = await fetch(`/api/user-portfolio/${currentUserAccount}`, {
@@ -71,15 +71,48 @@ async function saveUserPortfolio() {
     });
 
     if (res.ok) {
-      showToast(`Portfolio saved successfully for ${currentUserName}!`, 'success');
+      if (!silent) showToast(`Portfolio saved successfully for ${currentUserName}!`, 'success');
     } else {
-      showToast('Failed to save portfolio.', 'error');
+      if (!silent) showToast('Failed to save portfolio.', 'error');
     }
   } catch (err) {
     console.error('Error saving user portfolio:', err);
-    showToast('Error saving user portfolio.', 'error');
+    if (!silent) showToast('Error saving user portfolio.', 'error');
   }
 }
+
+// Add a school to user selected list (Auto-saved by default)
+function addUserSchool(school) {
+  if (userSelectedSchools.some(s => s.id === school.id)) {
+    showToast('School is already in your selected list!', 'info');
+    return;
+  }
+
+  userSelectedSchools.push(school);
+  updateUserSchoolsUI();
+  fetchRecommendations();
+  saveUserPortfolio(true); // Auto-save changes immediately
+  showToast(`Added ${school.name} to your target list!`, 'success');
+}
+
+// Remove a school from user selected list (Auto-saved by default)
+function removeUserSchool(schoolId) {
+  userSelectedSchools = userSelectedSchools.filter(s => s.id !== schoolId);
+  updateUserSchoolsUI();
+  fetchRecommendations();
+  saveUserPortfolio(true); // Auto-save changes immediately
+}
+
+// Explicitly remove a school from ever appearing in recommendations for this user (Auto-saved by default)
+function removeRecommendation(schoolId) {
+  if (!userRemovedSchoolIds.includes(schoolId)) {
+    userRemovedSchoolIds.push(schoolId);
+  }
+  fetchRecommendations();
+  saveUserPortfolio(true); // Auto-save changes immediately
+  showToast('School removed from recommendations list.', 'info');
+}
+
 
 // Apply Role UI controls & tab visibility based on authenticated role
 function applyRoleUI() {
@@ -2020,35 +2053,6 @@ function renderRecommendations(items) {
   });
 }
 
-
-// Add a school to user selected list
-function addUserSchool(school) {
-  if (userSelectedSchools.some(s => s.id === school.id)) {
-    showToast('School is already in your selected list!', 'info');
-    return;
-  }
-
-  userSelectedSchools.push(school);
-  updateUserSchoolsUI();
-  fetchRecommendations();
-  showToast(`Added ${school.name} to your target list! Recommendations updated.`, 'success');
-}
-
-// Remove a school from user selected list
-function removeUserSchool(schoolId) {
-  userSelectedSchools = userSelectedSchools.filter(s => s.id !== schoolId);
-  updateUserSchoolsUI();
-  fetchRecommendations();
-}
-
-// Explicitly remove a school from ever appearing in recommendations for this user
-function removeRecommendation(schoolId) {
-  if (!userRemovedSchoolIds.includes(schoolId)) {
-    userRemovedSchoolIds.push(schoolId);
-  }
-  fetchRecommendations();
-  showToast('School removed from recommendations list.', 'info');
-}
 
 // Render User Selected School Chips
 function updateUserSchoolsUI() {
