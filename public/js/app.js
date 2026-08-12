@@ -1,10 +1,9 @@
-// High Schools Database Frontend Application Script (User & Admin Roles)
-let currentSchools = [];
-let compareList = [];
-let currentViewMode = 'table'; // 'table' or 'cards' (Default to Table View)
-let currentRole = 'admin'; // 'admin' or 'user' (Default to Admin Role)
-let currentVerifiedBatch = null;
-
+// User Recommendation & Authentication State
+let currentUserAccount = 'parent-sarah'; // Default selected user profile ID
+let currentUserName = 'Sarah Jenkins';
+let currentRole = 'user'; // 'admin' or 'user' (Determined dynamically by authenticated account)
+let userSelectedSchools = []; // List of school objects user has added
+let userRemovedSchoolIds = []; // Set of school IDs user has removed from recommendations
 
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
@@ -14,41 +13,128 @@ async function initApp() {
   await fetchStats();
   await loadSchools();
   setupEventListeners();
+  loadRecWeights();
+  await loadUserPortfolio(currentUserAccount);
+  updateAuthUserBadge();
   applyRoleUI();
 }
 
-// Apply Role UI controls
+// Update Header Authenticated User Badge & Role Indicator
+function updateAuthUserBadge() {
+  const nameEl = document.getElementById('auth-user-name');
+  const roleEl = document.getElementById('auth-user-role-pill');
+
+  if (nameEl) nameEl.textContent = currentUserName;
+  if (roleEl) {
+    roleEl.textContent = currentRole === 'admin' ? 'Manager (Admin)' : 'Parent (Standard)';
+    roleEl.style.background = currentRole === 'admin' ? '#fef3c7' : '#ecfdf5';
+    roleEl.style.color = currentRole === 'admin' ? '#b45309' : '#047857';
+    roleEl.style.borderColor = currentRole === 'admin' ? '#fde68a' : '#a7f3d0';
+  }
+}
+
+// Load User Portfolio & Always Land Directly on Dashboard
+async function loadUserPortfolio(userId) {
+  try {
+    const res = await fetch(`/api/user-portfolio/${userId}`);
+    const data = await res.json();
+
+    userSelectedSchools = data.selectedSchools || [];
+    userRemovedSchoolIds = data.removedSchoolIds || [];
+
+    const locInput = document.getElementById('rec-location-input');
+    if (locInput) locInput.value = data.targetLocation || '';
+
+    updateUserSchoolsUI();
+    fetchRecommendations();
+
+    // ALWAYS land directly on dashboard regardless of shortlist state
+    switchTab('dashboard');
+  } catch (err) {
+    console.error('Failed to load user portfolio:', err);
+    switchTab('dashboard');
+  }
+}
+
+// Save Current User Portfolio to Backend
+async function saveUserPortfolio() {
+  const targetLocation = document.getElementById('rec-location-input') ? document.getElementById('rec-location-input').value : '';
+  try {
+    const res = await fetch(`/api/user-portfolio/${currentUserAccount}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetLocation,
+        selectedSchools: userSelectedSchools,
+        removedSchoolIds: userRemovedSchoolIds
+      })
+    });
+
+    if (res.ok) {
+      showToast(`Portfolio saved successfully for ${currentUserName}!`, 'success');
+    } else {
+      showToast('Failed to save portfolio.', 'error');
+    }
+  } catch (err) {
+    console.error('Error saving user portfolio:', err);
+    showToast('Error saving user portfolio.', 'error');
+  }
+}
+
+// Apply Role UI controls & tab visibility based on authenticated role
 function applyRoleUI() {
   const adminElements = document.querySelectorAll('.admin-only');
   adminElements.forEach(el => {
     el.style.display = currentRole === 'admin' ? 'inline-flex' : 'none';
   });
 
+  updateAuthUserBadge();
+
   if (currentRole === 'user') {
-    // Force directory tab active if switching to user role
-    switchTab('directory');
+    // Always land directly on dashboard for standard users
+    switchTab('dashboard');
+  } else {
+    // Re-render schools table for admin mode
+    renderSchools();
   }
 }
+
+
+
 
 // Switch main navigation tab
 function switchTab(tabName) {
+  const recommendTabBtn = document.getElementById('tab-recommend-btn');
   const directoryTabBtn = document.getElementById('tab-directory-btn');
   const adminTabBtn = document.getElementById('tab-admin-btn');
+
+  const recommendContent = document.getElementById('recommend-tab-content');
+  const dashboardContent = document.getElementById('user-dashboard-content');
   const directoryContent = document.getElementById('directory-tab-content');
   const adminContent = document.getElementById('admin-tab-content');
 
-  if (tabName === 'admin' && currentRole === 'admin') {
-    directoryTabBtn.classList.remove('active');
-    adminTabBtn.classList.add('active');
-    directoryContent.style.display = 'none';
-    adminContent.style.display = 'block';
+  // Deactivate all tab buttons and hide contents
+  [recommendTabBtn, directoryTabBtn, adminTabBtn].forEach(btn => btn && btn.classList.remove('active'));
+  [recommendContent, dashboardContent, directoryContent, adminContent].forEach(c => c && (c.style.display = 'none'));
+
+  if (tabName === 'dashboard') {
+    if (recommendTabBtn) recommendTabBtn.classList.add('active');
+    if (dashboardContent) dashboardContent.style.display = 'block';
+    renderUserDashboard();
+  } else if (tabName === 'admin' && currentRole === 'admin') {
+    if (adminTabBtn) adminTabBtn.classList.add('active');
+    if (adminContent) adminContent.style.display = 'block';
+  } else if (tabName === 'directory' && currentRole === 'admin') {
+    if (directoryTabBtn) directoryTabBtn.classList.add('active');
+    if (directoryContent) directoryContent.style.display = 'block';
   } else {
-    directoryTabBtn.classList.add('active');
-    adminTabBtn.classList.remove('active');
-    directoryContent.style.display = 'block';
-    adminContent.style.display = 'none';
+    // Default to Recommendation Service tab
+    if (recommendTabBtn) recommendTabBtn.classList.add('active');
+    if (recommendContent) recommendContent.style.display = 'block';
   }
 }
+
+
 
 // Fetch dashboard statistics
 async function fetchStats() {
@@ -318,22 +404,163 @@ function renderSchools() {
 
     tableBody.appendChild(tr);
 
-
   });
 }
 
 // Setup Event Listeners
 function setupEventListeners() {
-  // Role switcher listener
-  document.getElementById('role-select').addEventListener('change', (e) => {
-    currentRole = e.target.value;
-    applyRoleUI();
-    renderSchools();
-  });
+
+  // User account switcher listener
+  const userAccSelect = document.getElementById('user-account-select');
+
+  if (userAccSelect) {
+    userAccSelect.addEventListener('change', async (e) => {
+      currentUserAccount = e.target.value;
+      await loadUserPortfolio(currentUserAccount);
+      showToast(`Switched user account profile to ${e.target.options[e.target.selectedIndex].text}`, 'info');
+    });
+  }
+
+  // Save portfolio button
+  const savePortBtn = document.getElementById('save-portfolio-btn');
+  if (savePortBtn) {
+    savePortBtn.addEventListener('click', saveUserPortfolio);
+  }
+
+  // Auth Modals & Triggers
+  const loginModal = document.getElementById('auth-login-modal');
+  const signupModal = document.getElementById('auth-signup-modal');
+
+  const openLoginBtn = document.getElementById('auth-login-btn');
+  if (openLoginBtn) openLoginBtn.addEventListener('click', () => { loginModal.style.display = 'flex'; });
+
+  const openSignupBtn = document.getElementById('auth-signup-btn');
+  if (openSignupBtn) openSignupBtn.addEventListener('click', () => { signupModal.style.display = 'flex'; });
+
+  if (document.getElementById('modal-close-login')) document.getElementById('modal-close-login').addEventListener('click', () => { loginModal.style.display = 'none'; });
+  if (document.getElementById('modal-cancel-login')) document.getElementById('modal-cancel-login').addEventListener('click', () => { loginModal.style.display = 'none'; });
+
+  if (document.getElementById('modal-close-signup')) document.getElementById('modal-close-signup').addEventListener('click', () => { signupModal.style.display = 'none'; });
+  if (document.getElementById('modal-cancel-signup')) document.getElementById('modal-cancel-signup').addEventListener('click', () => { signupModal.style.display = 'none'; });
+
+  // Quick Demo Account Select Handler
+  const quickDemoSelect = document.getElementById('quick-demo-account-select');
+  if (quickDemoSelect) {
+    quickDemoSelect.addEventListener('change', async (e) => {
+      const val = e.target.value;
+      if (!val) return;
+      const [email, role] = val.split('|');
+      document.getElementById('login-email').value = email;
+      document.getElementById('login-password').value = role === 'admin' ? 'admin' : 'user';
+    });
+  }
+
+  // Login Form Submit Handler
+  const loginForm = document.getElementById('auth-login-form');
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          currentUserAccount = data.user.id;
+          currentUserName = data.user.name;
+          currentRole = data.user.role;
+          loginModal.style.display = 'none';
+          showToast(`Logged in successfully as ${currentUserName} (${currentRole === 'admin' ? 'Admin' : 'Parent'})!`, 'success');
+          await loadUserPortfolio(currentUserAccount);
+          applyRoleUI();
+        } else {
+          showToast(data.error || 'Login failed', 'error');
+        }
+      } catch (err) {
+        console.error('Login error:', err);
+        showToast('Login request failed', 'error');
+      }
+    });
+  }
+
+  // Signup Form Submit Handler
+  const signupForm = document.getElementById('auth-signup-form');
+  if (signupForm) {
+    signupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('signup-name').value.trim();
+      const email = document.getElementById('signup-email').value.trim();
+      const password = document.getElementById('signup-password').value;
+      const role = document.getElementById('signup-role').value;
+
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password, role })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          currentUserAccount = data.user.id;
+          currentUserName = data.user.name;
+          currentRole = data.user.role;
+          signupModal.style.display = 'none';
+          showToast(`Welcome ${currentUserName}! Account created with ${currentRole} permissions.`, 'success');
+          await loadUserPortfolio(currentUserAccount);
+          applyRoleUI();
+        } else {
+          showToast(data.error || 'Registration failed', 'error');
+        }
+      } catch (err) {
+        console.error('Signup error:', err);
+        showToast('Signup request failed', 'error');
+      }
+    });
+  }
+
+
 
   // Nav Tab Buttons
-  document.getElementById('tab-directory-btn').addEventListener('click', () => switchTab('directory'));
-  document.getElementById('tab-admin-btn').addEventListener('click', () => switchTab('admin'));
+  if (document.getElementById('tab-recommend-btn')) document.getElementById('tab-recommend-btn').addEventListener('click', () => switchTab('recommend'));
+  if (document.getElementById('tab-directory-btn')) document.getElementById('tab-directory-btn').addEventListener('click', () => switchTab('directory'));
+  if (document.getElementById('tab-admin-btn')) document.getElementById('tab-admin-btn').addEventListener('click', () => switchTab('admin'));
+
+  // Recommendation Event Handlers
+  setupRecAutocomplete();
+  const locInput = document.getElementById('rec-location-input');
+  if (locInput) locInput.addEventListener('input', debounce(fetchRecommendations, 300));
+
+  // Gender filter listeners
+  document.querySelectorAll('input[name="rec-gender"]').forEach(radio => {
+    radio.addEventListener('change', fetchRecommendations);
+  });
+  const includeCoedCheck = document.getElementById('rec-include-coed');
+  if (includeCoedCheck) includeCoedCheck.addEventListener('change', fetchRecommendations);
+
+  const refreshRecBtn = document.getElementById('refresh-rec-btn');
+  if (refreshRecBtn) refreshRecBtn.addEventListener('click', fetchRecommendations);
+
+  const finishSelBtn = document.getElementById('btn-finish-selection');
+  if (finishSelBtn) finishSelBtn.addEventListener('click', () => switchTab('dashboard'));
+
+  const viewDashTopBtn = document.getElementById('btn-view-dashboard-top');
+  if (viewDashTopBtn) viewDashTopBtn.addEventListener('click', () => switchTab('dashboard'));
+
+  const backRecBtn = document.getElementById('btn-back-to-rec');
+  if (backRecBtn) backRecBtn.addEventListener('click', () => switchTab('recommend'));
+
+
+  const weightsForm = document.getElementById('rec-weights-form');
+  if (weightsForm) weightsForm.addEventListener('submit', saveRecWeights);
+
+
 
   const filterInputs = ['search-input', 'la-select', 'type-select', 'gender-select', 'ofsted-select', 'exam-select', 'hot-select'];
   filterInputs.forEach(id => {
@@ -1615,6 +1842,477 @@ async function updateSchoolPill(id, fields) {
   }
 }
 
+// -------------------------------------------------------------
+// SMART RECOMMENDATIONS ENGINE FRONTEND LOGIC
+// -------------------------------------------------------------
+
+// Load saved weights in admin form
+async function loadRecWeights() {
+  try {
+    const res = await fetch('/api/recommendation-settings');
+    const data = await res.json();
+    const w = data.weights || { location: 40, examType: 35, schoolType: 15, gender: 10 };
+
+    if (document.getElementById('weight-location')) document.getElementById('weight-location').value = w.location || 40;
+    if (document.getElementById('weight-exam')) document.getElementById('weight-exam').value = w.examType || 35;
+    if (document.getElementById('weight-type')) document.getElementById('weight-type').value = w.schoolType || 15;
+    if (document.getElementById('weight-gender')) document.getElementById('weight-gender').value = w.gender || 10;
+  } catch (err) {
+    console.error('Failed to load recommendation weights:', err);
+  }
+}
+
+// Save weights from admin form
+async function saveRecWeights(e) {
+  e.preventDefault();
+  const weights = {
+    location: parseInt(document.getElementById('weight-location').value) || 0,
+    examType: parseInt(document.getElementById('weight-exam').value) || 0,
+    schoolType: parseInt(document.getElementById('weight-type').value) || 0,
+    gender: parseInt(document.getElementById('weight-gender').value) || 0,
+  };
+
+  try {
+    const res = await fetch('/api/recommendation-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weights })
+    });
+    if (res.ok) {
+      showToast('Algorithm weights updated successfully!', 'success');
+      fetchRecommendations();
+    } else {
+      showToast('Failed to save algorithm weights', 'error');
+    }
+  } catch (err) {
+    console.error('Error saving recommendation weights:', err);
+    showToast('Error saving algorithm weights', 'error');
+  }
+}
+
+// Fetch recommendations based on userSelectedSchools, location, and absolute gender filter
+async function fetchRecommendations() {
+  const container = document.getElementById('rec-cards-container');
+  if (!container) return;
+
+  const targetLocation = document.getElementById('rec-location-input') ? document.getElementById('rec-location-input').value : '';
+
+  // Read selected gender radio
+  let genderChoice = 'all';
+  const genderRadio = document.querySelector('input[name="rec-gender"]:checked');
+  if (genderRadio) genderChoice = genderRadio.value;
+
+  const includeCoedCheck = document.getElementById('rec-include-coed');
+  const includeCoed = includeCoedCheck ? includeCoedCheck.checked : true;
+
+  try {
+    const res = await fetch('/api/recommendations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userSchools: userSelectedSchools,
+        targetLocation: targetLocation,
+        removedSchoolIds: userRemovedSchoolIds,
+        genderChoice,
+        includeCoed
+      })
+    });
+
+    const data = await res.json();
+    renderRecommendations(data.recommendations || []);
+  } catch (err) {
+    console.error('Failed to fetch recommendations:', err);
+  }
+}
+
+// Render Compact, Space-Efficient Recommendation Cards
+function renderRecommendations(items) {
+  const container = document.getElementById('rec-cards-container');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  if (items.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 2.5rem; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1;">
+        <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 2.2rem; color: #94a3b8; margin-bottom: 0.8rem;"></i>
+        <h4>No matching recommendations found</h4>
+        <p style="color: #64748b; font-size: 0.85rem;">Try relaxing your gender or location filters to see more school suggestions.</p>
+      </div>
+    `;
+    return;
+  }
+
+  items.forEach(item => {
+    const s = item.school;
+    const score = item.matchScore;
+    const reasons = item.reasons;
+
+    let matchBg = '#ecfdf5';
+    let matchColor = '#059669'; // Green
+    if (score < 60) { matchBg = '#fffbeb'; matchColor = '#d97706'; } // Amber
+    if (score < 35) { matchBg = '#f1f5f9'; matchColor = '#64748b'; } // Slate
+
+    // Icon mapping for gender
+    let genderTag = `<span style="font-size:0.75rem; color:#475569;"><i class="fa-solid fa-users" style="color:#8b5cf6;"></i> ${s.gender}</span>`;
+    if ((s.gender || '').toLowerCase().includes('girl')) {
+      genderTag = `<span style="font-size:0.75rem; color:#ec4899; font-weight:600;"><i class="fa-solid fa-venus"></i> Girls</span>`;
+    } else if ((s.gender || '').toLowerCase().includes('boy')) {
+      genderTag = `<span style="font-size:0.75rem; color:#2563eb; font-weight:600;"><i class="fa-solid fa-mars"></i> Boys</span>`;
+    }
+
+    const card = document.createElement('div');
+    card.className = 'school-card';
+    card.style.padding = '0.9rem 1rem';
+    card.style.borderLeft = `4px solid ${matchColor}`;
+    card.style.display = 'flex';
+    card.style.flexDirection = 'column';
+    card.style.justifySpaceBetween = 'space-between';
+
+    card.innerHTML = `
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <span style="font-weight: 700; font-size: 0.78rem; color: ${matchColor}; background: ${matchBg}; padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid ${matchColor}33;">
+            <i class="fa-solid fa-sparkles"></i> ${score}% Match
+          </span>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            ${genderTag}
+            <button class="btn-text btn-remove-rec" data-id="${s.id}" style="color: #94a3b8; font-size: 0.75rem; cursor: pointer;" title="Remove from suggestions">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+
+        <h4 style="font-size: 0.95rem; font-weight: 700; color: #1e293b; margin-bottom: 0.2rem; line-height: 1.3;" title="${(s.name || '').replace(/"/g, '&quot;')}">
+          ${s.name.length > 32 ? s.name.slice(0, 32).trim() + '…' : s.name}
+        </h4>
+
+        <div style="font-size: 0.78rem; color: #64748b; margin-bottom: 0.4rem;">
+          <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> ${s.la} (${s.postcode || ''})
+        </div>
+
+        <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+          <span class="badge-ofsted" style="font-size: 0.72rem; padding: 0.1rem 0.4rem;"><i class="fa-solid fa-star"></i> ${formatOfsted(s.ofstedRating)}</span>
+          <span class="badge-exam" style="font-size: 0.72rem; padding: 0.1rem 0.4rem;" title="${(s.entranceExamType || '').replace(/"/g, '&quot;')}">${formatExam(s.entranceExamType)}</span>
+        </div>
+
+        <div style="font-size: 0.75rem; color: #475569; background: #f8fafc; padding: 0.35rem 0.55rem; border-radius: 6px; border: 1px solid #e2e8f0; line-height: 1.25;">
+          <strong style="color: #334155;">Why:</strong> ${reasons[0] || 'Matches criteria'}
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 0.4rem; margin-top: 0.75rem;">
+        <button class="btn btn-primary btn-add-user-school" data-id="${s.id}" style="flex: 1; padding: 0.35rem 0.6rem; font-size: 0.8rem;">
+          <i class="fa-solid fa-plus"></i> Shortlist
+        </button>
+        <button class="btn btn-outline btn-rec-detail" data-id="${s.id}" style="padding: 0.35rem 0.6rem; font-size: 0.8rem; color: #2563eb; border-color: #bfdbfe;">
+          <i class="fa-solid fa-circle-info"></i>
+        </button>
+      </div>
+    `;
+
+    // Button event listeners
+    card.querySelector('.btn-add-user-school').addEventListener('click', () => addUserSchool(s));
+    card.querySelector('.btn-rec-detail').addEventListener('click', () => openSchoolDetail(s.id));
+    card.querySelector('.btn-remove-rec').addEventListener('click', () => removeRecommendation(s.id));
+
+    container.appendChild(card);
+  });
+}
+
+
+// Add a school to user selected list
+function addUserSchool(school) {
+  if (userSelectedSchools.some(s => s.id === school.id)) {
+    showToast('School is already in your selected list!', 'info');
+    return;
+  }
+
+  userSelectedSchools.push(school);
+  updateUserSchoolsUI();
+  fetchRecommendations();
+  showToast(`Added ${school.name} to your target list! Recommendations updated.`, 'success');
+}
+
+// Remove a school from user selected list
+function removeUserSchool(schoolId) {
+  userSelectedSchools = userSelectedSchools.filter(s => s.id !== schoolId);
+  updateUserSchoolsUI();
+  fetchRecommendations();
+}
+
+// Explicitly remove a school from ever appearing in recommendations for this user
+function removeRecommendation(schoolId) {
+  if (!userRemovedSchoolIds.includes(schoolId)) {
+    userRemovedSchoolIds.push(schoolId);
+  }
+  fetchRecommendations();
+  showToast('School removed from recommendations list.', 'info');
+}
+
+// Render User Selected School Chips
+function updateUserSchoolsUI() {
+  const container = document.getElementById('user-schools-chips');
+  const countEl = document.getElementById('user-schools-count');
+  const countTopEl = document.getElementById('user-schools-count-top');
+
+  if (countEl) countEl.textContent = userSelectedSchools.length;
+  if (countTopEl) countTopEl.textContent = userSelectedSchools.length;
+  if (!container) return;
+
+
+  if (userSelectedSchools.length === 0) {
+    container.innerHTML = '<span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">No schools added yet. Search above to add your first school!</span>';
+    return;
+  }
+
+  container.innerHTML = userSelectedSchools.map(s => `
+    <span style="display: inline-flex; align-items: center; gap: 0.4rem; background: #e0e7ff; color: #3730a3; padding: 0.3rem 0.75rem; border-radius: 999px; font-size: 0.85rem; font-weight: 500; border: 1px solid #c7d2fe;">
+      <i class="fa-solid fa-graduation-cap"></i> ${s.name} (${s.la})
+      <i class="fa-solid fa-xmark btn-remove-user-chip" data-id="${s.id}" style="cursor: pointer; color: #4338ca; margin-left: 0.2rem;" title="Remove school"></i>
+    </span>
+  `).join('');
+
+  container.querySelectorAll('.btn-remove-user-chip').forEach(icon => {
+    icon.addEventListener('click', (e) => {
+      const id = e.target.getAttribute('data-id');
+      removeUserSchool(id);
+    });
+  });
+}
+
+// Setup Autocomplete search for Step 1 input
+function setupRecAutocomplete() {
+  const searchInput = document.getElementById('rec-school-search');
+  const suggestionsBox = document.getElementById('rec-school-suggestions');
+  if (!searchInput || !suggestionsBox) return;
+
+  searchInput.addEventListener('input', async (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    if (q.length < 2) {
+      suggestionsBox.style.display = 'none';
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/schools?search=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      const matches = data.schools || [];
+
+      if (matches.length === 0) {
+        suggestionsBox.innerHTML = '<div style="padding: 0.6rem 0.9rem; color: #94a3b8; font-size: 0.85rem;">No matching schools found</div>';
+      } else {
+        suggestionsBox.innerHTML = matches.slice(0, 10).map(s => `
+          <div class="rec-suggestion-item" data-id="${s.id}" style="padding: 0.6rem 0.9rem; cursor: pointer; border-bottom: 1px solid #f1f5f9; font-size: 0.88rem;">
+            <strong>${s.name}</strong> <span style="color:#64748b; font-size:0.8rem;">(${s.la} - ${s.entranceExamType})</span>
+          </div>
+        `).join('');
+
+        suggestionsBox.querySelectorAll('.rec-suggestion-item').forEach(item => {
+          item.addEventListener('click', () => {
+            const id = item.getAttribute('data-id');
+            const school = matches.find(m => m.id === id);
+            if (school) {
+              addUserSchool(school);
+              searchInput.value = '';
+              suggestionsBox.style.display = 'none';
+            }
+          });
+        });
+      }
+
+      suggestionsBox.style.display = 'block';
+    } catch (err) {
+      console.error('Error fetching search suggestions:', err);
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!searchInput.contains(e.target) && !suggestionsBox.contains(e.target)) {
+      suggestionsBox.style.display = 'none';
+    }
+  });
+}
+
+// -------------------------------------------------------------
+// USER SELECTED TARGET SCHOOLS DASHBOARD RENDERER
+// -------------------------------------------------------------
+
+// -------------------------------------------------------------
+// USER SELECTED TARGET SCHOOLS DASHBOARD & CALENDAR RENDERER
+// -------------------------------------------------------------
+
+function renderUserDashboard() {
+  const tableBody = document.getElementById('dashboard-schools-table-body');
+  const countEl = document.getElementById('dash-list-count');
+  const calendarContainer = document.getElementById('calendar-view-container');
+
+  if (countEl) countEl.textContent = userSelectedSchools.length;
+
+  if (!tableBody || !calendarContainer) return;
+
+  // 1. RENDER CLEAN SHORTLISTED SCHOOLS TABLE LIST
+  if (userSelectedSchools.length === 0) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="8" style="text-align: center; padding: 2.5rem; color: #94a3b8;">
+          <i class="fa-solid fa-folder-open" style="font-size: 2rem; margin-bottom: 0.5rem; display: block; color: #cbd5e1;"></i>
+          No target schools shortlisted yet. Use the Parent Portal recommendations widget to add schools!
+        </td>
+      </tr>
+    `;
+    calendarContainer.innerHTML = `
+      <div style="text-align: center; padding: 3rem; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1; color: #64748b;">
+        <i class="fa-solid fa-calendar-xmark" style="font-size: 2.5rem; color: #94a3b8; margin-bottom: 0.75rem;"></i>
+        <h4>No upcoming dates to display</h4>
+        <p style="font-size: 0.85rem; color: #94a3b8;">Shortlist target schools to automatically populate your color-coded admissions calendar.</p>
+      </div>
+    `;
+    return;
+  }
+
+  tableBody.innerHTML = userSelectedSchools.map(s => {
+    let pillClass = 'pill-comprehensive';
+    if (s.schoolType && s.schoolType.includes('Grammar')) pillClass = 'pill-grammar';
+    if (s.schoolType && s.schoolType.includes('Independent')) pillClass = 'pill-independent';
+
+    return `
+      <tr>
+        <td class="nowrap-cell">
+          <strong style="color: #1e293b; font-size: 0.92rem;">${s.name}</strong>
+          ${s.hot ? `<span class="badge-hot" style="margin-left: 0.4rem;"><i class="fa-solid fa-fire"></i> Hot</span>` : ''}
+        </td>
+        <td><i class="fa-solid fa-location-dot" style="color: #ef4444; font-size: 0.8rem;"></i> ${s.la} (${s.postcode || ''})</td>
+        <td style="text-align: center;"><span class="school-type-pill ${pillClass}">${s.schoolType}</span></td>
+        <td style="text-align: center; font-size: 0.85rem; font-weight: 600; color: #475569;">${s.gender}</td>
+        <td><span class="badge-ofsted"><i class="fa-solid fa-star"></i> ${formatOfsted(s.ofstedRating)}</span></td>
+        <td><span class="badge-exam" title="${(s.entranceExamType || '').replace(/"/g, '&quot;')}">${formatExam(s.entranceExamType)}</span></td>
+        <td style="font-weight: 700; color: #0f172a;">${s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined ? s.gcseAttainment8 : 'N/A'}</td>
+        <td style="text-align: center;">
+          <div style="display: flex; gap: 0.35rem; justify-content: center;">
+            <button class="btn btn-outline btn-dash-detail" data-id="${s.id}" style="padding: 0.3rem 0.6rem; font-size: 0.78rem;">
+              <i class="fa-solid fa-circle-info"></i> Details
+            </button>
+            <button class="btn btn-outline btn-dash-remove" data-id="${s.id}" style="padding: 0.3rem 0.5rem; font-size: 0.78rem; color: #ef4444; border-color: #fca5a5;" title="Remove from shortlist">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tableBody.querySelectorAll('.btn-dash-detail').forEach(btn => {
+    btn.addEventListener('click', () => openSchoolDetail(btn.getAttribute('data-id')));
+  });
+
+  tableBody.querySelectorAll('.btn-dash-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      removeUserSchool(id);
+      renderUserDashboard();
+    });
+  });
+
+  // 2. RENDER STAR INTERACTIVE ADMISSIONS & EXAM CALENDAR
+  renderAdmissionsCalendar(calendarContainer);
+}
+
+// Render Star Admissions Calendar
+function renderAdmissionsCalendar(container) {
+  // Aggregate all events from shortlisted user selected schools
+  const events = [];
+
+  userSelectedSchools.forEach(s => {
+    const dates = s.entranceExamDates || {};
+    const schoolName = s.name;
+
+    if (dates.registrationOpen) {
+      events.push({ schoolName, type: 'registration', label: 'Registration Opens', dateStr: dates.registrationOpen, color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', icon: 'fa-door-open' });
+    }
+    if (dates.registrationDeadline || dates.registrationCloseDate || dates.registrationCloses) {
+      const d = dates.registrationDeadline || dates.registrationCloseDate || dates.registrationCloses;
+      events.push({ schoolName, type: 'registration', label: 'Registration Deadline', dateStr: d, color: '#1d4ed8', bg: '#dbeafe', border: '#93c5fd', icon: 'fa-clock' });
+    }
+    if (dates.examDate || dates.firstExamDate) {
+      const d = dates.examDate || dates.firstExamDate;
+      events.push({ schoolName, type: 'exam', label: `1st Exam Sitting (${dates.firstExamSubjects || s.entranceExamType})`, dateStr: d, color: '#ea580c', bg: '#fff7ed', border: '#ffedd5', icon: 'fa-pen-to-square' });
+    }
+    if (dates.secondExamDate || dates.secondStageExamDate) {
+      const d = dates.secondExamDate || dates.secondStageExamDate;
+      events.push({ schoolName, type: 'exam', label: '2nd Stage Exam', dateStr: d, color: '#c2410c', bg: '#ffedd5', border: '#fed7aa', icon: 'fa-pen-clip' });
+    }
+    if (dates.interview || dates.interviewsDate) {
+      const d = dates.interview || dates.interviewsDate;
+      events.push({ schoolName, type: 'interview', label: 'Interview Sittings', dateStr: d, color: '#7e22ce', bg: '#fcf4ff', border: '#f5d0fe', icon: 'fa-comments' });
+    }
+    if (dates.resultsDate || dates.offerDate) {
+      const d = dates.resultsDate || dates.offerDate;
+      events.push({ schoolName, type: 'offer', label: 'Offers Released', dateStr: d, color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0', icon: 'fa-envelope-open-text' });
+    }
+    if (dates.offersAcceptance || dates.offerAcceptByDate) {
+      const d = dates.offersAcceptance || dates.offerAcceptByDate;
+      events.push({ schoolName, type: 'offer', label: 'Offer Acceptance Deadline', dateStr: d, color: '#15803d', bg: '#dcfce7', border: '#86efac', icon: 'fa-circle-check' });
+    }
+  });
+
+  // Group events into 4 key key academic timeline blocks (Autumn 2025 -> Spring 2026)
+  const timelineMonths = [
+    { name: 'May - October 2025', phase: 'Registration Phase', bgHeader: '#3b82f6', filterMonth: ['may', 'june', 'july', 'august', 'september', 'october'] },
+    { name: 'November - December 2025', phase: 'Stage 1 Examinations', bgHeader: '#f97316', filterMonth: ['november', 'december'] },
+    { name: 'January 2026', phase: 'Stage 2 Exams & Interviews', bgHeader: '#a855f7', filterMonth: ['january'] },
+    { name: 'February - March 2026', phase: 'Offers & Final Decision', bgHeader: '#22c55e', filterMonth: ['february', 'march', 'april'] }
+  ];
+
+  let calendarHtml = `
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem;">
+  `;
+
+  timelineMonths.forEach(m => {
+    // Find matching events for this month block
+    const monthEvents = events.filter(e => {
+      const dLower = (e.dateStr || '').toLowerCase();
+      return m.filterMonth.some(fm => dLower.includes(fm));
+    });
+
+    calendarHtml += `
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;">
+        <div style="background: ${m.bgHeader}; color: white; padding: 0.75rem 1rem; font-weight: 700; font-size: 0.9rem; display: flex; justify-content: space-between; align-items: center;">
+          <span><i class="fa-solid fa-calendar-day"></i> ${m.name}</span>
+          <span style="font-size: 0.75rem; background: rgba(255,255,255,0.25); padding: 0.15rem 0.5rem; border-radius: 999px;">${monthEvents.length} Events</span>
+        </div>
+        <div style="padding: 0.6rem; font-size: 0.75rem; font-weight: 700; color: #64748b; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; text-transform: uppercase;">
+          ${m.phase}
+        </div>
+
+        <div style="padding: 0.8rem; flex: 1; display: flex; flex-direction: column; gap: 0.6rem; max-height: 340px; overflow-y: auto;">
+          ${monthEvents.length === 0 ? `
+            <div style="color: #94a3b8; font-size: 0.82rem; font-style: italic; text-align: center; padding: 1.5rem 0;">
+              No key sittings scheduled for this phase.
+            </div>
+          ` : monthEvents.map(ev => `
+            <div style="background: ${ev.bg}; border: 1px solid ${ev.border}; border-radius: 8px; padding: 0.65rem 0.8rem; transition: transform 0.15s ease;" title="${ev.schoolName} - ${ev.label}">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.2rem;">
+                <strong style="font-size: 0.85rem; color: #0f172a; line-height: 1.2;">${ev.schoolName}</strong>
+                <span style="font-size: 0.72rem; font-weight: 700; color: ${ev.color}; white-space: nowrap; background: white; padding: 0.1rem 0.4rem; border-radius: 4px; border: 1px solid ${ev.border};">
+                  <i class="fa-solid ${ev.icon}"></i> ${ev.dateStr}
+                </span>
+              </div>
+              <div style="font-size: 0.78rem; font-weight: 600; color: ${ev.color};">
+                ${ev.label}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  });
+
+  calendarHtml += `</div>`;
+  container.innerHTML = calendarHtml;
+}
+
+
 // Utility debounce
 function debounce(func, delay) {
   let timeout;
@@ -1623,4 +2321,5 @@ function debounce(func, delay) {
     timeout = setTimeout(() => func.apply(this, args), delay);
   };
 }
+
 

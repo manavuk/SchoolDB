@@ -597,7 +597,298 @@ app.get('/api/admin/export', (req, res) => {
   res.status(400).json({ error: 'Unsupported format requested. Supported formats: json, csv, tsv, xml' });
 });
 
+// Settings file helper
+const SETTINGS_FILE = path.join(__dirname, 'data', 'recommendation_settings.json');
+function readRecSettings() {
+  try {
+    if (!fs.existsSync(SETTINGS_FILE)) {
+      return { weights: { location: 40, examType: 35, schoolType: 15, gender: 10 } };
+    }
+    return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  } catch (err) {
+    return { weights: { location: 40, examType: 35, schoolType: 15, gender: 10 } };
+  }
+}
+
+function writeRecSettings(settings) {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+// GET /api/recommendation-settings - Get current recommendation weights
+app.get('/api/recommendation-settings', (req, res) => {
+  res.json(readRecSettings());
+});
+
+// POST /api/recommendation-settings - Save recommendation weights (Admin only)
+app.post('/api/recommendation-settings', (req, res) => {
+  const { weights } = req.body;
+  if (!weights) return res.status(400).json({ error: 'Weights configuration required' });
+
+  const settings = { weights };
+  if (writeRecSettings(settings)) {
+    res.json({ message: 'Recommendation settings updated successfully', settings });
+  } else {
+    res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
+
+// Authentication & User DB Helpers
+const USERS_FILE = path.join(__dirname, 'data', 'users.json');
+function readUsers() {
+  try {
+    if (!fs.existsSync(USERS_FILE)) return [];
+    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+  } catch (err) {
+    return [];
+  }
+}
+
+function writeUsers(users) {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+// POST /api/auth/signup - Register new account
+app.post('/api/auth/signup', (req, res) => {
+  const { name, email, password, role } = req.body;
+
+  if (!email || !password || !name) {
+    return res.status(400).json({ error: 'Name, email, and password are required' });
+  }
+
+  const users = readUsers();
+  const existing = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+
+  if (existing) {
+    return res.status(400).json({ error: 'An account with this email already exists' });
+  }
+
+  const newUser = {
+    id: `usr-${Date.now()}`,
+    name,
+    email: email.toLowerCase(),
+    password, // Plain text for local experiment server
+    role: role === 'admin' ? 'admin' : 'user',
+    createdAt: new Date().toISOString()
+  };
+
+  users.push(newUser);
+  writeUsers(users);
+
+  res.json({
+    message: 'Registration successful',
+    user: { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role }
+  });
+});
+
+// POST /api/auth/login - Authenticate user
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  const users = readUsers();
+  const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+
+  res.json({
+    message: 'Login successful',
+    user: { id: user.id, name: user.name, email: user.email, role: user.role }
+  });
+});
+
+// GET /api/users - Get list of accounts (For quick switcher / demo)
+app.get('/api/users', (req, res) => {
+  const users = readUsers().map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role }));
+  res.json(users);
+});
+
+// User Portfolios File Helper
+
+const PORTFOLIOS_FILE = path.join(__dirname, 'data', 'user_portfolios.json');
+function readPortfolios() {
+  try {
+    if (!fs.existsSync(PORTFOLIOS_FILE)) return {};
+    return JSON.parse(fs.readFileSync(PORTFOLIOS_FILE, 'utf8'));
+  } catch (err) {
+    return {};
+  }
+}
+
+function writePortfolios(data) {
+  try {
+    fs.writeFileSync(PORTFOLIOS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+// GET /api/user-portfolio/:userId - Load saved portfolio for user
+app.get('/api/user-portfolio/:userId', (req, res) => {
+  const { userId } = req.params;
+  const portfolios = readPortfolios();
+  const portfolio = portfolios[userId] || {
+    userId,
+    targetLocation: '',
+    selectedSchools: [],
+    removedSchoolIds: [],
+    savedAt: null
+  };
+  res.json(portfolio);
+});
+
+// POST /api/user-portfolio/:userId - Save portfolio for user
+app.post('/api/user-portfolio/:userId', (req, res) => {
+  const { userId } = req.params;
+  const { targetLocation, selectedSchools, removedSchoolIds } = req.body;
+
+  const portfolios = readPortfolios();
+  portfolios[userId] = {
+    userId,
+    targetLocation: targetLocation || '',
+    selectedSchools: selectedSchools || [],
+    removedSchoolIds: removedSchoolIds || [],
+    savedAt: new Date().toISOString()
+  };
+
+  if (writePortfolios(portfolios)) {
+    res.json({ message: 'User portfolio saved successfully', portfolio: portfolios[userId] });
+  } else {
+    res.status(500).json({ error: 'Failed to save portfolio' });
+  }
+});
+
+// POST /api/recommendations - Smart School Recommendation Engine
+
+app.post('/api/recommendations', (req, res) => {
+  const { userSchools = [], targetLocation = '', removedSchoolIds = [], genderChoice = 'all', includeCoed = true } = req.body;
+  const allSchools = readData();
+  const settings = readRecSettings();
+  const weights = settings.weights || { location: 40, examType: 35, schoolType: 15, gender: 10 };
+
+  const removedSet = new Set(removedSchoolIds);
+  const userSchoolSet = new Set(userSchools.map(s => s.id));
+
+  // Candidate pool (exclude already saved or explicitly removed schools)
+  let candidates = allSchools.filter(s => !userSchoolSet.has(s.id) && !removedSet.has(s.id));
+
+  // ABSOLUTE GENDER FILTER ENFORCEMENT
+  if (genderChoice === 'boys') {
+    candidates = candidates.filter(s => {
+      const g = (s.gender || '').toLowerCase();
+      const isBoys = g.includes('boy');
+      const isCoed = g.includes('mixed') || g.includes('co-ed');
+      return isBoys || (includeCoed && isCoed);
+    });
+  } else if (genderChoice === 'girls') {
+    candidates = candidates.filter(s => {
+      const g = (s.gender || '').toLowerCase();
+      const isGirls = g.includes('girl');
+      const isCoed = g.includes('mixed') || g.includes('co-ed');
+      return isGirls || (includeCoed && isCoed);
+    });
+  }
+
+  // Extract preferences from user's current list of saved schools
+  const userLAs = new Set(userSchools.map(s => (s.la || '').toLowerCase()).filter(Boolean));
+  if (targetLocation) userLAs.add(targetLocation.toLowerCase().trim());
+
+  const userExamTypes = new Set(userSchools.map(s => (s.entranceExamType || '').toLowerCase()).filter(Boolean));
+  const userSchoolTypes = new Set(userSchools.map(s => (s.schoolType || '').toLowerCase()).filter(Boolean));
+  const userGenders = new Set(userSchools.map(s => (s.gender || '').toLowerCase()).filter(Boolean));
+
+  // Score each candidate school
+
+  const scored = candidates.map(candidate => {
+    let locScore = 0;
+    let examScore = 0;
+    let typeScore = 0;
+    let genderScore = 0;
+
+    const cLA = (candidate.la || '').toLowerCase();
+    const cExam = (candidate.entranceExamType || '').toLowerCase();
+    const cType = (candidate.schoolType || '').toLowerCase();
+    const cGender = (candidate.gender || '').toLowerCase();
+
+    // Location score
+    if (userLAs.has(cLA) || (targetLocation && cLA.includes(targetLocation.toLowerCase()))) {
+      locScore = 1.0;
+    } else if (candidate.address && targetLocation && candidate.address.toLowerCase().includes(targetLocation.toLowerCase())) {
+      locScore = 0.8;
+    }
+
+    // Exam Type score
+    if (userExamTypes.has(cExam)) {
+      examScore = 1.0;
+    } else {
+      userExamTypes.forEach(uExam => {
+        if (cExam && uExam && (cExam.includes(uExam) || uExam.includes(cExam))) examScore = Math.max(examScore, 0.7);
+      });
+    }
+
+    // School Type score
+    if (userSchoolTypes.has(cType)) {
+      typeScore = 1.0;
+    } else {
+      userSchoolTypes.forEach(uType => {
+        if (cType && uType && (cType.includes(uType) || uType.includes(cType))) typeScore = Math.max(typeScore, 0.6);
+      });
+    }
+
+    // Gender score
+    if (userGenders.has(cGender)) {
+      genderScore = 1.0;
+    }
+
+    // Weighted composite score (0 - 100)
+    const totalWeight = (weights.location || 40) + (weights.examType || 35) + (weights.schoolType || 15) + (weights.gender || 10);
+    const score = (
+      (locScore * (weights.location || 40)) +
+      (examScore * (weights.examType || 35)) +
+      (typeScore * (weights.schoolType || 15)) +
+      (genderScore * (weights.gender || 10))
+    ) / (totalWeight || 1) * 100;
+
+    // Recommendation reason
+    const reasons = [];
+    if (locScore > 0) reasons.push(`Nearby area / LA (${candidate.la})`);
+    if (examScore > 0) reasons.push(`Matching exam format (${candidate.entranceExamType})`);
+    if (typeScore > 0) reasons.push(`Matching school type (${candidate.schoolType})`);
+    if (genderScore > 0) reasons.push(`Matching intake (${candidate.gender})`);
+
+    return {
+      school: candidate,
+      matchScore: Math.round(score),
+      reasons: reasons.length > 0 ? reasons : ['General high school recommendation']
+    };
+  });
+
+  // Sort by match score descending
+  scored.sort((a, b) => b.matchScore - a.matchScore);
+
+  res.json({
+    totalCandidates: candidates.length,
+    recommendations: scored.slice(0, 30) // top 30 recommendations
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`London High Schools DB Server running at http://localhost:${PORT}`);
 });
+
 
