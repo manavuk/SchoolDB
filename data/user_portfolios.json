@@ -1,7 +1,6 @@
 {
   "parent-sarah": {
     "userId": "parent-sarah",
-    "name": "Sarah Jenkins (Parent)",
     "targetLocation": "Kingston upon Thames",
     "selectedSchools": [
       {
@@ -156,10 +155,74 @@
           "registrationCloses": "November prior to year of entry",
           "coEd": "No"
         }
+      },
+      {
+        "id": "sch-csv-805389",
+        "name": "Torquay Girls' Grammar School",
+        "urn": "136506",
+        "la": "Torbay",
+        "region": "Greater London",
+        "postcode": "TQ2 7DY",
+        "address": "30 Shiphay Lane, Torquay, Devon",
+        "gender": "Girls",
+        "schoolType": "Academy Converter",
+        "ageRange": "11-18",
+        "pupilCount": 1058,
+        "admissionsPolicy": "Selective",
+        "website": "www.tggsacademy.org",
+        "phone": "01803613215",
+        "official": true,
+        "officialDataSource": "DfE GIAS",
+        "compareSchoolPerformanceUrl": "https://www.compare-school-performance.service.gov.uk/school/136506",
+        "_csv": {
+          "establishmentNumber": "4114",
+          "laCode": "880",
+          "ukprn": "10033040",
+          "uprn": "100041054206",
+          "establishmentStatus": "Open",
+          "phaseOfEducation": "Secondary",
+          "typeOfEstablishment": "Academy converter",
+          "establishmentTypeGroup": "Academies",
+          "schoolCapacity": 1200,
+          "numberOfBoys": 3,
+          "numberOfGirls": 1055,
+          "percentageFSM": 6,
+          "fsm": 49,
+          "religiousCharacter": "None",
+          "officialSixthForm": "Has a sixth form",
+          "boarders": null,
+          "nurseryProvision": "Not applicable",
+          "specialClasses": null,
+          "federationFlag": "Not applicable",
+          "federations": null,
+          "trustSchoolFlag": "Supported by a single-academy trust",
+          "trusts": "TORQUAY GIRLS' GRAMMAR SCHOOL",
+          "schoolSponsors": null,
+          "openDate": "01-02-2011",
+          "closeDate": null,
+          "lastChangedDate": "01-07-2026",
+          "inspectorateReport": null,
+          "lastInspectionDate": null,
+          "headTeacher": "Ms Sarah Forster",
+          "headPreferredJobTitle": "Headteacher",
+          "urbanRural": "Urban: Further from a major town or city",
+          "district": "Torbay",
+          "ward": "Shiphay",
+          "parliamentaryConstituency": "Torbay",
+          "gssLACode": "E06000027",
+          "msoaName": "Torbay 019",
+          "msoaCode": "E02006840",
+          "lsoaName": "Torbay 019B",
+          "lsoaCode": "E01015210",
+          "easting": "289867",
+          "northing": "65289",
+          "senTypes": null,
+          "linkedEstablishments": "113523 Predecessor"
+        }
       }
     ],
     "removedSchoolIds": [],
-    "savedAt": "2026-08-11T22:06:15.144Z"
+    "savedAt": "2026-08-12T21:45:22.668Z"
   },
   "parent-david": {
     "userId": "parent-david",
@@ -227,27 +290,27 @@
     "targetLocation": "London",
     "selectedSchools": [
       {
-        "id": "sch-517326",
-        "name": "Notting Hill and Ealing High School GDST",
-        "urn": "101938",
-        "la": "Ealing",
+        "id": "sch-176522",
+        "name": "Putney High School",
+        "urn": "101065",
+        "la": "Wandsworth",
         "region": "Greater London",
-        "postcode": "W13 8AX",
-        "address": "2 Cleveland Road, Ealing, London, W13 8HT",
+        "postcode": "SW15 6BH",
+        "address": "35 Putney Hill, London, SW15 6BH",
         "schoolType": "Independent",
         "gender": "Girls",
         "ageRange": "11-18",
-        "pupilCount": 921,
+        "pupilCount": 750,
         "ofstedRating": "Independent (ISI Excellent)",
         "gcseProgress8": null,
         "gcseAttainment8": null,
         "ebaccAveragePointScore": null,
-        "entranceExamType": "ISEB Pre-test",
+        "entranceExamType": "GDST",
         "entranceExamDates": {
-          "registrationOpen": "",
-          "registrationDeadline": "",
-          "examDate": "",
-          "resultsDate": ""
+          "registrationOpen": "1 May 2025",
+          "registrationDeadline": "10 November 2025",
+          "examDate": "December 2025",
+          "resultsDate": "February 2026"
         },
         "gcseSubjects": [
           "Mathematics",
@@ -261,14 +324,15 @@
           "French",
           "Spanish"
         ],
-        "admissionsPolicy": "Selective girls' day school with entry principally at 11+ and sixth form.",
-        "website": "https://www.nhehs.gdst.net",
-        "phone": "020 8799 8400",
-        "email": "enquiries@nhehs.gdst.net",
-        "description": "Independent day and/or boarding school providing secondary education in Ealing."
+        "admissionsPolicy": "Selective entry via London 11+ Consortium entrance exam and interview.",
+        "website": "https://www.putneyhigh.gdst.net",
+        "phone": "020 8788 4886",
+        "email": "putneyhigh@put.gdst.net",
+        "description": "Forward-thinking GDST independent school for girls in Putney.",
+        "hot": true
       }
     ],
     "removedSchoolIds": [],
-    "savedAt": "2026-08-12T11:02:45.883Z"
+    "savedAt": "2026-08-12T21:19:44.524Z"
   }
 }

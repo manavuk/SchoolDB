@@ -667,13 +667,21 @@ app.get('/api/admin/export', (req, res) => {
 // Settings file helper
 const SETTINGS_FILE = path.join(__dirname, 'data', 'recommendation_settings.json');
 function readRecSettings() {
+  const DEFAULT_WEIGHTS = {
+    location: 35,
+    examType: 25,
+    academicPerformance: 20,
+    ofstedRating: 10,
+    schoolType: 10
+  };
   try {
     if (!fs.existsSync(SETTINGS_FILE)) {
-      return { weights: { location: 40, examType: 35, schoolType: 15, gender: 10 } };
+      return { weights: DEFAULT_WEIGHTS };
     }
-    return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    return { weights: { ...DEFAULT_WEIGHTS, ...(data.weights || {}) } };
   } catch (err) {
-    return { weights: { location: 40, examType: 35, schoolType: 15, gender: 10 } };
+    return { weights: DEFAULT_WEIGHTS };
   }
 }
 
@@ -840,13 +848,96 @@ app.post('/api/user-portfolio/:userId', (req, res) => {
   }
 });
 
+// Helper to calculate postcode and spatial proximity score (0.0 to 1.0)
+function calculateLocationProximityScore(candidate, targetQuery, userSchools) {
+  const normQuery = (targetQuery || '').trim().toUpperCase();
+  const cPostcode = (candidate.postcode || '').trim().toUpperCase();
+  const cLA = (candidate.la || '').trim().toLowerCase();
+  const cAddress = (candidate.address || '').trim().toLowerCase();
+  const cEasting = candidate._csv && candidate._csv.easting ? parseFloat(candidate._csv.easting) : null;
+  const cNorthing = candidate._csv && candidate._csv.northing ? parseFloat(candidate._csv.northing) : null;
+
+  let bestScore = 0;
+  let matchReason = '';
+
+  // 1. Evaluate target location query if provided
+  if (normQuery) {
+    const targetOutcode = normQuery.split(' ')[0];
+    const cOutcode = cPostcode.split(' ')[0];
+    const targetAreaCode = normQuery.replace(/[0-9\s]/g, '');
+    const cAreaCode = cPostcode.replace(/[0-9\s]/g, '');
+
+    if (cPostcode && cPostcode === normQuery) {
+      bestScore = 1.0;
+      matchReason = `Exact postcode match (${candidate.postcode})`;
+    } else if (targetOutcode && cOutcode && cOutcode === targetOutcode) {
+      bestScore = 0.95;
+      matchReason = `Same postcode sector (${cOutcode})`;
+    } else if (targetAreaCode && cAreaCode && cAreaCode === targetAreaCode && targetAreaCode.length >= 1) {
+      bestScore = 0.75;
+      matchReason = `Nearby postcode area (${cAreaCode})`;
+    } else if (cLA && cLA.includes(normQuery.toLowerCase())) {
+      bestScore = 0.85;
+      matchReason = `Borough / LA match (${candidate.la})`;
+    } else if (cAddress && cAddress.includes(normQuery.toLowerCase())) {
+      bestScore = 0.65;
+      matchReason = `Address vicinity match (${candidate.la})`;
+    }
+  }
+
+  // 2. Evaluate spatial (Easting / Northing) distance against user's saved schools
+  if (userSchools && userSchools.length > 0) {
+    userSchools.forEach(uSch => {
+      const uLA = (uSch.la || '').trim().toLowerCase();
+      if (cLA && uLA && cLA === uLA) {
+        if (bestScore < 0.8) {
+          bestScore = Math.max(bestScore, 0.8);
+          matchReason = `Same borough (${candidate.la}) as saved school`;
+        }
+      }
+
+      const uPcode = (uSch.postcode || '').trim().toUpperCase();
+      const uOutcode = uPcode.split(' ')[0];
+      const cOutcode = cPostcode.split(' ')[0];
+      if (cOutcode && uOutcode && cOutcode === uOutcode) {
+        if (bestScore < 0.9) {
+          bestScore = Math.max(bestScore, 0.9);
+          matchReason = `Same postcode sector (${cOutcode}) as saved school`;
+        }
+      }
+
+      const uEasting = uSch._csv && uSch._csv.easting ? parseFloat(uSch._csv.easting) : null;
+      const uNorthing = uSch._csv && uSch._csv.northing ? parseFloat(uSch._csv.northing) : null;
+
+      if (cEasting && cNorthing && uEasting && uNorthing) {
+        const dx = cEasting - uEasting;
+        const dy = cNorthing - uNorthing;
+        const distanceKm = Math.sqrt(dx * dx + dy * dy) / 1000.0; // Distance in kilometers
+
+        let distScore = 0;
+        if (distanceKm <= 3.0) distScore = 1.0;
+        else if (distanceKm <= 7.0) distScore = 0.85;
+        else if (distanceKm <= 15.0) distScore = 0.65;
+        else if (distanceKm <= 25.0) distScore = 0.40;
+
+        if (distScore > bestScore) {
+          bestScore = distScore;
+          matchReason = `~${distanceKm.toFixed(1)} km from ${uSch.name}`;
+        }
+      }
+    });
+  }
+
+  return { score: bestScore, reason: matchReason };
+}
+
 // POST /api/recommendations - Smart School Recommendation Engine
 
 app.post('/api/recommendations', (req, res) => {
   const { userSchools = [], targetLocation = '', removedSchoolIds = [], genderChoice = 'all', includeCoed = true } = req.body;
   const allSchools = readData();
   const settings = readRecSettings();
-  const weights = settings.weights || { location: 40, examType: 35, schoolType: 15, gender: 10 };
+  const weights = settings.weights || { location: 50, examType: 35, schoolType: 15 };
 
   const removedSet = new Set(removedSchoolIds);
   const userSchoolSet = new Set(userSchools.map(s => s.id));
@@ -871,35 +962,33 @@ app.post('/api/recommendations', (req, res) => {
     });
   }
 
-  // Extract preferences from user's current list of saved schools
-  const userLAs = new Set(userSchools.map(s => (s.la || '').toLowerCase()).filter(Boolean));
-  if (targetLocation) userLAs.add(targetLocation.toLowerCase().trim());
-
+  // Extract preferences & benchmarks from user's current list of saved schools
   const userExamTypes = new Set(userSchools.map(s => (s.entranceExamType || '').toLowerCase()).filter(Boolean));
   const userSchoolTypes = new Set(userSchools.map(s => (s.schoolType || '').toLowerCase()).filter(Boolean));
-  const userGenders = new Set(userSchools.map(s => (s.gender || '').toLowerCase()).filter(Boolean));
+
+  // Compute benchmark academic metrics from user's saved portfolio
+  const userAttainment8List = userSchools.map(s => s.gcseAttainment8).filter(v => typeof v === 'number' && !isNaN(v));
+  const avgUserAttainment8 = userAttainment8List.length > 0 ? (userAttainment8List.reduce((a, b) => a + b, 0) / userAttainment8List.length) : 65.0;
+
+  const userProgress8List = userSchools.map(s => s.gcseProgress8).filter(v => typeof v === 'number' && !isNaN(v));
+  const avgUserProgress8 = userProgress8List.length > 0 ? (userProgress8List.reduce((a, b) => a + b, 0) / userProgress8List.length) : 0.5;
 
   // Score each candidate school
-
   const scored = candidates.map(candidate => {
-    let locScore = 0;
     let examScore = 0;
     let typeScore = 0;
-    let genderScore = 0;
+    let academicScore = 0;
+    let ofstedScore = 0;
 
-    const cLA = (candidate.la || '').toLowerCase();
     const cExam = (candidate.entranceExamType || '').toLowerCase();
     const cType = (candidate.schoolType || '').toLowerCase();
-    const cGender = (candidate.gender || '').toLowerCase();
+    const cOfsted = (candidate.ofstedRating || '').toLowerCase();
 
-    // Location score
-    if (userLAs.has(cLA) || (targetLocation && cLA.includes(targetLocation.toLowerCase()))) {
-      locScore = 1.0;
-    } else if (candidate.address && targetLocation && candidate.address.toLowerCase().includes(targetLocation.toLowerCase())) {
-      locScore = 0.8;
-    }
+    // 1. Location / Proximity score via multi-tier postcode & spatial distance
+    const locResult = calculateLocationProximityScore(candidate, targetLocation, userSchools);
+    const locScore = locResult.score;
 
-    // Exam Type score
+    // 2. Exam Type score
     if (userExamTypes.has(cExam)) {
       examScore = 1.0;
     } else {
@@ -908,7 +997,7 @@ app.post('/api/recommendations', (req, res) => {
       });
     }
 
-    // School Type score
+    // 3. School Type score
     if (userSchoolTypes.has(cType)) {
       typeScore = 1.0;
     } else {
@@ -917,26 +1006,57 @@ app.post('/api/recommendations', (req, res) => {
       });
     }
 
-    // Gender score
-    if (userGenders.has(cGender)) {
-      genderScore = 1.0;
+    // 4. Academic Performance score (GCSE Attainment 8 & Progress 8 vs benchmark)
+    const cAttainment = typeof candidate.gcseAttainment8 === 'number' ? candidate.gcseAttainment8 : null;
+    const cProgress = typeof candidate.gcseProgress8 === 'number' ? candidate.gcseProgress8 : null;
+
+    if (cAttainment !== null) {
+      if (cAttainment >= avgUserAttainment8 + 5) academicScore = 1.0;
+      else if (cAttainment >= avgUserAttainment8 - 5) academicScore = 0.85;
+      else if (cAttainment >= 50) academicScore = 0.65;
+      else academicScore = 0.40;
+    } else if (cProgress !== null) {
+      if (cProgress >= 0.7) academicScore = 0.95;
+      else if (cProgress >= 0.3) academicScore = 0.75;
+      else academicScore = 0.50;
+    } else {
+      academicScore = 0.50; // default baseline for unrated
+    }
+
+    // 5. Ofsted Rating score
+    if (cOfsted.includes('outstanding') || cOfsted.includes('excellent')) {
+      ofstedScore = 1.0;
+    } else if (cOfsted.includes('good')) {
+      ofstedScore = 0.80;
+    } else if (cOfsted.includes('requires improvement')) {
+      ofstedScore = 0.40;
+    } else {
+      ofstedScore = 0.50;
     }
 
     // Weighted composite score (0 - 100)
-    const totalWeight = (weights.location || 40) + (weights.examType || 35) + (weights.schoolType || 15) + (weights.gender || 10);
+    const wLoc = weights.location ?? 35;
+    const wExam = weights.examType ?? 25;
+    const wAcad = weights.academicPerformance ?? 20;
+    const wOfsted = weights.ofstedRating ?? 10;
+    const wType = weights.schoolType ?? 10;
+
+    const totalWeight = wLoc + wExam + wAcad + wOfsted + wType;
     const score = (
-      (locScore * (weights.location || 40)) +
-      (examScore * (weights.examType || 35)) +
-      (typeScore * (weights.schoolType || 15)) +
-      (genderScore * (weights.gender || 10))
+      (locScore * wLoc) +
+      (examScore * wExam) +
+      (academicScore * wAcad) +
+      (ofstedScore * wOfsted) +
+      (typeScore * wType)
     ) / (totalWeight || 1) * 100;
 
-    // Recommendation reason
+    // Nuanced recommendation rationale strings
     const reasons = [];
-    if (locScore > 0) reasons.push(`Nearby area / LA (${candidate.la})`);
+    if (locScore > 0 && locResult.reason) reasons.push(locResult.reason);
     if (examScore > 0) reasons.push(`Matching exam format (${candidate.entranceExamType})`);
+    if (academicScore >= 0.85 && cAttainment !== null) reasons.push(`High Academic Attainment 8 (${cAttainment})`);
+    if (ofstedScore >= 0.80 && candidate.ofstedRating) reasons.push(`Ofsted ${candidate.ofstedRating}`);
     if (typeScore > 0) reasons.push(`Matching school type (${candidate.schoolType})`);
-    if (genderScore > 0) reasons.push(`Matching intake (${candidate.gender})`);
 
     return {
       school: candidate,

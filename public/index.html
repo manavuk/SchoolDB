@@ -38,30 +38,29 @@
       </nav>
 
       <div class="nav-actions">
-        <!-- Active Authenticated User Badge & Role Pill -->
-        <div id="auth-user-badge" style="display: flex; align-items: center; gap: 0.55rem; background: #f8fafc; border: 1px solid #cbd5e1; padding: 0.35rem 0.75rem; border-radius: 8px;">
-          <i class="fa-solid fa-circle-user" style="color: #4f46e5; font-size: 1.1rem;"></i>
-          <div>
-            <div id="auth-user-name" style="font-size: 0.82rem; font-weight: 700; color: #0f172a; line-height: 1.2;">System Admin (Manager)</div>
-            <div style="font-size: 0.72rem; color: #64748b; font-weight: 600;">
-              Role: <span id="auth-user-role-pill" class="badge-ofsted" style="font-size: 0.68rem; padding: 0.05rem 0.35rem; background: #fef3c7; color: #b45309; border-color: #fde68a;">Manager (Admin)</span>
-            </div>
+        <!-- Unified Account Switcher & Role Selector Dropdown -->
+        <div class="user-account-switcher" style="position: relative;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; background: #f8fafc; border: 1px solid #cbd5e1; padding: 0.35rem 0.75rem; border-radius: 8px;">
+            <i class="fa-solid fa-circle-user" style="color: #4f46e5; font-size: 1.15rem;"></i>
+            <select id="auth-user-select" style="background: transparent; border: none; font-size: 0.85rem; font-weight: 700; color: #0f172a; cursor: pointer; outline: none; padding-right: 0.25rem;">
+              <option value="usr-admin-1">System Admin (Manager)</option>
+              <option value="parent-sarah">Sarah Jenkins (Parent)</option>
+              <option value="parent-david">David &amp; Emma Miller (Parent)</option>
+              <option value="parent-priya">Priya Patel (Parent)</option>
+            </select>
           </div>
         </div>
 
-        <button id="auth-login-btn" class="btn btn-outline" style="font-size: 0.85rem;">
-          <i class="fa-solid fa-right-to-bracket"></i> Switch Account / Login
+        <button id="auth-login-btn" class="btn btn-outline" style="font-size: 0.82rem; padding: 0.35rem 0.65rem;">
+          <i class="fa-solid fa-right-to-bracket"></i> Login
         </button>
 
-        <button id="auth-signup-btn" class="btn btn-primary" style="font-size: 0.85rem; background: #059669; border-color: #047857;">
-          <i class="fa-solid fa-user-plus"></i> Register Account
+        <button id="auth-signup-btn" class="btn btn-primary" style="font-size: 0.82rem; padding: 0.35rem 0.65rem; background: #059669; border-color: #047857;">
+          <i class="fa-solid fa-user-plus"></i> Register
         </button>
 
         <button id="compare-bar-btn" class="btn btn-outline" style="display:none;">
           <i class="fa-solid fa-code-compare"></i> Compare (<span id="compare-count">0</span>)
-        </button>
-        <button id="add-school-btn" class="btn btn-primary admin-only" style="display: none;">
-          <i class="fa-solid fa-plus"></i> Add School Entry
         </button>
       </div>
     </div>
@@ -386,9 +385,14 @@
   <!-- ADMIN TAB VIEW CONTENT (Shown when Admin tab is active) -->
   <div id="admin-tab-content" style="display: none;">
     <section class="admin-portal-container">
-      <div class="admin-header-box">
-        <h2><i class="fa-solid fa-user-shield"></i> Admin Management & Bulk Import Center</h2>
-        <p>Perform bulk data verification, automatic de-duplication, and dataset cleanup prior to committing school records.</p>
+      <div class="admin-header-box" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h2><i class="fa-solid fa-user-shield"></i> Admin Management &amp; Bulk Import Center</h2>
+          <p>Perform bulk data verification, automatic de-duplication, and dataset cleanup prior to committing school records.</p>
+        </div>
+        <button id="add-school-btn" class="btn btn-primary admin-only" style="background: #2563eb; border-color: #2563eb; font-size: 0.9rem; padding: 0.55rem 1.1rem;">
+          <i class="fa-solid fa-plus"></i> Add School Entry
+        </button>
       </div>
 
       <div class="admin-grid">
@@ -625,27 +629,33 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
           <form id="rec-weights-form" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;">
             <div>
               <label style="font-size: 0.85rem; font-weight: 600; color: #475569; display: block; margin-bottom: 0.3rem;">
-                <i class="fa-solid fa-location-dot"></i> Location / Nearby Area (%)
+                <i class="fa-solid fa-location-dot"></i> Location / Proximity (%)
               </label>
-              <input type="number" id="weight-location" min="0" max="100" value="40" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+              <input type="number" id="weight-location" min="0" max="100" value="35" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
             </div>
             <div>
               <label style="font-size: 0.85rem; font-weight: 600; color: #475569; display: block; margin-bottom: 0.3rem;">
                 <i class="fa-solid fa-file-pen"></i> Entrance Exam Type (%)
               </label>
-              <input type="number" id="weight-exam" min="0" max="100" value="35" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+              <input type="number" id="weight-exam" min="0" max="100" value="25" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+            </div>
+            <div>
+              <label style="font-size: 0.85rem; font-weight: 600; color: #475569; display: block; margin-bottom: 0.3rem;">
+                <i class="fa-solid fa-chart-line"></i> Academic Performance (%)
+              </label>
+              <input type="number" id="weight-academic" min="0" max="100" value="20" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+            </div>
+            <div>
+              <label style="font-size: 0.85rem; font-weight: 600; color: #475569; display: block; margin-bottom: 0.3rem;">
+                <i class="fa-solid fa-star"></i> Ofsted Rating (%)
+              </label>
+              <input type="number" id="weight-ofsted" min="0" max="100" value="10" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
             </div>
             <div>
               <label style="font-size: 0.85rem; font-weight: 600; color: #475569; display: block; margin-bottom: 0.3rem;">
                 <i class="fa-solid fa-school"></i> School Type (%)
               </label>
-              <input type="number" id="weight-type" min="0" max="100" value="15" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
-            </div>
-            <div>
-              <label style="font-size: 0.85rem; font-weight: 600; color: #475569; display: block; margin-bottom: 0.3rem;">
-                <i class="fa-solid fa-users"></i> Gender Intake (%)
-              </label>
-              <input type="number" id="weight-gender" min="0" max="100" value="10" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
+              <input type="number" id="weight-type" min="0" max="100" value="10" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem;">
             </div>
 
             <div style="grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem;">

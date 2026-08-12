@@ -23,15 +23,9 @@ async function initApp() {
 
 // Update Header Authenticated User Badge & Role Indicator
 function updateAuthUserBadge() {
-  const nameEl = document.getElementById('auth-user-name');
-  const roleEl = document.getElementById('auth-user-role-pill');
-
-  if (nameEl) nameEl.textContent = currentUserName;
-  if (roleEl) {
-    roleEl.textContent = currentRole === 'admin' ? 'Manager (Admin)' : 'Parent (Standard)';
-    roleEl.style.background = currentRole === 'admin' ? '#fef3c7' : '#ecfdf5';
-    roleEl.style.color = currentRole === 'admin' ? '#b45309' : '#047857';
-    roleEl.style.borderColor = currentRole === 'admin' ? '#fde68a' : '#a7f3d0';
+  const selectEl = document.getElementById('auth-user-select');
+  if (selectEl && currentUserAccount) {
+    selectEl.value = currentUserAccount;
   }
 }
 
@@ -539,14 +533,33 @@ function setupEventListeners() {
   const openLoginBtn = document.getElementById('auth-login-btn');
   if (openLoginBtn) openLoginBtn.addEventListener('click', () => { loginModal.style.display = 'flex'; });
 
-  const openSignupBtn = document.getElementById('auth-signup-btn');
-  if (openSignupBtn) openSignupBtn.addEventListener('click', () => { signupModal.style.display = 'flex'; });
-
-  if (document.getElementById('modal-close-login')) document.getElementById('modal-close-login').addEventListener('click', () => { loginModal.style.display = 'none'; });
-  if (document.getElementById('modal-cancel-login')) document.getElementById('modal-cancel-login').addEventListener('click', () => { loginModal.style.display = 'none'; });
-
-  if (document.getElementById('modal-close-signup')) document.getElementById('modal-close-signup').addEventListener('click', () => { signupModal.style.display = 'none'; });
-  if (document.getElementById('modal-cancel-signup')) document.getElementById('modal-cancel-signup').addEventListener('click', () => { signupModal.style.display = 'none'; });
+  // Account Switcher Dropdown Change Handler
+  const userSelectDropdown = document.getElementById('auth-user-select');
+  if (userSelectDropdown) {
+    userSelectDropdown.addEventListener('change', async (e) => {
+      const selectedId = e.target.value;
+      if (selectedId === 'usr-admin-1') {
+        currentUserAccount = 'usr-admin-1';
+        currentUserName = 'System Admin (Manager)';
+        currentRole = 'admin';
+      } else if (selectedId === 'parent-sarah') {
+        currentUserAccount = 'parent-sarah';
+        currentUserName = 'Sarah Jenkins';
+        currentRole = 'user';
+      } else if (selectedId === 'parent-david') {
+        currentUserAccount = 'parent-david';
+        currentUserName = 'David & Emma Miller';
+        currentRole = 'user';
+      } else if (selectedId === 'parent-priya') {
+        currentUserAccount = 'parent-priya';
+        currentUserName = 'Priya Patel';
+        currentRole = 'user';
+      }
+      showToast(`Switched active profile to ${currentUserName} (${currentRole === 'admin' ? 'Admin' : 'Parent'})`, 'success');
+      await loadUserPortfolio(currentUserAccount);
+      applyRoleUI();
+    });
+  }
 
   // Quick Demo Account Select Handler
   const quickDemoSelect = document.getElementById('quick-demo-account-select');
@@ -2092,12 +2105,13 @@ async function loadRecWeights() {
   try {
     const res = await fetch('/api/recommendation-settings');
     const data = await res.json();
-    const w = data.weights || { location: 40, examType: 35, schoolType: 15, gender: 10 };
+    const w = data.weights || { location: 35, examType: 25, academicPerformance: 20, ofstedRating: 10, schoolType: 10 };
 
-    if (document.getElementById('weight-location')) document.getElementById('weight-location').value = w.location || 40;
-    if (document.getElementById('weight-exam')) document.getElementById('weight-exam').value = w.examType || 35;
-    if (document.getElementById('weight-type')) document.getElementById('weight-type').value = w.schoolType || 15;
-    if (document.getElementById('weight-gender')) document.getElementById('weight-gender').value = w.gender || 10;
+    if (document.getElementById('weight-location')) document.getElementById('weight-location').value = w.location ?? 35;
+    if (document.getElementById('weight-exam')) document.getElementById('weight-exam').value = w.examType ?? 25;
+    if (document.getElementById('weight-academic')) document.getElementById('weight-academic').value = w.academicPerformance ?? 20;
+    if (document.getElementById('weight-ofsted')) document.getElementById('weight-ofsted').value = w.ofstedRating ?? 10;
+    if (document.getElementById('weight-type')) document.getElementById('weight-type').value = w.schoolType ?? 10;
   } catch (err) {
     console.error('Failed to load recommendation weights:', err);
   }
@@ -2109,8 +2123,9 @@ async function saveRecWeights(e) {
   const weights = {
     location: parseInt(document.getElementById('weight-location').value) || 0,
     examType: parseInt(document.getElementById('weight-exam').value) || 0,
-    schoolType: parseInt(document.getElementById('weight-type').value) || 0,
-    gender: parseInt(document.getElementById('weight-gender').value) || 0,
+    academicPerformance: parseInt(document.getElementById('weight-academic').value) || 0,
+    ofstedRating: parseInt(document.getElementById('weight-ofsted').value) || 0,
+    schoolType: parseInt(document.getElementById('weight-type').value) || 0
   };
 
   try {
