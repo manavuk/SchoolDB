@@ -1,9 +1,10 @@
 // User Recommendation & Authentication State
-let currentUserAccount = 'parent-sarah'; // Default selected user profile ID
-let currentUserName = 'Sarah Jenkins';
-let currentRole = 'user'; // 'admin' or 'user' (Determined dynamically by authenticated account)
+let currentUserAccount = 'usr-admin-1'; // Default selected user profile ID
+let currentUserName = 'System Admin (Manager)';
+let currentRole = 'admin'; // 'admin' or 'user' (Determined dynamically by authenticated account)
 let userSelectedSchools = []; // List of school objects user has added
 let userRemovedSchoolIds = []; // Set of school IDs user has removed from recommendations
+let compareList = []; // List of schools currently selected for comparison
 
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
@@ -33,7 +34,7 @@ function updateAuthUserBadge() {
   }
 }
 
-// Load User Portfolio & Always Land Directly on Dashboard
+// Load User Portfolio
 async function loadUserPortfolio(userId) {
   try {
     const res = await fetch(`/api/user-portfolio/${userId}`);
@@ -47,12 +48,8 @@ async function loadUserPortfolio(userId) {
 
     updateUserSchoolsUI();
     fetchRecommendations();
-
-    // ALWAYS land directly on dashboard regardless of shortlist state
-    switchTab('dashboard');
   } catch (err) {
     console.error('Failed to load user portfolio:', err);
-    switchTab('dashboard');
   }
 }
 
@@ -127,7 +124,8 @@ function applyRoleUI() {
     // Always land directly on dashboard for standard users
     switchTab('dashboard');
   } else {
-    // Re-render schools table for admin mode
+    // Land on Directory view for admin mode
+    switchTab('directory');
     renderSchools();
   }
 }

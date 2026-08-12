@@ -26,13 +26,13 @@
 
       <!-- Navigation Tabs -->
       <nav class="nav-tabs">
-        <button id="tab-recommend-btn" class="nav-tab-btn active">
+        <button id="tab-recommend-btn" class="nav-tab-btn">
           <i class="fa-solid fa-house-user"></i> Parent Portal
         </button>
-        <button id="tab-directory-btn" class="nav-tab-btn admin-only" style="display: none;">
+        <button id="tab-directory-btn" class="nav-tab-btn admin-only active" style="display: inline-flex;">
           <i class="fa-solid fa-building-columns"></i> Directory View
         </button>
-        <button id="tab-admin-btn" class="nav-tab-btn admin-only" style="display: none;">
+        <button id="tab-admin-btn" class="nav-tab-btn admin-only" style="display: inline-flex;">
           <i class="fa-solid fa-user-shield"></i> Admin Portal
         </button>
       </nav>
@@ -42,9 +42,9 @@
         <div id="auth-user-badge" style="display: flex; align-items: center; gap: 0.55rem; background: #f8fafc; border: 1px solid #cbd5e1; padding: 0.35rem 0.75rem; border-radius: 8px;">
           <i class="fa-solid fa-circle-user" style="color: #4f46e5; font-size: 1.1rem;"></i>
           <div>
-            <div id="auth-user-name" style="font-size: 0.82rem; font-weight: 700; color: #0f172a; line-height: 1.2;">Sarah Jenkins</div>
+            <div id="auth-user-name" style="font-size: 0.82rem; font-weight: 700; color: #0f172a; line-height: 1.2;">System Admin (Manager)</div>
             <div style="font-size: 0.72rem; color: #64748b; font-weight: 600;">
-              Role: <span id="auth-user-role-pill" class="badge-ofsted" style="font-size: 0.68rem; padding: 0.05rem 0.35rem;">Standard User</span>
+              Role: <span id="auth-user-role-pill" class="badge-ofsted" style="font-size: 0.68rem; padding: 0.05rem 0.35rem; background: #fef3c7; color: #b45309; border-color: #fde68a;">Manager (Admin)</span>
             </div>
           </div>
         </div>
@@ -177,7 +177,7 @@
 
 
   <!-- PARENT / USER SELECTED SCHOOLS DASHBOARD VIEW -->
-  <div id="user-dashboard-content" style="display: block; max-width: 1400px; margin: 1.25rem auto; padding: 0 1.5rem;">
+  <div id="user-dashboard-content" style="display: none; max-width: 1400px; margin: 1.25rem auto; padding: 0 1.5rem;">
 
     <!-- Top Action Bar -->
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; background: white; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.03);">
@@ -257,7 +257,7 @@
 
 
   <!-- DIRECTORY TAB VIEW CONTENT -->
-  <div id="directory-tab-content" style="display: none;">
+  <div id="directory-tab-content" style="display: block;">
 
 
 
