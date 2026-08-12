@@ -548,7 +548,42 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
               <i class="fa-solid fa-magnifying-glass"></i> Scan for Duplicates
             </button>
           </div>
-          <p class="helper-text">Scan the entire school database for potential duplicate entries. The scanner compares school names and URNs using fuzzy matching to surface likely matches side-by-side.</p>
+          <p class="helper-text">Scan the entire school database for potential duplicate entries, or manually pick any two schools below to merge side-by-side.</p>
+
+          <!-- Manual Merge Selector Box with Typeaheads -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; margin-top: 0.8rem; margin-bottom: 1rem; overflow: visible; position: relative;">
+            <div style="font-weight: 700; font-size: 0.9rem; color: #334155; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem;">
+              <i class="fa-solid fa-hand-pointer" style="color: #7c3aed;"></i> Manually Select Any Two Schools to Merge:
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.8rem; align-items: end; overflow: visible;">
+              
+              <!-- Typeahead School A -->
+              <div style="position: relative; overflow: visible;">
+                <label style="font-size: 0.78rem; font-weight: 600; color: #64748b; display: block; margin-bottom: 0.25rem;">
+                  <i class="fa-solid fa-a" style="color: #2563eb;"></i> Primary Record A (Will be updated)
+                </label>
+                <input type="text" id="manual-merge-input-a" placeholder="Type school name or URN..." autocomplete="off" style="width: 100%; padding: 0.5rem 0.65rem; font-size: 0.85rem; border: 1px solid #cbd5e1; border-radius: 8px;">
+                <input type="hidden" id="manual-merge-school-a">
+                <div id="manual-merge-suggestions-a" style="position: absolute; top: 100%; left: 0; right: 0; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 240px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.25);"></div>
+              </div>
+
+              <!-- Typeahead School B -->
+              <div style="position: relative; overflow: visible;">
+                <label style="font-size: 0.78rem; font-weight: 600; color: #64748b; display: block; margin-bottom: 0.25rem;">
+                  <i class="fa-solid fa-b" style="color: #7c3aed;"></i> Candidate Record B (Will be deleted)
+                </label>
+                <input type="text" id="manual-merge-input-b" placeholder="Type school name or URN..." autocomplete="off" style="width: 100%; padding: 0.5rem 0.65rem; font-size: 0.85rem; border: 1px solid #cbd5e1; border-radius: 8px;">
+                <input type="hidden" id="manual-merge-school-b">
+                <div id="manual-merge-suggestions-b" style="position: absolute; top: 100%; left: 0; right: 0; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 240px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.25);"></div>
+              </div>
+
+              <div>
+                <button id="manual-merge-trigger-btn" class="btn btn-primary" style="width: 100%; background: #7c3aed; border-color: #7c3aed; font-size: 0.85rem; padding: 0.5rem 0.9rem;">
+                  <i class="fa-solid fa-code-merge"></i> Compare &amp; Merge Selected
+                </button>
+              </div>
+            </div>
+          </div>
 
           <!-- Scan Summary Pills -->
           <div id="dedup-scan-summary" style="display:none;" class="stats-pills-row">

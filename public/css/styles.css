@@ -850,6 +850,10 @@ body {
   color: #b45309;
 }
 
+.typeahead-item:hover {
+  background-color: #f1f5f9 !important;
+}
+
 /* De-duplicate Scanner — Pair Cards */
 .dedup-pair-card {
   border: 1px solid #e2e8f0;

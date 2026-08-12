@@ -1,0 +1,20 @@
+[
+  {
+    "pairKey": "sch-023483___sch-023484",
+    "idA": "sch-023483",
+    "idB": "sch-023484",
+    "reviewedAt": "2026-08-12T14:30:59.360Z"
+  },
+  {
+    "pairKey": "sch-004___sch-023483",
+    "idA": "sch-023483",
+    "idB": "sch-004",
+    "reviewedAt": "2026-08-12T14:37:06.445Z"
+  },
+  {
+    "pairKey": "sch-060___sch-csv-804857",
+    "idA": "sch-060",
+    "idB": "sch-csv-804857",
+    "reviewedAt": "2026-08-12T15:20:05.253Z"
+  }
+]

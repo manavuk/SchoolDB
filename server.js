@@ -327,9 +327,43 @@ app.post('/api/admin/merge-records', (req, res) => {
 
 
 
+const REVIEWED_PAIRS_FILE = path.join(__dirname, 'data', 'reviewed_pairs.json');
+
+// Helper to read reviewed pairs
+function readReviewedPairs() {
+  try {
+    if (!fs.existsSync(REVIEWED_PAIRS_FILE)) {
+      return [];
+    }
+    const raw = fs.readFileSync(REVIEWED_PAIRS_FILE, 'utf8');
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Error reading reviewed pairs:', err);
+    return [];
+  }
+}
+
+// Helper to write reviewed pairs
+function writeReviewedPairs(data) {
+  try {
+    fs.writeFileSync(REVIEWED_PAIRS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    console.error('Error writing reviewed pairs:', err);
+    return false;
+  }
+}
+
+// Helper to construct normalized key for a pair of IDs
+function getPairKey(id1, id2) {
+  return [String(id1), String(id2)].sort().join('___');
+}
+
 // GET /api/admin/scan-duplicates - Scan entire database for fuzzy-duplicate pairs
 app.get('/api/admin/scan-duplicates', (req, res) => {
   const schools = readData();
+  const reviewedList = readReviewedPairs();
+  const reviewedSet = new Set(reviewedList.map(item => item.pairKey));
 
   // Helper: normalise a name for comparison
   const norm = str => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
@@ -363,6 +397,12 @@ app.get('/api/admin/scan-duplicates', (req, res) => {
       const a = schools[i];
       const b = schools[j];
 
+      // Exclude if already marked reviewed
+      const key = getPairKey(a.id, b.id);
+      if (reviewedSet.has(key)) {
+        continue;
+      }
+
       // Gender conflict check: if one is strictly Boys-only and the other is strictly Girls-only, they cannot be duplicates
       const gA = String(a.gender || '').trim().toLowerCase();
       const gB = String(b.gender || '').trim().toLowerCase();
@@ -384,7 +424,8 @@ app.get('/api/admin/scan-duplicates', (req, res) => {
           similarity: urnMatch ? 1 : parseFloat(nameSim.toFixed(3)),
           matchType: urnMatch ? 'URN Match' : nameSim === 1 ? 'Exact Name' : 'Fuzzy Name',
           recordA: a,
-          recordB: b
+          recordB: b,
+          pairKey: key
         });
       }
     }
@@ -398,6 +439,32 @@ app.get('/api/admin/scan-duplicates', (req, res) => {
     pairsFound: pairs.length,
     pairs
   });
+});
+
+// POST /api/admin/mark-reviewed - Mark a duplicate pair as reviewed (not a duplicate)
+app.post('/api/admin/mark-reviewed', (req, res) => {
+  const { idA, idB } = req.body;
+
+  if (!idA || !idB) {
+    return res.status(400).json({ error: 'idA and idB are required' });
+  }
+
+  const pairKey = getPairKey(idA, idB);
+  const reviewed = readReviewedPairs();
+
+  if (!reviewed.some(r => r.pairKey === pairKey)) {
+    reviewed.push({
+      pairKey,
+      idA,
+      idB,
+      reviewedAt: new Date().toISOString()
+    });
+    if (!writeReviewedPairs(reviewed)) {
+      return res.status(500).json({ error: 'Failed to save reviewed pair status' });
+    }
+  }
+
+  res.json({ message: 'Duplicate pair marked as reviewed successfully', pairKey });
 });
 
 // DELETE /api/admin/schools/:id - Delete a school record (used when merging to eliminate the duplicate)

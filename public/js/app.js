@@ -18,6 +18,7 @@ async function initApp() {
   await loadUserPortfolio(currentUserAccount);
   updateAuthUserBadge();
   applyRoleUI();
+  populateManualMergeDropdowns();
 }
 
 // Update Header Authenticated User Badge & Role Indicator
@@ -190,6 +191,76 @@ async function fetchStats() {
 }
 
 
+// Setup typeahead search input for school selection
+function setupMergeTypeahead(inputId, hiddenId, containerId) {
+  const inputEl = document.getElementById(inputId);
+  const hiddenEl = document.getElementById(hiddenId);
+  const suggestionsEl = document.getElementById(containerId);
+
+  if (!inputEl || !hiddenEl || !suggestionsEl) return;
+
+  // Render suggestion popup based on query
+  const doSearch = async (query = '') => {
+    const q = query.toLowerCase().trim();
+    try {
+      const res = await fetch(`/api/schools?search=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      const matches = data.schools || [];
+
+      if (matches.length === 0) {
+        suggestionsEl.innerHTML = '<div style="padding:0.6rem 0.8rem; color:#94a3b8; font-size:0.85rem;">No matching schools found</div>';
+        suggestionsEl.style.display = 'block';
+        return;
+      }
+
+      suggestionsEl.innerHTML = matches.slice(0, 50).map(s => {
+        const laStr = s.la ? ` (${s.la})` : '';
+        const urnStr = s.urn ? ` [URN: ${s.urn}]` : '';
+        const escName = (s.name || '').replace(/"/g, '&quot;');
+        return `
+          <div class="typeahead-item" data-id="${s.id}" data-name="${escName}${laStr}" style="padding:0.6rem 0.85rem; border-bottom:1px solid #f1f5f9; cursor:pointer; font-size:0.85rem; background:#ffffff;">
+            <strong style="color:#1e293b; display:block;">${s.name}</strong>
+            <span style="color:#64748b; font-size:0.78rem;">${laStr}${urnStr}</span>
+          </div>`;
+      }).join('');
+
+      suggestionsEl.style.display = 'block';
+
+      suggestionsEl.querySelectorAll('.typeahead-item').forEach(item => {
+        item.onmousedown = (e) => {
+          e.preventDefault();
+          hiddenEl.value = item.dataset.id;
+          inputEl.value = item.dataset.name;
+          inputEl.dataset.selectedId = item.dataset.id;
+          suggestionsEl.style.display = 'none';
+        };
+      });
+    } catch (err) {
+      console.error('Typeahead search error:', err);
+    }
+  };
+
+  inputEl.onfocus = () => doSearch(inputEl.value);
+  inputEl.onclick = () => doSearch(inputEl.value);
+  inputEl.oninput = (e) => {
+    hiddenEl.value = '';
+    delete inputEl.dataset.selectedId;
+    doSearch(e.target.value);
+  };
+
+  document.addEventListener('click', (e) => {
+    if (!inputEl.contains(e.target) && !suggestionsEl.contains(e.target)) {
+      suggestionsEl.style.display = 'none';
+    }
+  });
+}
+
+// Populate / initialize manual merge typeahead inputs
+function populateManualMergeDropdowns() {
+  setupMergeTypeahead('manual-merge-input-a', 'manual-merge-school-a', 'manual-merge-suggestions-a');
+  setupMergeTypeahead('manual-merge-input-b', 'manual-merge-school-b', 'manual-merge-suggestions-b');
+}
+
 // Fetch schools based on filters
 async function loadSchools() {
   const search = document.getElementById('search-input').value;
@@ -219,6 +290,9 @@ async function loadSchools() {
 
     document.getElementById('results-num').textContent = data.total;
     renderSchools();
+    if (typeof populateManualMergeDropdowns === 'function') {
+      populateManualMergeDropdowns();
+    }
   } catch (err) {
     console.error('Error fetching schools list:', err);
   }
@@ -643,10 +717,16 @@ function setupEventListeners() {
   });
 
   // Compare Modal Trigger & Close
-  document.getElementById('compare-bar-btn').addEventListener('click', openCompareModal);
-  document.getElementById('modal-close-compare').addEventListener('click', () => {
-    document.getElementById('compare-modal').style.display = 'none';
-  });
+  const compareBarBtn = document.getElementById('compare-bar-btn');
+  if (compareBarBtn) compareBarBtn.addEventListener('click', openCompareModal);
+
+  const modalCloseCompare = document.getElementById('modal-close-compare');
+  if (modalCloseCompare) {
+    modalCloseCompare.addEventListener('click', () => {
+      const compareModal = document.getElementById('compare-modal');
+      if (compareModal) compareModal.style.display = 'none';
+    });
+  }
 
   // Add / Edit School Form Submit Handler
   document.getElementById('add-school-form').addEventListener('submit', async (e) => {
@@ -865,9 +945,19 @@ async function runDedupScan() {
       leftEl.appendChild(badge);
       leftEl.appendChild(nameWrap);
 
-      // --- Right side: Merge button + Chevron ---
+      // --- Right side: Mark Reviewed button + Merge button + Chevron ---
       const rightEl = document.createElement('div');
       rightEl.style.cssText = 'display:flex; align-items:center; gap:0.5rem; flex-shrink:0;';
+
+      const reviewBtn = document.createElement('button');
+      reviewBtn.className = 'btn btn-outline';
+      reviewBtn.style.cssText = 'font-size:0.78rem; padding:0.35rem 0.75rem; color:#059669; border-color:#a7f3d0; background:#ecfdf5;';
+      reviewBtn.innerHTML = '<i class="fa-solid fa-check"></i> Mark Reviewed';
+      reviewBtn.title = 'Mark pair as reviewed (not a duplicate) so it won\'t appear in future scans';
+      reviewBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        markPairReviewed(pair.recordA.id, pair.recordB.id, pair.recordA.name, pair.recordB.name);
+      });
 
       const mergeBtn = document.createElement('button');
       mergeBtn.className = 'btn btn-primary';
@@ -882,6 +972,7 @@ async function runDedupScan() {
       chevron.className = 'fa-solid fa-chevron-down dedup-chevron';
       chevron.id = `dedup-chevron-${idx}`;
 
+      rightEl.appendChild(reviewBtn);
       rightEl.appendChild(mergeBtn);
       rightEl.appendChild(chevron);
 
@@ -923,6 +1014,28 @@ function toggleDedupPair(idx) {
   const isOpen  = body.style.display !== 'none';
   body.style.display    = isOpen ? 'none' : 'block';
   chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+}
+
+// Mark a duplicate pair as reviewed so it will not show in future scan results
+async function markPairReviewed(idA, idB, nameA, nameB) {
+  try {
+    const res = await fetch('/api/admin/mark-reviewed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idA, idB })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      showToast(`Marked recommendation reviewed: ${nameA} vs ${nameB}. Pair will no longer appear as a duplicate.`, 'success', 5000);
+      await runDedupScan();
+    } else {
+      showToast('Failed to mark pair as reviewed: ' + (data.error || 'Server error'), 'error');
+    }
+  } catch (err) {
+    console.error('Error marking pair reviewed:', err);
+    showToast('Error marking pair as reviewed.', 'error');
+  }
 }
 
 // Render a mini field-comparison table inside the pair card
@@ -1084,14 +1197,88 @@ async function confirmDbMerge() {
     dbMergeTarget = null;
 
     // Refresh data and re-run scan to update UI
+    window._allSchoolsList = null;
     await fetchStats();
     await loadSchools();
-    await runDedupScan();
+    if (document.getElementById('dedup-scan-results').style.display !== 'none') {
+      await runDedupScan();
+    }
 
   } catch (err) {
     console.error('DB merge error:', err);
     showToast('Failed to complete merge operation.', 'error');
   }
+}
+
+// Fetch and cache all schools list for typeaheads
+async function getAllSchoolsList() {
+  if (!window._allSchoolsList) {
+    const res = await fetch('/api/schools');
+    const data = await res.json();
+    window._allSchoolsList = data.schools || [];
+  }
+  return window._allSchoolsList;
+}
+
+// Pre-select School A from School Details modal
+function preselectMergeSchoolA(school) {
+  const inputA = document.getElementById('manual-merge-input-a');
+  const hiddenA = document.getElementById('manual-merge-school-a');
+  if (inputA && hiddenA && school) {
+    hiddenA.value = school.id;
+    inputA.dataset.selectedId = school.id;
+    const laStr = school.la ? ` (${school.la})` : '';
+    inputA.value = `${school.name}${laStr}`;
+  }
+}
+
+// Open merge modal for two manually selected schools
+async function openManualMergeModal() {
+  const hiddenA = document.getElementById('manual-merge-school-a');
+  const hiddenB = document.getElementById('manual-merge-school-b');
+  const inputA = document.getElementById('manual-merge-input-a');
+  const inputB = document.getElementById('manual-merge-input-b');
+
+  const idA = (hiddenA && hiddenA.value) || (inputA && inputA.dataset.selectedId) || '';
+  const idB = (hiddenB && hiddenB.value) || (inputB && inputB.dataset.selectedId) || '';
+
+  if (!idA || !idB) {
+    showToast('Please select both School A and School B from the search suggestions to perform a merge.', 'warn');
+    return;
+  }
+
+  if (idA === idB) {
+    showToast('School A and School B cannot be the same school record.', 'warn');
+    return;
+  }
+
+  let list = window._allSchoolsList;
+  if (!list) {
+    const res = await fetch('/api/schools');
+    const data = await res.json();
+    list = data.schools || [];
+    window._allSchoolsList = list;
+  }
+
+  const recA = list.find(s => s.id === idA);
+  const recB = list.find(s => s.id === idB);
+
+  if (!recA || !recB) {
+    showToast('One or both selected school records could not be loaded.', 'error');
+    return;
+  }
+
+  // Create temporary pair and trigger DB merge modal
+  if (!window._dedupPairs) window._dedupPairs = [];
+  const pairIdx = window._dedupPairs.length;
+  window._dedupPairs.push({
+    recordA: recA,
+    recordB: recB,
+    similarity: 1.0,
+    matchType: 'Manual Selection'
+  });
+
+  openDbMergeModal(pairIdx, idA, idB);
 }
 
   // --- ADMIN BULK IMPORT EVENT HANDLERS ---
@@ -1227,6 +1414,12 @@ async function confirmDbMerge() {
 
   // Scan for Duplicates button
   document.getElementById('run-dedup-scan-btn').addEventListener('click', runDedupScan);
+
+  // Manual Merge button
+  const manualMergeBtn = document.getElementById('manual-merge-trigger-btn');
+  if (manualMergeBtn) {
+    manualMergeBtn.addEventListener('click', openManualMergeModal);
+  }
 
   // Confirm Merge Handler — routes to either DB-wide or bulk-import merge
   document.getElementById('modal-confirm-merge').addEventListener('click', async () => {
@@ -1728,13 +1921,30 @@ async function openSchoolDetail(id) {
         </div>
       </div>
 
-      <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap:wrap; border-top: 1px solid #e2e8f0; padding-top: 1rem;">
+      <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap:wrap; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 1rem;">
         ${school.website ? `<a href="${school.website}" target="_blank" class="btn btn-primary"><i class="fa-solid fa-globe"></i> Official Website</a>` : ''}
         ${school.compareSchoolPerformanceUrl ? `<a href="${school.compareSchoolPerformanceUrl}" target="_blank" class="btn btn-outline" style="color:#059669; border-color:#6ee7b7;"><i class="fa-solid fa-chart-bar"></i> Compare School Performance</a>` : ''}
         ${school.phone ? `<a href="tel:${school.phone}" class="btn btn-outline"><i class="fa-solid fa-phone"></i> ${school.phone}</a>` : ''}
         ${school.email ? `<a href="mailto:${school.email}" class="btn btn-outline"><i class="fa-solid fa-envelope"></i> Email School</a>` : ''}
+        ${currentRole === 'admin' ? `
+          <button type="button" class="btn btn-primary" id="detail-merge-btn" style="background:#7c3aed; border-color:#7c3aed; margin-left:auto;">
+            <i class="fa-solid fa-code-merge"></i> Merge This School Record
+          </button>
+        ` : ''}
       </div>
     `;
+
+    // Wire merge listener for Admin role
+    const detailMergeBtn = document.getElementById('detail-merge-btn');
+    if (detailMergeBtn && currentRole === 'admin') {
+      detailMergeBtn.addEventListener('click', () => {
+        document.getElementById('detail-modal').style.display = 'none';
+        switchTab('admin');
+        preselectMergeSchoolA(school);
+        const card = document.getElementById('merge-dedup-card');
+        if (card) card.scrollIntoView({ behavior: 'smooth' });
+      });
+    }
 
     // Wire toggle listeners for Admin role
     const hotBtn = document.getElementById('toggle-hot-btn');
