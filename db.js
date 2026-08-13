@@ -2,14 +2,65 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 
-const DB_PATH = path.join(__dirname, 'data', 'schooldb.sqlite');
+function resolveDatabasePath() {
+  if (process.env.DB_PATH) {
+    return process.env.DB_PATH;
+  }
+
+  const isServerless = Boolean(
+    process.env.LAMBDA_TASK_ROOT ||
+    process.env.VERCEL ||
+    process.env.NETLIFY ||
+    process.env.AWS_EXECUTION_ENV ||
+    __dirname.startsWith('/var/task')
+  );
+
+  if (isServerless) {
+    const tmpDbPath = path.join('/tmp', 'schooldb.sqlite');
+    const seedDbPath = path.join(__dirname, 'data', 'schooldb.sqlite');
+
+    // Copy initial seed DB from read-only /var/task to writable /tmp if /tmp DB doesn't exist
+    try {
+      if (fs.existsSync(seedDbPath) && !fs.existsSync(tmpDbPath)) {
+        fs.copyFileSync(seedDbPath, tmpDbPath);
+      }
+    } catch (err) {
+      console.warn('Warning: Could not copy seed database to /tmp:', err.message);
+    }
+
+    return tmpDbPath;
+  }
+
+  const localDataDir = path.join(__dirname, 'data');
+  if (!fs.existsSync(localDataDir)) {
+    try {
+      fs.mkdirSync(localDataDir, { recursive: true });
+    } catch (e) {}
+  }
+  return path.join(localDataDir, 'schooldb.sqlite');
+}
+
+const DB_PATH = resolveDatabasePath();
 
 let db = null;
 
 function getDb() {
   if (!db) {
+    const targetDir = path.dirname(DB_PATH);
+    if (!fs.existsSync(targetDir)) {
+      try {
+        fs.mkdirSync(targetDir, { recursive: true });
+      } catch (e) {}
+    }
+
     db = new DatabaseSync(DB_PATH);
-    db.exec('PRAGMA journal_mode = WAL;');
+
+    try {
+      db.exec('PRAGMA journal_mode = WAL;');
+    } catch (e) {
+      try { db.exec('PRAGMA journal_mode = DELETE;'); } catch (err) {}
+    }
+
     initTables();
   }
   return db;
