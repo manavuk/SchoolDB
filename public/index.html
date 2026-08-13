@@ -13,6 +13,20 @@
   <link rel="alternate icon" type="image/png" href="favicon.png">
   <link rel="apple-touch-icon" href="favicon.png">
   <link rel="stylesheet" href="css/styles.css">
+  <script>
+    (function() {
+      const hasLocal = localStorage.getItem('school_db_session_id');
+      const hasCookie = document.cookie && document.cookie.indexOf('school_db_session_id=') !== -1;
+      if (hasLocal || hasCookie) {
+        document.documentElement.classList.add('session-pending');
+      }
+    })();
+  </script>
+  <style>
+    html.session-pending #auth-gatekeeper-overlay {
+      display: none !important;
+    }
+  </style>
 </head>
 <body>
 
@@ -916,7 +930,7 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
 
 
   <!-- Mandatory Unauthenticated Gatekeeper & Google SSO Login Screen Overlay -->
-  <div id="auth-gatekeeper-overlay" class="auth-gatekeeper-overlay" style="display: flex;">
+  <div id="auth-gatekeeper-overlay" class="auth-gatekeeper-overlay" style="display: none;">
     <div class="auth-gatekeeper-card">
       <div class="auth-gatekeeper-banner">
         <div class="auth-gatekeeper-icon">
@@ -950,6 +964,7 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
         </label>
         <select id="gatekeeper-demo-select" class="role-dropdown" style="width: 100%; padding: 0.55rem; font-size: 0.85rem; font-weight: 600; border-radius: 8px;">
           <option value="">-- Select Demo Account --</option>
+          <option value="aa@bb.cc|admin">Super Admin (aa@bb.cc)</option>
           <option value="sarah@gmail.com|user">Sarah Jenkins (Parent)</option>
           <option value="david@gmail.com|user">David &amp; Emma Miller (Parent)</option>
           <option value="priya@gmail.com|user">Priya Patel (Parent)</option>

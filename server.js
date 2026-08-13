@@ -678,8 +678,34 @@ app.post('/api/recommendation-settings', (req, res) => {
   }
 });
 
-// Session Store & Permissions Configuration
+// Helper to parse cookies from incoming HTTP request
+function parseCookies(req) {
+  const list = {};
+  const rc = req.headers.cookie;
+  if (rc) {
+    rc.split(';').forEach(cookie => {
+      const parts = cookie.split('=');
+      if (parts.length > 0) {
+        const key = parts.shift().trim();
+        list[key] = decodeURIComponent(parts.join('='));
+      }
+    });
+  }
+  return list;
+}
+
+function setSessionCookie(res, sessionId) {
+  // Set 30-day session cookie (2,592,000 seconds = 30 days) compatible with HTTP localhost
+  res.setHeader('Set-Cookie', `school_db_session_id=${sessionId}; Path=/; Max-Age=2592000; SameSite=Lax`);
+}
+
+function clearSessionCookie(res) {
+  res.setHeader('Set-Cookie', `school_db_session_id=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`);
+}
+
+// Session Store & Permissions Configuration (30-day Persistent Sessions)
 const DEFAULT_PERMISSIONS = ['parent:recommendations', 'parent:portfolio'];
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const activeSessions = new Map();
 
 function createSession(user) {
@@ -694,15 +720,33 @@ function createSession(user) {
     email: user.email,
     permissions
   };
+
+  // Persist session in SQLite (30 days) and in-memory Map
+  db.saveSession(sessionId, sessionUser, THIRTY_DAYS_MS);
   activeSessions.set(sessionId, { user: sessionUser, createdAt: new Date() });
   return { sessionId, user: sessionUser };
 }
 
 function getSessionUser(req) {
-  const sessionId = req.headers['x-session-id'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.sessionId;
+  const cookies = parseCookies(req);
+  const sessionId = req.headers['x-session-id'] ||
+                    req.headers['authorization']?.replace('Bearer ', '') ||
+                    req.query.sessionId ||
+                    cookies['school_db_session_id'];
   if (!sessionId) return null;
-  const sess = activeSessions.get(sessionId);
-  return sess ? sess.user : null;
+
+  // 1. Check in-memory store
+  const cachedSess = activeSessions.get(sessionId);
+  if (cachedSess) return cachedSess.user;
+
+  // 2. Fallback to SQLite sessions table (restores session across page refresh & server restarts)
+  const dbSess = db.getSession(sessionId);
+  if (dbSess && dbSess.user) {
+    activeSessions.set(sessionId, { user: dbSess.user, createdAt: new Date(dbSess.createdAt) });
+    return dbSess.user;
+  }
+
+  return null;
 }
 
 // Middleware to enforce authentication
@@ -735,11 +779,24 @@ function requirePermission(permissionName) {
 
 // GET /api/auth/me - Check current active session
 app.get('/api/auth/me', (req, res) => {
+  const cookies = parseCookies(req);
+  const sessionId = req.headers['x-session-id'] ||
+                    req.headers['authorization']?.replace('Bearer ', '') ||
+                    req.query.sessionId ||
+                    cookies['school_db_session_id'];
+
+  if (!sessionId) {
+    return res.status(401).json({ authenticated: false, error: 'No active session token provided' });
+  }
+
   const user = getSessionUser(req);
   if (!user) {
-    return res.status(401).json({ authenticated: false, error: 'No active session' });
+    clearSessionCookie(res);
+    return res.status(401).json({ authenticated: false, error: 'Session expired or invalidated' });
   }
-  res.json({ authenticated: true, user });
+
+  setSessionCookie(res, sessionId);
+  res.json({ authenticated: true, sessionId, user });
 });
 
 // POST /api/auth/google - Authenticate via Google OAuth / SSO
@@ -766,6 +823,7 @@ app.post('/api/auth/google', (req, res) => {
   }
 
   const session = createSession(user);
+  setSessionCookie(res, session.sessionId);
   res.json({
     message: 'Google authentication successful',
     sessionId: session.sessionId,
@@ -803,6 +861,7 @@ app.get('/api/auth/google/callback', (req, res) => {
   }
 
   const session = createSession(user);
+  setSessionCookie(res, session.sessionId);
   res.redirect(`/?sessionId=${session.sessionId}&auth=success`);
 });
 
@@ -831,6 +890,7 @@ app.post('/api/auth/signup', (req, res) => {
 
   const created = db.insertUser(newUser);
   const session = createSession(created);
+  setSessionCookie(res, session.sessionId);
 
   res.json({
     message: 'Registration successful',
@@ -854,6 +914,7 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   const session = createSession(user);
+  setSessionCookie(res, session.sessionId);
 
   res.json({
     message: 'Login successful',
@@ -864,10 +925,18 @@ app.post('/api/auth/login', (req, res) => {
 
 // POST /api/auth/logout - End session
 app.post('/api/auth/logout', (req, res) => {
-  const sessionId = req.headers['x-session-id'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.sessionId || req.body?.sessionId;
+  const cookies = parseCookies(req);
+  const sessionId = req.headers['x-session-id'] ||
+                    req.headers['authorization']?.replace('Bearer ', '') ||
+                    req.query.sessionId ||
+                    req.body?.sessionId ||
+                    cookies['school_db_session_id'];
+
   if (sessionId) {
     activeSessions.delete(sessionId);
+    db.deleteSession(sessionId);
   }
+  clearSessionCookie(res);
   res.json({ success: true, message: 'Signed out successfully' });
 });
 

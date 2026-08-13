@@ -1,18 +1,18 @@
 [
   {
-    "id": "usr-admin-1",
-    "email": "admin@edulondon.sch.uk",
+    "id": "admin-super",
+    "email": "aa@bb.cc",
     "password": "admin",
-    "name": "System Admin (Manager)",
-    "role": "admin",
-    "createdAt": "2026-08-12T10:35:42.970Z"
+    "name": "Super Admin (aa@bb.cc)",
+    "permissions": ["directory:view", "admin:portal", "admin:edit", "admin:delete", "parent:recommendations", "parent:portfolio"],
+    "createdAt": "2026-08-12T10:00:00.000Z"
   },
   {
     "id": "parent-sarah",
     "email": "sarah@gmail.com",
     "password": "user",
     "name": "Sarah Jenkins",
-    "role": "user",
+    "permissions": ["parent:recommendations", "parent:portfolio"],
     "createdAt": "2026-08-12T10:35:42.971Z"
   },
   {
@@ -20,7 +20,7 @@
     "email": "david@gmail.com",
     "password": "user",
     "name": "David & Emma Miller",
-    "role": "user",
+    "permissions": ["parent:recommendations", "parent:portfolio"],
     "createdAt": "2026-08-12T10:35:42.971Z"
   },
   {
@@ -28,15 +28,15 @@
     "email": "priya@gmail.com",
     "password": "user",
     "name": "Priya Patel",
-    "role": "user",
+    "permissions": ["parent:recommendations", "parent:portfolio"],
     "createdAt": "2026-08-12T10:35:42.971Z"
   },
   {
-    "id": "usr-1786633535839",
-    "name": "aa",
-    "email": "aa@bb.cc",
-    "password": "aa@bb.cc",
-    "role": "user",
-    "createdAt": "2026-08-13T15:05:35.839Z"
+    "id": "usr-admin-1",
+    "email": "admin@edulondon.sch.uk",
+    "password": "admin",
+    "name": "System User (admin@edulondon.sch.uk)",
+    "permissions": ["parent:recommendations", "parent:portfolio"],
+    "createdAt": "2026-08-12T10:35:42.970Z"
   }
 ]

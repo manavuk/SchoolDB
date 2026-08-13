@@ -42,13 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function initApp() {
-  await fetchStats();
-  await loadSchools();
-  setupEventListeners();
-  loadRecWeights();
-  populateManualMergeDropdowns();
-
-  // Check URL query parameters for session ID (e.g. after Google OAuth redirect)
+  // 1. Immediately check URL query parameters for session ID (e.g. after Google OAuth redirect)
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.has('sessionId')) {
     currentSessionId = urlParams.get('sessionId');
@@ -56,44 +50,80 @@ async function initApp() {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
-  // Validate session with backend
+  // 2. Validate active session immediately before heavy data loading
   const authenticated = await checkActiveSession();
 
   if (authenticated) {
     hideGatekeeperLoginScreen();
-    await loadUserPortfolio(currentUserAccount);
-    applyPermissionsUI();
   } else {
     showGatekeeperLoginScreen();
   }
+
+  // 3. Register DOM event listeners
+  setupEventListeners();
+
+  // 4. Fetch user portfolio & load application data
+  if (authenticated) {
+    await loadUserPortfolio(currentUserAccount);
+    applyPermissionsUI();
+  }
+
+  await fetchStats();
+  await loadSchools();
+  loadRecWeights();
+  populateManualMergeDropdowns();
 }
 
 // Check active session with backend /api/auth/me
 async function checkActiveSession() {
-  if (!currentSessionId) return false;
+  // 1. Try localStorage token first
+  let token = currentSessionId || localStorage.getItem('school_db_session_id');
+
+  // 2. Fallback to document.cookie on localhost
+  if (!token) {
+    const match = document.cookie.match(/school_db_session_id=([^;]+)/);
+    if (match) token = match[1];
+  }
+
+  if (token) {
+    currentSessionId = token;
+    localStorage.setItem('school_db_session_id', token);
+  }
+
   try {
     const res = await fetch('/api/auth/me', {
-      headers: { 'x-session-id': currentSessionId }
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: token ? { 'x-session-id': token } : {}
     });
+
     if (res.ok) {
       const data = await res.json();
       if (data.authenticated && data.user) {
         currentUserAccount = data.user.id;
         currentUserName = data.user.name;
         currentPermissions = Array.isArray(data.user.permissions) ? data.user.permissions : [];
+        if (data.sessionId) {
+          currentSessionId = data.sessionId;
+          localStorage.setItem('school_db_session_id', currentSessionId);
+          document.cookie = `school_db_session_id=${currentSessionId}; Path=/; Max-Age=2592000; SameSite=Lax`;
+        }
         return true;
       }
     }
   } catch (err) {
     console.error('Session check failed:', err);
   }
+
   currentSessionId = null;
   localStorage.removeItem('school_db_session_id');
+  document.cookie = 'school_db_session_id=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
   return false;
 }
 
 // Show full-screen unauthenticated login screen
 function showGatekeeperLoginScreen() {
+  document.documentElement.classList.remove('session-pending');
   const overlay = document.getElementById('auth-gatekeeper-overlay');
   if (overlay) overlay.style.display = 'flex';
 
@@ -108,6 +138,7 @@ function showGatekeeperLoginScreen() {
 
 // Hide gatekeeper login screen on successful authentication
 function hideGatekeeperLoginScreen() {
+  document.documentElement.classList.remove('session-pending');
   const overlay = document.getElementById('auth-gatekeeper-overlay');
   if (overlay) overlay.style.display = 'none';
   const loginModal = document.getElementById('auth-login-modal');
@@ -121,6 +152,7 @@ function hideGatekeeperLoginScreen() {
 async function setAuthenticatedSession(sessionData, toastMessage) {
   currentSessionId = sessionData.sessionId;
   localStorage.setItem('school_db_session_id', currentSessionId);
+  document.cookie = `school_db_session_id=${currentSessionId}; Path=/; Max-Age=2592000; SameSite=Lax`;
 
   currentUserAccount = sessionData.user.id;
   currentUserName = sessionData.user.name;
@@ -150,6 +182,7 @@ async function logoutSession() {
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
           'x-session-id': currentSessionId,
@@ -162,7 +195,7 @@ async function logoutSession() {
     }
   }
 
-  // 1. Purge all session credentials & user state from memory
+  // 1. Purge all session credentials & user state from memory and storage
   currentSessionId = null;
   currentUserAccount = null;
   currentUserName = '';
@@ -171,6 +204,7 @@ async function logoutSession() {
   userRemovedSchoolIds = [];
   compareList = [];
   localStorage.removeItem('school_db_session_id');
+  document.cookie = 'school_db_session_id=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
 
   // 2. Clear input fields in login/signup forms
   const gatekeeperEmail = document.getElementById('gatekeeper-email');

@@ -86,6 +86,20 @@ function initTables() {
     // Column already exists
   }
 
+  // Ensure Super Admin user aa@bb.cc exists with full admin capabilities
+  const adminPerms = JSON.stringify(['directory:view', 'admin:portal', 'admin:edit', 'admin:delete', 'parent:recommendations', 'parent:portfolio']);
+  try {
+    sqlite.prepare(`
+      INSERT INTO users (id, name, email, password, permissions, createdAt)
+      VALUES ('admin-super', 'Super Admin (aa@bb.cc)', 'aa@bb.cc', 'admin', ?, ?)
+      ON CONFLICT(email) DO UPDATE SET
+        permissions = excluded.permissions,
+        name = 'Super Admin (aa@bb.cc)';
+    `).run(adminPerms, new Date().toISOString());
+  } catch (e) {
+    console.error('Error seeding aa@bb.cc admin user:', e);
+  }
+
   // 3. User Portfolios table
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS user_portfolios (
@@ -113,6 +127,17 @@ function initTables() {
     CREATE TABLE IF NOT EXISTS recommendation_settings (
       key TEXT PRIMARY KEY,
       weights TEXT NOT NULL
+    );
+  `);
+
+  // 6. Persistent Sessions table (30-day session lifetime)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      userJson TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      expiresAt TEXT NOT NULL
     );
   `);
 }
@@ -599,6 +624,50 @@ function saveRecSettings(weights) {
   return getRecSettings();
 }
 
+// Persistent Session Storage (30 days)
+function saveSession(sessionId, user, durationMs = 30 * 24 * 60 * 60 * 1000) {
+  const sqlite = getDb();
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + durationMs).toISOString();
+  const stmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO sessions (id, userId, userJson, createdAt, expiresAt)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  stmt.run(sessionId, user.id, JSON.stringify(user), createdAt, expiresAt);
+  return { id: sessionId, user, createdAt, expiresAt };
+}
+
+function getSession(sessionId) {
+  const sqlite = getDb();
+  const stmt = sqlite.prepare('SELECT * FROM sessions WHERE id = ?');
+  const row = stmt.get(sessionId);
+  if (!row) return null;
+
+  // Check expiration
+  if (new Date(row.expiresAt) <= new Date()) {
+    deleteSession(sessionId);
+    return null;
+  }
+
+  try {
+    return {
+      id: row.id,
+      userId: row.userId,
+      user: JSON.parse(row.userJson),
+      createdAt: row.createdAt,
+      expiresAt: row.expiresAt
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function deleteSession(sessionId) {
+  const sqlite = getDb();
+  const stmt = sqlite.prepare('DELETE FROM sessions WHERE id = ?');
+  stmt.run(sessionId);
+}
+
 module.exports = {
   getDb,
   getAllSchools,
@@ -619,5 +688,8 @@ module.exports = {
   insertReviewedPair,
   insertReviewedPairsBulk,
   getRecSettings,
-  saveRecSettings
+  saveRecSettings,
+  saveSession,
+  getSession,
+  deleteSession
 };
