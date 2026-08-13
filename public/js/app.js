@@ -389,6 +389,7 @@ function switchTab(tabName) {
   } else if (tabName === 'admin' && canViewAdmin) {
     if (adminTabBtn) adminTabBtn.classList.add('active');
     if (adminContent) adminContent.style.display = 'block';
+    loadAdminFieldReports();
   } else if (tabName === 'directory' && canViewDirectory) {
     if (directoryTabBtn) directoryTabBtn.classList.add('active');
     if (directoryContent) directoryContent.style.display = 'block';
@@ -766,6 +767,69 @@ function setupEventListeners() {
     savePortBtn.addEventListener('click', saveUserPortfolio);
   }
 
+  // Save Recommendation Profile button
+  const saveRecProfileBtn = document.getElementById('btn-save-rec-profile');
+  if (saveRecProfileBtn) {
+    saveRecProfileBtn.addEventListener('click', saveUserRecProfile);
+  }
+
+  // Refresh Admin Field Error Audit button
+  const refreshReportsBtn = document.getElementById('refresh-field-reports-btn');
+  if (refreshReportsBtn) {
+    refreshReportsBtn.addEventListener('click', loadAdminFieldReports);
+  }
+
+  // Field Custom Override Form Submit
+  const overrideForm = document.getElementById('field-override-form');
+  if (overrideForm) {
+    overrideForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const sId = document.getElementById('override-school-id').value;
+      const fName = document.getElementById('override-field-name').value;
+      const origVal = document.getElementById('override-original-val').value;
+      const customVal = document.getElementById('override-custom-value-input').value.trim();
+
+      if (!customVal) return;
+
+      try {
+        const res = await fetch('/api/user-reports', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+          },
+          body: JSON.stringify({
+            schoolId: sId,
+            fieldName: fName,
+            status: 'down',
+            originalValue: origVal,
+            customValue: customVal
+          })
+        });
+
+        if (res.ok) {
+          document.getElementById('field-override-modal').style.display = 'none';
+          showToast('Updated custom field value in your personal records!', 'success');
+          openSchoolDetail(sId);
+        } else {
+          showToast('Failed to save custom value', 'error');
+        }
+      } catch (err) {
+        showToast('Error saving custom value', 'error');
+      }
+    });
+  }
+
+  const overrideClose = document.getElementById('override-modal-close');
+  const overrideCancel = document.getElementById('override-modal-cancel');
+  const hideOverrideModal = () => {
+    const modal = document.getElementById('field-override-modal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  if (overrideClose) overrideClose.onclick = hideOverrideModal;
+  if (overrideCancel) overrideCancel.onclick = hideOverrideModal;
+
   // Header Logout Button
   const logoutBtn = document.getElementById('auth-logout-btn');
   if (logoutBtn) {
@@ -1103,18 +1167,36 @@ function setupEventListeners() {
       name: document.getElementById('add-name').value,
       urn: document.getElementById('add-urn').value,
       la: document.getElementById('add-la').value,
+      region: document.getElementById('add-region').value,
+      address: document.getElementById('add-address').value,
       postcode: document.getElementById('add-postcode').value,
       schoolType: document.getElementById('add-type').value,
       gender: document.getElementById('add-gender').value,
-      pupilCount: document.getElementById('add-pupils').value,
+      ageRange: document.getElementById('add-age-range').value,
+      pupilCount: document.getElementById('add-pupils').value ? parseInt(document.getElementById('add-pupils').value, 10) : 0,
       ofstedRating: document.getElementById('add-ofsted').value,
-      gcseProgress8: document.getElementById('add-progress8').value,
-      gcseAttainment8: document.getElementById('add-attainment8').value,
+      gcseProgress8: document.getElementById('add-progress8').value !== '' ? parseFloat(document.getElementById('add-progress8').value) : null,
+      gcseAttainment8: document.getElementById('add-attainment8').value !== '' ? parseFloat(document.getElementById('add-attainment8').value) : null,
+      ebaccAveragePointScore: document.getElementById('add-ebacc').value !== '' ? parseFloat(document.getElementById('add-ebacc').value) : null,
       entranceExamType: document.getElementById('add-exam-type').value,
+      entranceExamDates: {
+        registrationOpen: document.getElementById('add-exam-reg-open').value || 'TBC',
+        registrationDeadline: document.getElementById('add-exam-reg-deadline').value || 'TBC',
+        examDate: document.getElementById('add-exam-date').value || 'TBC',
+        secondExamDate: document.getElementById('add-exam-second-date').value || 'TBC',
+        resultsDate: document.getElementById('add-exam-results-date').value || 'TBC',
+        interviewInfo: document.getElementById('add-exam-interview').value || '',
+        openEvents: document.getElementById('add-exam-open-events').value || '',
+        scholarships: document.getElementById('add-exam-scholarships').value || ''
+      },
       gcseSubjects: document.getElementById('add-subjects').value,
       admissionsPolicy: document.getElementById('add-policy').value,
+      description: document.getElementById('add-description').value,
+      phone: document.getElementById('add-phone').value,
+      email: document.getElementById('add-email').value,
       website: document.getElementById('add-website').value,
-      phone: document.getElementById('add-phone').value
+      hot: document.getElementById('add-hot').checked,
+      official: document.getElementById('add-official').checked
     };
 
     try {
@@ -2062,22 +2144,47 @@ async function openEditModal(id) {
     }
     const school = await res.json();
 
+    const dates = school.entranceExamDates || {};
+    const k = school.kpsDetails || {};
+    const p = school.pillaiDetails || {};
+
     document.getElementById('edit-school-id').value = school.id;
     document.getElementById('add-name').value = school.name || '';
     document.getElementById('add-urn').value = school.urn !== 'N/A' ? (school.urn || '') : '';
     document.getElementById('add-la').value = school.la || '';
+    document.getElementById('add-region').value = school.region || 'Greater London';
+    document.getElementById('add-address').value = school.address || '';
     document.getElementById('add-postcode').value = school.postcode || '';
     document.getElementById('add-type').value = school.schoolType || 'Comprehensive (Academy)';
     document.getElementById('add-gender').value = school.gender || 'Mixed';
+    document.getElementById('add-age-range').value = school.ageRange || '11-18';
     document.getElementById('add-pupils').value = school.pupilCount || '';
     document.getElementById('add-ofsted').value = school.ofstedRating || 'Good';
+    
     document.getElementById('add-progress8').value = school.gcseProgress8 !== null && school.gcseProgress8 !== undefined ? school.gcseProgress8 : '';
     document.getElementById('add-attainment8').value = school.gcseAttainment8 !== null && school.gcseAttainment8 !== undefined ? school.gcseAttainment8 : '';
+    document.getElementById('add-ebacc').value = school.ebaccAveragePointScore !== null && school.ebaccAveragePointScore !== undefined ? school.ebaccAveragePointScore : '';
+
+    // Entrance Exam & Key Dates Fields
     document.getElementById('add-exam-type').value = school.entranceExamType || '';
+    document.getElementById('add-exam-reg-open').value = p.registrationOpens || dates.registrationOpen || '';
+    document.getElementById('add-exam-reg-deadline').value = p.registrationDeadline || k.registrationCloseDate || dates.registrationDeadline || '';
+    document.getElementById('add-exam-date').value = p.firstExamDate || k.firstExamDate || dates.examDate || '';
+    document.getElementById('add-exam-second-date').value = p.secondExamDate || k.secondStageExamDate || dates.secondExamDate || '';
+    document.getElementById('add-exam-results-date').value = p.offersAcceptance || k.offerDate || dates.resultsDate || '';
+    document.getElementById('add-exam-interview').value = p.interview || k.interviewsDate || dates.interviewInfo || '';
+    document.getElementById('add-exam-open-events').value = p.openDayEvening || dates.openEvents || '';
+    document.getElementById('add-exam-scholarships').value = k.scholarshipsOffered || dates.scholarships || '';
+
+    // Other Details
     document.getElementById('add-subjects').value = Array.isArray(school.gcseSubjects) ? school.gcseSubjects.join(', ') : (school.gcseSubjects || '');
     document.getElementById('add-policy').value = school.admissionsPolicy || '';
-    document.getElementById('add-website').value = school.website || '';
+    document.getElementById('add-description').value = school.description || '';
     document.getElementById('add-phone').value = school.phone || '';
+    document.getElementById('add-email').value = school.email || '';
+    document.getElementById('add-website').value = school.website || '';
+    document.getElementById('add-hot').checked = Boolean(school.hot);
+    document.getElementById('add-official').checked = Boolean(school.official);
 
     document.getElementById('modal-title-text').innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Edit High School Record';
     document.getElementById('modal-subtitle-text').textContent = `Update specs and details for ${school.name}`;
@@ -2117,8 +2224,20 @@ async function openSchoolDetail(id) {
 
     const detailContent = document.getElementById('detail-modal-content');
 
-    const subjectsHtml = school.gcseSubjects && school.gcseSubjects.length > 0
-      ? school.gcseSubjects.map(sub => `<span class="subject-tag">${sub}</span>`).join('')
+    let subjectsArray = [];
+    if (Array.isArray(school.gcseSubjects)) {
+      subjectsArray = school.gcseSubjects;
+    } else if (typeof school.gcseSubjects === 'string' && school.gcseSubjects.trim()) {
+      try {
+        const parsed = JSON.parse(school.gcseSubjects);
+        subjectsArray = Array.isArray(parsed) ? parsed : school.gcseSubjects.split(',').map(s => s.trim()).filter(Boolean);
+      } catch (e) {
+        subjectsArray = school.gcseSubjects.split(',').map(s => s.trim()).filter(Boolean);
+      }
+    }
+
+    const subjectsHtml = subjectsArray.length > 0
+      ? subjectsArray.map(sub => `<span class="subject-tag">${sub}</span>`).join('')
       : '<span style="color:#94a3b8;">No subjects cataloged</span>';
 
     const dates = school.entranceExamDates || {};
@@ -2149,6 +2268,41 @@ async function openSchoolDetail(id) {
     const scholarships = k.scholarshipsOffered || null;
     const notes = p.notes || null;
 
+    const userReports = school.userReports || {};
+    const userOverrides = school.userCustomOverrides || {};
+
+    const renderWidget = (fieldName, fieldLabel, origValue) => {
+      const report = userReports[fieldName] || null;
+      const isUp = report && report.status === 'up';
+      const isDown = report && report.status === 'down';
+      const customVal = userOverrides[fieldName] !== undefined ? userOverrides[fieldName] : (report && report.customValue ? report.customValue : null);
+      const isCustom = customVal !== null && customVal !== undefined && customVal !== '';
+      const displayVal = isCustom ? customVal : (origValue !== null && origValue !== undefined && origValue !== '' ? origValue : 'N/A');
+
+      return `
+        <div class="field-rating-row" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; width: 100%; margin-bottom: 0.35rem; font-size: 0.85rem; color: #475569;">
+          <div style="flex: 1; word-break: break-word;">
+            <strong>${fieldLabel}:</strong> ${displayVal}
+            ${isCustom ? `
+              <span class="badge-custom-value" style="background:#fff7ed; color:#c2410c; border:1px solid #ffedd5; font-size:0.72rem; font-weight:700; padding:0.15rem 0.45rem; border-radius:999px; margin-left:0.35rem; display:inline-flex; align-items:center; gap:0.2rem;" title="Custom value updated in your personal record">
+                <i class="fa-solid fa-user-pen"></i> Custom Value Updated by You
+              </span>
+              <button type="button" class="btn-reset-field-report" data-school-id="${school.id}" data-field-name="${fieldName}" style="background:none; border:none; color:#ef4444; font-size:0.75rem; text-decoration:underline; cursor:pointer; margin-left:0.35rem;">Reset</button>
+            ` : ''}
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 0.25rem;">
+            <button type="button" class="btn-field-thumb btn-thumb-up ${isUp ? 'active' : ''}" data-school-id="${school.id}" data-field-name="${fieldName}" data-label="${fieldLabel}" data-orig="${origValue || ''}" title="Mark field as accurate" style="padding: 0.18rem 0.4rem; font-size: 0.75rem; border-radius: 6px; border: 1px solid ${isUp ? '#16a34a' : '#cbd5e1'}; background: ${isUp ? '#dcfce7' : '#ffffff'}; color: ${isUp ? '#15803d' : '#64748b'}; cursor: pointer;">
+              <i class="fa-solid fa-thumbs-up"></i>
+            </button>
+            <button type="button" class="btn-field-thumb btn-thumb-down ${isDown ? 'active' : ''}" data-school-id="${school.id}" data-field-name="${fieldName}" data-label="${fieldLabel}" data-orig="${origValue || ''}" data-custom="${customVal || ''}" title="Mark as inaccurate & update in your records" style="padding: 0.18rem 0.4rem; font-size: 0.75rem; border-radius: 6px; border: 1px solid ${isDown ? '#dc2626' : '#cbd5e1'}; background: ${isDown ? '#fee2e2' : '#ffffff'}; color: ${isDown ? '#b91c1c' : '#64748b'}; cursor: pointer;">
+              <i class="fa-solid fa-thumbs-down"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    };
+
     // Unified Admissions & Key Dates Card Block
     const admissionsUnifiedHtml = `
       <div class="detail-box" style="grid-column: 1 / -1; background: #f8fafc; border-color: #cbd5e1;">
@@ -2162,13 +2316,13 @@ async function openSchoolDetail(id) {
             <strong style="color: #3b82f6; display: block; margin-bottom: 0.4rem; font-size: 0.9rem;">
               <i class="fa-solid fa-file-pen"></i> Registration & Overview
             </strong>
-            <div style="font-size: 0.85rem; color: #475569; display: flex; flex-direction: column; gap: 0.3rem;">
-              <p><strong>Exam Type / Board:</strong> ${examBoard ? `${examType} (${examBoard})` : examType}</p>
-              ${regStatus ? `<p><strong>Registration Status:</strong> ${regStatus}</p>` : ''}
-              ${regFee ? `<p><strong>Registration Fee:</strong> ${regFee}</p>` : ''}
-              <p><strong>Registration Opens:</strong> ${regOpen || 'N/A'}</p>
-              <p><strong>Registration Deadline:</strong> ${regDeadline || 'N/A'}</p>
-              ${openEvents ? `<p><strong>Open Events:</strong> ${openEvents}</p>` : ''}
+            <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+              ${renderWidget('entranceExamType', 'Exam Type / Board', examBoard ? `${examType} (${examBoard})` : examType)}
+              ${regStatus ? renderWidget('registrationStatus', 'Registration Status', regStatus) : ''}
+              ${regFee ? renderWidget('registrationFee', 'Registration Fee', regFee) : ''}
+              ${renderWidget('registrationOpen', 'Registration Opens', regOpen)}
+              ${renderWidget('registrationDeadline', 'Registration Deadline', regDeadline)}
+              ${openEvents ? renderWidget('openDayEvening', 'Open Events', openEvents) : ''}
             </div>
           </div>
 
@@ -2177,10 +2331,10 @@ async function openSchoolDetail(id) {
             <strong style="color: #d97706; display: block; margin-bottom: 0.4rem; font-size: 0.9rem;">
               <i class="fa-solid fa-pen-nib"></i> 1st Stage Assessment
             </strong>
-            <div style="font-size: 0.85rem; color: #475569; display: flex; flex-direction: column; gap: 0.3rem;">
-              <p><strong>1st Exam Date:</strong> ${firstExamDate || 'N/A'}</p>
-              ${firstExamSubjects ? `<p><strong>Format / Subjects:</strong> ${firstExamSubjects}</p>` : ''}
-              ${firstStageResult ? `<p><strong>1st Stage Result:</strong> ${firstStageResult}</p>` : ''}
+            <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+              ${renderWidget('firstExamDate', '1st Exam Date', firstExamDate)}
+              ${firstExamSubjects ? renderWidget('firstExamSubjects', 'Format / Subjects', firstExamSubjects) : ''}
+              ${firstStageResult ? renderWidget('firstStageResult', '1st Stage Result', firstStageResult) : ''}
             </div>
           </div>
 
@@ -2189,24 +2343,24 @@ async function openSchoolDetail(id) {
             <strong style="color: #059669; display: block; margin-bottom: 0.4rem; font-size: 0.9rem;">
               <i class="fa-solid fa-award"></i> Stage 2, Interview & Offers
             </strong>
-            <div style="font-size: 0.85rem; color: #475569; display: flex; flex-direction: column; gap: 0.3rem;">
-              ${secondExamDate ? `<p><strong>2nd Exam Date:</strong> ${secondExamDate}</p>` : ''}
-              ${secondExamSubjects ? `<p><strong>2nd Exam Format:</strong> ${secondExamSubjects}</p>` : ''}
-              ${secondStageResult ? `<p><strong>2nd Stage Result:</strong> ${secondStageResult}</p>` : ''}
-              <p><strong>Interview / Activity:</strong> ${interviewInfo || 'N/A'}</p>
-              <p><strong>Offers / Results:</strong> ${offersInfo || 'N/A'}</p>
-              ${offerAcceptBy ? `<p><strong>Accept Offer By:</strong> ${offerAcceptBy}</p>` : ''}
+            <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+              ${secondExamDate ? renderWidget('secondExamDate', '2nd Exam Date', secondExamDate) : ''}
+              ${secondExamSubjects ? renderWidget('secondExamSubjects', '2nd Exam Format', secondExamSubjects) : ''}
+              ${secondStageResult ? renderWidget('secondStageResult', '2nd Stage Result', secondStageResult) : ''}
+              ${renderWidget('interviewInfo', 'Interview / Activity', interviewInfo)}
+              ${renderWidget('offersInfo', 'Offers / Results', offersInfo)}
+              ${offerAcceptBy ? renderWidget('offerAcceptBy', 'Accept Offer By', offerAcceptBy) : ''}
             </div>
           </div>
         </div>
 
         ${scholarships || notes || school.admissionsPolicy ? `
           <div style="margin-top: 0.8rem; background: white; padding: 0.8rem; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.85rem; color: #475569;">
-            ${scholarships ? `<p style="margin-bottom: 0.3rem;"><strong>Scholarships Offered:</strong> ${scholarships}</p>` : ''}
-            ${notes ? `<p style="margin-bottom: 0.3rem;"><strong>Additional Notes:</strong> ${notes}</p>` : ''}
-            <p style="border-top: 1px dashed #e2e8f0; padding-top: 0.4rem; margin-top: 0.4rem;">
-              <strong>Admissions Policy Summary:</strong> ${school.admissionsPolicy || 'Standard admissions policy.'}
-            </p>
+            ${scholarships ? renderWidget('scholarshipsOffered', 'Scholarships Offered', scholarships) : ''}
+            ${notes ? renderWidget('additionalNotes', 'Additional Notes', notes) : ''}
+            <div style="border-top: 1px dashed #e2e8f0; padding-top: 0.4rem; margin-top: 0.4rem;">
+              ${renderWidget('admissionsPolicy', 'Admissions Policy Summary', school.admissionsPolicy || 'Standard admissions policy.')}
+            </div>
           </div>
         ` : ''}
       </div>
@@ -2219,9 +2373,9 @@ async function openSchoolDetail(id) {
           <i class="fa-solid fa-location-dot"></i> ${school.address || school.la}, ${school.postcode || ''} | URN: ${school.urn || 'N/A'}
         </div>
         <div class="detail-tags-row" style="align-items: center;">
-          <span class="badge-ofsted"><i class="fa-solid fa-star"></i> ${formatOfsted(school.ofstedRating)}</span>
-          <span class="badge-exam">${school.schoolType}</span>
-          <span class="badge-exam">${school.gender} intake</span>
+          <span class="badge-ofsted"><i class="fa-solid fa-star"></i> ${formatOfsted(userOverrides.ofstedRating || school.ofstedRating)}</span>
+          <span class="badge-exam">${userOverrides.schoolType || school.schoolType}</span>
+          <span class="badge-exam">${userOverrides.gender || school.gender} intake</span>
 
           <!-- Toggleable Hot Pill -->
           <button type="button" class="btn" id="toggle-hot-btn" style="border:none; cursor:${currentPermissions.includes('admin:edit') ? 'pointer' : 'default'}; padding:0;" title="${currentPermissions.includes('admin:edit') ? 'Click to toggle Hot status' : 'Hot status'}">
@@ -2248,15 +2402,24 @@ async function openSchoolDetail(id) {
 
         <div class="detail-box" style="grid-column: 1 / -1;">
           <h4><i class="fa-solid fa-chart-line"></i> Academic Metrics & GCSE</h4>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.6rem; font-size: 0.85rem; color: #475569;">
-            <p><strong>Pupil Count:</strong> ${school.pupilCount ? school.pupilCount.toLocaleString() : 'N/A'}</p>
-            <p><strong>GCSE Attainment 8:</strong> ${school.gcseAttainment8 !== null && school.gcseAttainment8 !== undefined ? school.gcseAttainment8 : 'N/A'}</p>
-            <p><strong>Progress 8 Score:</strong> ${school.gcseProgress8 !== null && school.gcseProgress8 !== undefined ? school.gcseProgress8 : 'N/A'}</p>
-            <p><strong>EBacc Average Point Score:</strong> ${school.ebaccAveragePointScore !== null && school.ebaccAveragePointScore !== undefined ? school.ebaccAveragePointScore : 'N/A'}</p>
+          <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+            ${renderWidget('pupilCount', 'Pupil Count', school.pupilCount ? school.pupilCount.toLocaleString() : 'N/A')}
+            ${renderWidget('gcseAttainment8', 'GCSE Attainment 8', school.gcseAttainment8 !== null && school.gcseAttainment8 !== undefined ? school.gcseAttainment8 : 'N/A')}
+            ${renderWidget('gcseProgress8', 'Progress 8 Score', school.gcseProgress8 !== null && school.gcseProgress8 !== undefined ? school.gcseProgress8 : 'N/A')}
+            ${renderWidget('ebaccAveragePointScore', 'EBacc Average Point Score', school.ebaccAveragePointScore !== null && school.ebaccAveragePointScore !== undefined ? school.ebaccAveragePointScore : 'N/A')}
           </div>
           <div style="margin-top: 0.8rem; border-top: 1px dashed #cbd5e1; padding-top: 0.6rem;">
-            <strong>Offered GCSE Subjects (${school.gcseSubjects ? school.gcseSubjects.length : 0}):</strong>
+            <strong>Offered GCSE Subjects (${subjectsArray.length}):</strong>
             <div class="subjects-tags" style="margin-top: 0.4rem;">${subjectsHtml}</div>
+          </div>
+        </div>
+
+        <div class="detail-box" style="grid-column: 1 / -1;">
+          <h4><i class="fa-solid fa-address-book"></i> School Contact & Details</h4>
+          <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+            ${renderWidget('phone', 'Phone Number', school.phone)}
+            ${renderWidget('email', 'Email Address', school.email)}
+            ${renderWidget('website', 'Official Website', school.website)}
           </div>
         </div>
       </div>
@@ -2321,6 +2484,83 @@ async function openSchoolDetail(id) {
         await loadSchools();
       });
     }
+
+    // Wire Field Rating & Custom Override buttons
+    detailContent.querySelectorAll('.btn-thumb-up').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const sId = btn.getAttribute('data-school-id');
+        const fName = btn.getAttribute('data-field-name');
+        const origVal = btn.getAttribute('data-orig');
+        try {
+          await fetch('/api/user-reports', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+            },
+            body: JSON.stringify({ schoolId: sId, fieldName: fName, status: 'up', originalValue: origVal })
+          });
+          showToast(`Marked ${btn.getAttribute('data-label')} as accurate 👍`, 'success');
+          openSchoolDetail(sId);
+        } catch (err) {
+          showToast('Failed to save field rating', 'error');
+        }
+      });
+    });
+
+    detailContent.querySelectorAll('.btn-thumb-down').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const sId = btn.getAttribute('data-school-id');
+        const fName = btn.getAttribute('data-field-name');
+        const fLabel = btn.getAttribute('data-label');
+        const origVal = btn.getAttribute('data-orig');
+        const existingCustom = btn.getAttribute('data-custom');
+
+        document.getElementById('override-school-id').value = sId;
+        document.getElementById('override-field-name').value = fName;
+        document.getElementById('override-original-val').value = origVal;
+        document.getElementById('override-field-display-name').innerText = fLabel;
+        document.getElementById('override-field-display-orig').innerText = origVal || 'N/A';
+        document.getElementById('override-custom-value-input').value = existingCustom || '';
+
+        const modal = document.getElementById('field-override-modal');
+        if (modal) {
+          modal.style.display = 'flex';
+          modal.style.zIndex = '25000';
+          setTimeout(() => {
+            const input = document.getElementById('override-custom-value-input');
+            if (input) {
+              input.focus();
+              input.select();
+            }
+          }, 50);
+        }
+      });
+    });
+
+    detailContent.querySelectorAll('.btn-reset-field-report').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const sId = btn.getAttribute('data-school-id');
+        const fName = btn.getAttribute('data-field-name');
+        try {
+          await fetch('/api/user-reports', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+            },
+            body: JSON.stringify({ schoolId: sId, fieldName: fName })
+          });
+          showToast('Reset custom value to master record', 'info');
+          openSchoolDetail(sId);
+        } catch (err) {
+          showToast('Failed to reset field value', 'error');
+        }
+      });
+    });
 
     document.getElementById('detail-modal').style.display = 'flex';
 
@@ -2487,30 +2727,150 @@ async function saveRecWeights(e) {
 }
 
 // Fetch recommendations based on userSelectedSchools, location, and absolute gender filter
+// Load Parent Recommendation Profile & Preferences
+async function loadUserRecProfile() {
+  try {
+    const res = await fetch('/api/user-recommendations/preferences', {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+    if (!res.ok) return;
+    const prefs = await res.json();
+
+    const childAbilityEl = document.getElementById('rec-child-ability');
+    if (childAbilityEl) childAbilityEl.value = prefs.childAbilityLevel || 'NA';
+
+    const binary = prefs.binaryFilters || {};
+    const genderEl = document.getElementById('rec-gender');
+    if (genderEl) genderEl.value = binary.gender || 'NA';
+
+    const ofstedFloorEl = document.getElementById('rec-ofsted-floor');
+    if (ofstedFloorEl) ofstedFloorEl.value = binary.ofstedFloor || 'NA';
+
+    const locInput = document.getElementById('rec-target-locations');
+    if (locInput) locInput.value = binary.locations || prefs.targetPostcode || prefs.targetBorough || '';
+
+    const qual = prefs.qualitativeWeights || {};
+    const proxEl = document.getElementById('rec-qual-prox');
+    if (proxEl) proxEl.value = qual.proximity || 'somewhat';
+
+    const acadEl = document.getElementById('rec-qual-acad');
+    if (acadEl) acadEl.value = qual.academicExcellence || 'very';
+
+    const progEl = document.getElementById('rec-qual-prog');
+    if (progEl) progEl.value = qual.pupilProgress || 'somewhat';
+
+    const reqFormats = Array.isArray(binary.examFormats) ? binary.examFormats : ['NA'];
+    document.querySelectorAll('.rec-exam-format-chk').forEach(chk => {
+      chk.checked = reqFormats.includes(chk.value);
+    });
+
+    const reqTypes = Array.isArray(binary.schoolTypes) ? binary.schoolTypes : ['NA'];
+    document.querySelectorAll('.rec-school-type-chk').forEach(chk => {
+      chk.checked = reqTypes.includes(chk.value);
+    });
+  } catch (err) {
+    console.error('Error loading parent recommendation profile:', err);
+  }
+}
+
+// Save Parent Recommendation Profile & Preferences
+async function saveUserRecProfile() {
+  const childAbilityLevel = document.getElementById('rec-child-ability') ? document.getElementById('rec-child-ability').value : 'NA';
+  const gender = document.getElementById('rec-gender') ? document.getElementById('rec-gender').value : 'NA';
+  const ofstedFloor = document.getElementById('rec-ofsted-floor') ? document.getElementById('rec-ofsted-floor').value : 'NA';
+  const locations = document.getElementById('rec-target-locations') ? document.getElementById('rec-target-locations').value.trim() : '';
+
+  const selectedFormats = Array.from(document.querySelectorAll('.rec-exam-format-chk:checked')).map(c => c.value);
+  const selectedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
+
+  const proximity = document.getElementById('rec-qual-prox') ? document.getElementById('rec-qual-prox').value : 'somewhat';
+  const academicExcellence = document.getElementById('rec-qual-acad') ? document.getElementById('rec-qual-acad').value : 'very';
+  const pupilProgress = document.getElementById('rec-qual-prog') ? document.getElementById('rec-qual-prog').value : 'somewhat';
+
+  const payload = {
+    targetBorough: locations,
+    targetPostcode: locations,
+    childAbilityLevel,
+    binaryFilters: {
+      locations,
+      gender,
+      ofstedFloor,
+      examFormats: selectedFormats.length > 0 ? selectedFormats : ['NA'],
+      schoolTypes: selectedTypes.length > 0 ? selectedTypes : ['NA']
+    },
+    qualitativeWeights: {
+      proximity,
+      academicExcellence,
+      pupilProgress
+    }
+  };
+
+  try {
+    const res = await fetch('/api/user-recommendations/preferences', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      showToast('Saved your personalized recommendation profile!', 'success');
+      await fetchRecommendations();
+    }
+  } catch (err) {
+    showToast('Failed to save recommendation profile', 'error');
+  }
+}
+
+// Fetch recommendations based on userSelectedSchools, target locations, and qualitative profile
 async function fetchRecommendations() {
   const container = document.getElementById('rec-cards-container');
   if (!container) return;
 
-  const targetLocation = document.getElementById('rec-location-input') ? document.getElementById('rec-location-input').value : '';
+  const locations = document.getElementById('rec-target-locations') ? document.getElementById('rec-target-locations').value.trim() : '';
+  const childAbilityLevel = document.getElementById('rec-child-ability') ? document.getElementById('rec-child-ability').value : 'NA';
+  const gender = document.getElementById('rec-gender') ? document.getElementById('rec-gender').value : 'NA';
+  const ofstedFloor = document.getElementById('rec-ofsted-floor') ? document.getElementById('rec-ofsted-floor').value : 'NA';
 
-  // Read selected gender radio
-  let genderChoice = 'all';
-  const genderRadio = document.querySelector('input[name="rec-gender"]:checked');
-  if (genderRadio) genderChoice = genderRadio.value;
+  const selectedFormats = Array.from(document.querySelectorAll('.rec-exam-format-chk:checked')).map(c => c.value);
+  const selectedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
 
-  const includeCoedCheck = document.getElementById('rec-include-coed');
-  const includeCoed = includeCoedCheck ? includeCoedCheck.checked : true;
+  const proximity = document.getElementById('rec-qual-prox') ? document.getElementById('rec-qual-prox').value : 'somewhat';
+  const academicExcellence = document.getElementById('rec-qual-acad') ? document.getElementById('rec-qual-acad').value : 'very';
+  const pupilProgress = document.getElementById('rec-qual-prog') ? document.getElementById('rec-qual-prog').value : 'somewhat';
+
+  const preferencesOverride = {
+    targetBorough: locations,
+    targetPostcode: locations,
+    childAbilityLevel,
+    binaryFilters: {
+      locations,
+      gender,
+      ofstedFloor,
+      examFormats: selectedFormats.length > 0 ? selectedFormats : ['NA'],
+      schoolTypes: selectedTypes.length > 0 ? selectedTypes : ['NA']
+    },
+    qualitativeWeights: {
+      proximity,
+      academicExcellence,
+      pupilProgress
+    }
+  };
 
   try {
     const res = await fetch('/api/recommendations', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
       body: JSON.stringify({
         userSchools: userSelectedSchools,
-        targetLocation: targetLocation,
+        targetLocation: locations,
         removedSchoolIds: userRemovedSchoolIds,
-        genderChoice,
-        includeCoed
+        preferencesOverride
       })
     });
 
@@ -2521,7 +2881,7 @@ async function fetchRecommendations() {
   }
 }
 
-// Render Compact, Space-Efficient Recommendation Cards
+// Render Single-Line List Layout for Recommendations
 function renderRecommendations(items) {
   const container = document.getElementById('rec-cards-container');
   if (!container) return;
@@ -2530,10 +2890,10 @@ function renderRecommendations(items) {
 
   if (items.length === 0) {
     container.innerHTML = `
-      <div style="grid-column: 1 / -1; text-align: center; padding: 2.5rem; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1;">
+      <div style="text-align: center; padding: 2.5rem; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1;">
         <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 2.2rem; color: #94a3b8; margin-bottom: 0.8rem;"></i>
         <h4>No matching recommendations found</h4>
-        <p style="color: #64748b; font-size: 0.85rem;">Try relaxing your gender or location filters to see more school suggestions.</p>
+        <p style="color: #64748b; font-size: 0.85rem;">Try adjusting your hard requirements or location filters to view more school suggestions.</p>
       </div>
     `;
     return;
@@ -2545,11 +2905,10 @@ function renderRecommendations(items) {
     const reasons = item.reasons;
 
     let matchBg = '#ecfdf5';
-    let matchColor = '#059669'; // Green
-    if (score < 60) { matchBg = '#fffbeb'; matchColor = '#d97706'; } // Amber
-    if (score < 35) { matchBg = '#f1f5f9'; matchColor = '#64748b'; } // Slate
+    let matchColor = '#059669';
+    if (score < 60) { matchBg = '#fffbeb'; matchColor = '#d97706'; }
+    if (score < 35) { matchBg = '#f1f5f9'; matchColor = '#64748b'; }
 
-    // Icon mapping for gender
     let genderTag = `<span style="font-size:0.75rem; color:#475569;"><i class="fa-solid fa-users" style="color:#8b5cf6;"></i> ${s.gender}</span>`;
     if ((s.gender || '').toLowerCase().includes('girl')) {
       genderTag = `<span style="font-size:0.75rem; color:#ec4899; font-weight:600;"><i class="fa-solid fa-venus"></i> Girls</span>`;
@@ -2557,84 +2916,99 @@ function renderRecommendations(items) {
       genderTag = `<span style="font-size:0.75rem; color:#2563eb; font-weight:600;"><i class="fa-solid fa-mars"></i> Boys</span>`;
     }
 
-    const card = document.createElement('div');
-    card.className = 'school-card';
-    card.style.padding = '0.9rem 1rem';
-    card.style.borderLeft = `4px solid ${matchColor}`;
-    card.style.display = 'flex';
-    card.style.flexDirection = 'column';
-    card.style.justifySpaceBetween = 'space-between';
+    const isAlreadyAdded = userSelectedSchools.some(x => x.id === s.id);
+    const dates = s.entranceExamDates || {};
 
-    card.innerHTML = `
-      <div>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
-          <span style="font-weight: 700; font-size: 0.78rem; color: ${matchColor}; background: ${matchBg}; padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid ${matchColor}33;">
+    const row = document.createElement('div');
+    row.className = 'school-row-item';
+    row.style.background = 'white';
+    row.style.border = '1px solid #cbd5e1';
+    row.style.borderLeft = `5px solid ${matchColor}`;
+    row.style.borderRadius = '8px';
+    row.style.padding = '0.75rem 1.1rem';
+    row.style.display = 'flex';
+    row.style.justifyContent = 'space-between';
+    row.style.alignItems = 'center';
+    row.style.gap = '1.25rem';
+    row.style.flexWrap = 'wrap';
+
+    row.innerHTML = `
+      <div style="flex: 1 1 500px;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.25rem; flex-wrap: wrap;">
+          <span style="font-weight: 800; font-size: 0.82rem; color: ${matchColor}; background: ${matchBg}; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid ${matchColor}44;">
             <i class="fa-solid fa-sparkles"></i> ${score}% Match
           </span>
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            ${genderTag}
-            <button class="btn-text btn-remove-rec" data-id="${s.id}" style="color: #94a3b8; font-size: 0.75rem; cursor: pointer;" title="Remove from suggestions">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
-          </div>
+          <h4 style="font-size: 1rem; font-weight: 700; color: #1e293b; margin: 0;">
+            <a href="#" onclick="openSchoolDetail('${s.id}'); return false;" style="color: #1e293b; text-decoration: none;">${s.name}</a>
+          </h4>
+          ${s.hot ? '<span class="badge-hot" style="font-size:0.7rem; padding:0.1rem 0.4rem;">🔥 Hot</span>' : ''}
+          ${s.official ? '<span class="badge-official" style="font-size:0.7rem; padding:0.1rem 0.4rem;">✓ DfE Official</span>' : ''}
         </div>
 
-        <h4 style="font-size: 0.95rem; font-weight: 700; color: #1e293b; margin-bottom: 0.2rem; line-height: 1.3;" title="${(s.name || '').replace(/"/g, '&quot;')}">
-          ${s.name.length > 32 ? s.name.slice(0, 32).trim() + '…' : s.name}
-        </h4>
-
-        <div style="font-size: 0.78rem; color: #64748b; margin-bottom: 0.4rem;">
-          <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> ${s.la} (${s.postcode || ''})
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #475569; margin-bottom: 0.35rem; align-items: center;">
+          <span><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> <strong>${s.la}</strong> (${s.postcode || ''})</span>
+          <span><i class="fa-solid fa-building-columns"></i> ${s.schoolType}</span>
+          ${genderTag}
+          <span><i class="fa-solid fa-star" style="color: #eab308;"></i> Ofsted: <strong>${formatOfsted(s.ofstedRating)}</strong></span>
+          ${s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined ? `<span>Attainment 8: <strong>${s.gcseAttainment8}</strong></span>` : ''}
+          ${s.gcseProgress8 !== null && s.gcseProgress8 !== undefined ? `<span>Progress 8: <strong>+${s.gcseProgress8}</strong></span>` : ''}
         </div>
 
-        <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
-          <span class="badge-ofsted" style="font-size: 0.72rem; padding: 0.1rem 0.4rem;"><i class="fa-solid fa-star"></i> ${formatOfsted(s.ofstedRating)}</span>
-          <span class="badge-exam" style="font-size: 0.72rem; padding: 0.1rem 0.4rem;" title="${(s.entranceExamType || '').replace(/"/g, '&quot;')}">${formatExam(s.entranceExamType)}</span>
-        </div>
-
-        <div style="font-size: 0.75rem; color: #475569; background: #f8fafc; padding: 0.35rem 0.55rem; border-radius: 6px; border: 1px solid #e2e8f0; line-height: 1.25;">
-          <strong style="color: #334155;">Why:</strong> ${reasons[0] || 'Matches criteria'}
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; font-size: 0.76rem; color: #64748b;">
+          <span style="background: #f1f5f9; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #cbd5e1;">
+            <i class="fa-solid fa-pen-nib" style="color: #4f46e5;"></i> Exam: ${s.entranceExamType || 'Standard'}
+          </span>
+          ${dates.examDate ? `<span style="background: #fff7ed; color: #c2410c; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #ffedd5;"><i class="fa-solid fa-calendar"></i> Exam Sitting: ${dates.examDate}</span>` : ''}
+          ${dates.registrationDeadline ? `<span style="background: #eff6ff; color: #1d4ed8; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #bfdbfe;"><i class="fa-solid fa-clock"></i> Reg Deadline: ${dates.registrationDeadline}</span>` : ''}
+          <span style="background: #f8fafc; color: #334155; padding: 0.15rem 0.5rem; border-radius: 4px; border: 1px solid #e2e8f0;">
+            <strong>Match Reason:</strong> ${reasons[0] || 'Fits parent profile'}
+          </span>
         </div>
       </div>
 
-      <div style="display: flex; gap: 0.4rem; margin-top: 0.75rem;">
-        <button class="btn btn-primary btn-add-user-school" data-id="${s.id}" style="flex: 1; padding: 0.35rem 0.6rem; font-size: 0.8rem;">
-          <i class="fa-solid fa-plus"></i> Shortlist
+      <div style="display: flex; align-items: center; gap: 0.6rem;">
+        <button class="btn btn-outline" onclick="openSchoolDetail('${s.id}')" style="font-size: 0.78rem; padding: 0.45rem 0.75rem;">
+          <i class="fa-solid fa-eye"></i> Details
         </button>
-        <button class="btn btn-outline btn-rec-detail" data-id="${s.id}" style="padding: 0.35rem 0.6rem; font-size: 0.8rem; color: #2563eb; border-color: #bfdbfe;">
-          <i class="fa-solid fa-circle-info"></i>
+        <button class="btn ${isAlreadyAdded ? 'btn-secondary' : 'btn-primary'} btn-add-rec" data-id="${s.id}" style="font-size: 0.78rem; padding: 0.45rem 0.85rem; ${isAlreadyAdded ? 'background:#e2e8f0; color:#475569; border:none;' : ''}">
+          <i class="fa-solid ${isAlreadyAdded ? 'fa-check' : 'fa-plus'}"></i> ${isAlreadyAdded ? 'Shortlisted' : 'Add to Shortlist'}
+        </button>
+        <button class="btn-text btn-remove-rec" data-id="${s.id}" style="color: #94a3b8; font-size: 0.8rem; cursor: pointer; padding: 0.2rem 0.4rem;" title="Remove from suggestions">
+          <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
     `;
 
-    // Button event listeners with safe event isolation
-    const addBtn = card.querySelector('.btn-add-user-school');
-    const detailBtn = card.querySelector('.btn-rec-detail');
-    const removeBtn = card.querySelector('.btn-remove-rec');
+    container.appendChild(row);
+  });
 
-    if (addBtn) {
-      addBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        addUserSchool(s);
-      });
-    }
-    if (detailBtn) {
-      detailBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openSchoolDetail(s.id);
-      });
-    }
-    if (removeBtn) {
-      removeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        removeRecommendation(s.id);
-      });
-    }
+  // Attach event listeners for Add to Shortlist & Remove from suggestions
+  container.querySelectorAll('.btn-add-rec').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      const targetSchool = items.find(item => item.school.id === id)?.school;
+      if (targetSchool) {
+        addSchoolToUserPortfolio(targetSchool);
+        btn.textContent = '✓ Shortlisted';
+        btn.className = 'btn btn-secondary btn-add-rec';
+        btn.style.background = '#e2e8f0';
+        btn.style.color = '#475569';
+        btn.style.border = 'none';
+      }
+    });
+  });
 
-    container.appendChild(card);
+  container.querySelectorAll('.btn-remove-rec').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      if (!userRemovedSchoolIds.includes(id)) {
+        userRemovedSchoolIds.push(id);
+        saveUserPortfolio(true);
+        fetchRecommendations();
+      }
+    });
   });
 }
 
@@ -2903,6 +3277,139 @@ function renderAdmissionsCalendar(container) {
   container.innerHTML = calendarHtml;
 }
 
+
+// Admin Error Audit Panel: Load User-Reported Data Inaccuracies
+async function loadAdminFieldReports() {
+  const container = document.getElementById('admin-field-reports-container');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/admin/field-reports', {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+
+    if (!res.ok) {
+      container.innerHTML = `<div style="color: #ef4444; padding: 1rem;">Failed to load reported errors.</div>`;
+      return;
+    }
+
+    const schoolsList = await res.json();
+
+    if (!Array.isArray(schoolsList) || schoolsList.length === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 2.5rem 1rem; background: #f0fdf4; border-radius: 10px; border: 1px solid #bbf7d0;">
+          <i class="fa-solid fa-circle-check" style="font-size:2.2rem; color:#22c55e; display:block; margin-bottom:0.5rem;"></i>
+          <strong style="color: #166534; font-size: 1rem;">No User-Reported Data Inaccuracies</strong>
+          <p style="color: #4ade80; font-size: 0.85rem; margin-top: 0.2rem;">All school records are currently rated accurate by parents.</p>
+        </div>
+      `;
+      return;
+    }
+
+    let html = `<div style="display: flex; flex-direction: column; gap: 1rem;">`;
+
+    for (const schoolObj of schoolsList) {
+      html += `
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.6rem; margin-bottom: 0.8rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div>
+              <strong style="font-size: 1.05rem; color: #1e293b;"><i class="fa-solid fa-school" style="color: #4f46e5;"></i> ${schoolObj.schoolName}</strong>
+              <span style="font-size: 0.8rem; color: #64748b; margin-left: 0.5rem;">URN: ${schoolObj.schoolUrn}</span>
+            </div>
+            <span style="background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5; font-size: 0.8rem; font-weight: 700; padding: 0.25rem 0.65rem; border-radius: 999px;">
+              <i class="fa-solid fa-thumbs-down"></i> ${schoolObj.totalErrorCount} Reported Error${schoolObj.totalErrorCount > 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <table class="data-table" style="width: 100%; font-size: 0.85rem;">
+            <thead>
+              <tr style="background: #f8fafc;">
+                <th>Reported Field</th>
+                <th>Reports Count</th>
+                <th>Master Original Value</th>
+                <th>User Proposed Custom Values</th>
+                ${currentPermissions.includes('admin:edit') ? '<th>Admin Action</th>' : ''}
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      for (const fieldObj of schoolObj.fields) {
+        const userValsList = fieldObj.reports.map(r => `
+          <div style="margin-bottom: 0.3rem;">
+            <strong style="color: #ea580c;">"${r.customValue || '(No value specified)'}"</strong>
+            <span style="font-size: 0.75rem; color: #64748b;">by ${r.userName} (${r.userEmail})</span>
+          </div>
+        `).join('');
+
+        const latestCustomVal = fieldObj.reports.find(r => r.customValue)?.customValue || '';
+
+        html += `
+          <tr>
+            <td><strong style="color: #334155;">${fieldObj.fieldName}</strong></td>
+            <td><span class="badge-hot" style="background:#fee2e2; color:#b91c1c; font-size:0.78rem; font-weight:700;">${fieldObj.fieldErrorCount} Downvote${fieldObj.fieldErrorCount > 1 ? 's' : ''}</span></td>
+            <td><code style="background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px;">${fieldObj.reports[0]?.originalValue || 'N/A'}</code></td>
+            <td>${userValsList}</td>
+            ${currentPermissions.includes('admin:edit') ? `
+              <td>
+                ${latestCustomVal ? `
+                  <button type="button" class="btn btn-primary btn-apply-master-report" data-school-id="${schoolObj.schoolId}" data-field-name="${fieldObj.fieldName}" data-custom-val="${latestCustomVal}" style="padding: 0.3rem 0.65rem; font-size: 0.78rem; background: #059669; border-color: #047857;">
+                    <i class="fa-solid fa-check-double"></i> Apply "${latestCustomVal}" to Master
+                  </button>
+                ` : '<span style="color:#94a3b8; font-size:0.75rem;">No custom value proposed</span>'}
+              </td>
+            ` : ''}
+          </tr>
+        `;
+      }
+
+      html += `
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+
+    // Attach Apply to Master button listeners
+    container.querySelectorAll('.btn-apply-master-report').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const sId = btn.getAttribute('data-school-id');
+        const fName = btn.getAttribute('data-field-name');
+        const cVal = btn.getAttribute('data-custom-val');
+
+        if (!confirm(`Are you sure you want to update the master database for field '${fName}' to "${cVal}"?`)) return;
+
+        try {
+          const res = await fetch('/api/admin/apply-field-report', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+            },
+            body: JSON.stringify({ schoolId: sId, fieldName: fName, customValue: cVal })
+          });
+
+          if (res.ok) {
+            showToast(`Updated master school record for '${fName}'!`, 'success');
+            await loadSchools();
+            await loadAdminFieldReports();
+          } else {
+            showToast('Failed to update master record.', 'error');
+          }
+        } catch (err) {
+          showToast('Error promoting custom value to master.', 'error');
+        }
+      });
+    });
+
+  } catch (err) {
+    console.error('Error loading admin field reports:', err);
+  }
+}
 
 // Utility debounce
 function debounce(func, delay) {

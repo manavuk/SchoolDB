@@ -116,6 +116,28 @@ app.get('/api/schools/:id', (req, res) => {
   if (!school) {
     return res.status(404).json({ error: 'School not found' });
   }
+
+  // If user is authenticated, attach user field reports and custom overrides
+  const user = getSessionUser(req);
+  if (user) {
+    const userReports = db.getUserFieldReports(user.id, req.params.id);
+    const userReportsMap = {};
+    const userCustomOverrides = {};
+
+    for (const r of userReports) {
+      userReportsMap[r.fieldName] = { status: r.status, customValue: r.customValue, originalValue: r.originalValue, reportedAt: r.reportedAt };
+      if (r.status === 'down' && r.customValue !== undefined && r.customValue !== null && r.customValue !== '') {
+        userCustomOverrides[r.fieldName] = r.customValue;
+      }
+    }
+
+    return res.json({
+      ...school,
+      userReports: userReportsMap,
+      userCustomOverrides
+    });
+  }
+
   res.json(school);
 });
 
@@ -946,6 +968,66 @@ app.get('/api/users', (req, res) => {
   res.json(users);
 });
 
+// POST /api/user-reports - Rate field accuracy (thumbs up / thumbs down + custom value)
+app.post('/api/user-reports', requireAuth, (req, res) => {
+  const { schoolId, fieldName, status, originalValue, customValue } = req.body;
+  if (!schoolId || !fieldName || !status) {
+    return res.status(400).json({ error: 'schoolId, fieldName, and status (up/down) are required' });
+  }
+
+  const report = db.saveFieldReport({
+    userId: req.user.id,
+    schoolId,
+    fieldName,
+    status,
+    originalValue,
+    customValue: status === 'down' ? customValue : ''
+  });
+
+  res.json({ success: true, message: 'Report saved successfully', report });
+});
+
+// GET /api/user-reports/my - Get current user's field reports & custom overrides
+app.get('/api/user-reports/my', requireAuth, (req, res) => {
+  const { schoolId } = req.query;
+  const reports = db.getUserFieldReports(req.user.id, schoolId || null);
+  res.json(reports);
+});
+
+// DELETE /api/user-reports - Reset user field rating / custom override
+app.delete('/api/user-reports', requireAuth, (req, res) => {
+  const { schoolId, fieldName } = req.body;
+  if (!schoolId || !fieldName) {
+    return res.status(400).json({ error: 'schoolId and fieldName are required' });
+  }
+  db.deleteFieldReport(req.user.id, schoolId, fieldName);
+  res.json({ success: true, message: 'Field report reset successfully' });
+});
+
+// GET /api/admin/field-reports - Admin error audit panel (Ordered by highest reported school & field)
+app.get('/api/admin/field-reports', requirePermission('admin:portal'), (req, res) => {
+  const reports = db.getAdminReportedErrors();
+  res.json(reports);
+});
+
+// POST /api/admin/apply-field-report - Promote user custom value to master school record
+app.post('/api/admin/apply-field-report', requirePermission('admin:edit'), (req, res) => {
+  const { schoolId, fieldName, customValue } = req.body;
+  if (!schoolId || !fieldName || customValue === undefined) {
+    return res.status(400).json({ error: 'schoolId, fieldName, and customValue are required' });
+  }
+  const school = db.getSchoolById(schoolId);
+  if (!school) {
+    return res.status(404).json({ error: 'School not found' });
+  }
+
+  const updateData = {};
+  updateData[fieldName] = customValue;
+  const updated = db.updateSchool(schoolId, updateData);
+
+  res.json({ success: true, message: `Master record updated for field '${fieldName}'`, school: updated });
+});
+
 // User Portfolios Database Helpers
 
 function readPortfolios() {
@@ -1071,144 +1153,218 @@ function calculateLocationProximityScore(candidate, targetQuery, userSchools) {
 
 // POST /api/recommendations - Smart School Recommendation Engine
 
+// GET /api/user-recommendations/preferences - Get active parent recommendation preferences
+app.get('/api/user-recommendations/preferences', requireAuth, (req, res) => {
+  const prefs = db.getUserRecPreferences(req.user.id);
+  res.json(prefs);
+});
+
+// POST /api/user-recommendations/preferences - Save active parent recommendation preferences
+app.post('/api/user-recommendations/preferences', requireAuth, (req, res) => {
+  const prefs = db.saveUserRecPreferences(req.user.id, req.body);
+  res.json({ success: true, message: 'Recommendation preferences updated successfully', preferences: prefs });
+});
+
+// POST /api/recommendations - Personalized 2-Stage Smart Recommendation Engine
 app.post('/api/recommendations', (req, res) => {
-  const { userSchools = [], targetLocation = '', removedSchoolIds = [], genderChoice = 'all', includeCoed = true } = req.body;
+  const { userSchools = [], targetLocation = '', removedSchoolIds = [], genderChoice = 'all', includeCoed = true, preferencesOverride = null } = req.body;
   const allSchools = readData();
-  const settings = readRecSettings();
-  const weights = settings.weights || { location: 50, examType: 35, schoolType: 15 };
+
+  // Try to load authenticated parent's saved qualitative preferences if available
+  const sessionUser = getSessionUser(req);
+  let userPrefs = sessionUser ? db.getUserRecPreferences(sessionUser.id) : null;
+  if (preferencesOverride) {
+    userPrefs = { ...userPrefs, ...preferencesOverride };
+  }
 
   const removedSet = new Set(removedSchoolIds);
   const userSchoolSet = new Set(userSchools.map(s => s.id));
 
-  // Candidate pool (exclude already saved or explicitly removed schools)
+  // Base pool (exclude already saved or explicitly removed schools)
   let candidates = allSchools.filter(s => !userSchoolSet.has(s.id) && !removedSet.has(s.id));
 
-  // ABSOLUTE GENDER FILTER ENFORCEMENT
-  if (genderChoice === 'boys') {
+  // Extract preferences
+  const binaryFilters = userPrefs?.binaryFilters || {};
+  const qualWeights = userPrefs?.qualitativeWeights || {};
+  const childAbility = userPrefs?.childAbilityLevel || 'NA';
+
+  // --- STAGE 1: HARD BINARY FILTERS (Pass/Fail Elimination, with N/A Ignore) ---
+
+  // 0. Multi-Location Hard Requirement Filter (Postcodes & Boroughs)
+  const reqLocationsStr = (binaryFilters.locations || userPrefs?.targetPostcode || userPrefs?.targetBorough || targetLocation || '').trim();
+  if (reqLocationsStr && reqLocationsStr.toUpperCase() !== 'NA') {
+    const locTokens = reqLocationsStr.split(/[,;\s]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
+    if (locTokens.length > 0) {
+      candidates = candidates.filter(s => {
+        const la = (s.la || '').toLowerCase();
+        const pc = (s.postcode || '').toLowerCase();
+        const addr = (s.address || '').toLowerCase();
+        const reg = (s.region || '').toLowerCase();
+        const name = (s.name || '').toLowerCase();
+        return locTokens.some(tok => la.includes(tok) || pc.includes(tok) || addr.includes(tok) || reg.includes(tok) || name.includes(tok));
+      });
+    }
+  }
+
+  // 1. Gender Filter
+  const effGender = binaryFilters.gender && binaryFilters.gender !== 'NA' ? binaryFilters.gender : genderChoice;
+  if (effGender && effGender !== 'all' && effGender !== 'NA') {
     candidates = candidates.filter(s => {
       const g = (s.gender || '').toLowerCase();
-      const isBoys = g.includes('boy');
-      const isCoed = g.includes('mixed') || g.includes('co-ed');
-      return isBoys || (includeCoed && isCoed);
-    });
-  } else if (genderChoice === 'girls') {
-    candidates = candidates.filter(s => {
-      const g = (s.gender || '').toLowerCase();
-      const isGirls = g.includes('girl');
-      const isCoed = g.includes('mixed') || g.includes('co-ed');
-      return isGirls || (includeCoed && isCoed);
+      if (effGender === 'boys') return g.includes('boy') || (includeCoed && (g.includes('mixed') || g.includes('co-ed')));
+      if (effGender === 'girls') return g.includes('girl') || (includeCoed && (g.includes('mixed') || g.includes('co-ed')));
+      if (effGender === 'mixed') return g.includes('mixed') || g.includes('co-ed');
+      return true;
     });
   }
 
-  // Extract preferences & benchmarks from user's current list of saved schools
-  const userExamTypes = new Set(userSchools.map(s => (s.entranceExamType || '').toLowerCase()).filter(Boolean));
-  const userSchoolTypes = new Set(userSchools.map(s => (s.schoolType || '').toLowerCase()).filter(Boolean));
+  // 2. School Types Filter
+  const reqTypes = Array.isArray(binaryFilters.schoolTypes) ? binaryFilters.schoolTypes.filter(t => t && t !== 'NA') : [];
+  if (reqTypes.length > 0) {
+    candidates = candidates.filter(s => {
+      const st = (s.schoolType || '').toLowerCase();
+      return reqTypes.some(t => st.includes(t.toLowerCase()));
+    });
+  }
 
-  // Compute benchmark academic metrics from user's saved portfolio
-  const userAttainment8List = userSchools.map(s => s.gcseAttainment8).filter(v => typeof v === 'number' && !isNaN(v));
-  const avgUserAttainment8 = userAttainment8List.length > 0 ? (userAttainment8List.reduce((a, b) => a + b, 0) / userAttainment8List.length) : 65.0;
+  // 3. Exam Formats Multi-Select Filter
+  const reqExamFormats = Array.isArray(binaryFilters.examFormats) ? binaryFilters.examFormats.filter(f => f && f !== 'NA') : [];
+  if (reqExamFormats.length > 0) {
+    candidates = candidates.filter(s => {
+      const et = (s.entranceExamType || '').toLowerCase();
+      return reqExamFormats.some(f => et.includes(f.toLowerCase()) || f.toLowerCase().includes(et));
+    });
+  }
 
-  const userProgress8List = userSchools.map(s => s.gcseProgress8).filter(v => typeof v === 'number' && !isNaN(v));
-  const avgUserProgress8 = userProgress8List.length > 0 ? (userProgress8List.reduce((a, b) => a + b, 0) / userProgress8List.length) : 0.5;
+  // 4. Ofsted Rating Floor Filter
+  const ofstedFloor = binaryFilters.ofstedFloor || 'NA';
+  if (ofstedFloor === 'outstanding') {
+    candidates = candidates.filter(s => {
+      const o = (s.ofstedRating || '').toLowerCase();
+      return o.includes('outstanding') || o.includes('excellent');
+    });
+  } else if (ofstedFloor === 'good') {
+    candidates = candidates.filter(s => {
+      const o = (s.ofstedRating || '').toLowerCase();
+      return o.includes('outstanding') || o.includes('excellent') || o.includes('good');
+    });
+  }
 
-  // Score each candidate school
+  // 5. Sixth Form Requirement
+  if (binaryFilters.sixthForm === 'yes') {
+    candidates = candidates.filter(s => (s.ageRange || '').includes('18') || (s.ageRange || '').includes('19'));
+  }
+
+  // --- STAGE 2: SOFT QUALITATIVE WEIGHTED MATCH SCORING (0-100%) ---
+
+  const QUALITATIVE_MULTIPLIERS = {
+    'NA': 0,
+    'not_important': 0.25,
+    'somewhat': 0.50,
+    'very': 0.85,
+    'top_priority': 1.00
+  };
+
+  const wProxMult = QUALITATIVE_MULTIPLIERS[qualWeights.proximity] !== undefined ? QUALITATIVE_MULTIPLIERS[qualWeights.proximity] : 0.50;
+  const wAcadMult = QUALITATIVE_MULTIPLIERS[qualWeights.academicExcellence] !== undefined ? QUALITATIVE_MULTIPLIERS[qualWeights.academicExcellence] : 0.85;
+  const wProgMult = QUALITATIVE_MULTIPLIERS[qualWeights.pupilProgress] !== undefined ? QUALITATIVE_MULTIPLIERS[qualWeights.pupilProgress] : 0.50;
+  const wSubjMult = QUALITATIVE_MULTIPLIERS[qualWeights.subjectBreadth] !== undefined ? QUALITATIVE_MULTIPLIERS[qualWeights.subjectBreadth] : 0;
+
+  const activeTargetLoc = userPrefs?.targetPostcode || userPrefs?.targetBorough || targetLocation;
+
   const scored = candidates.map(candidate => {
-    let examScore = 0;
-    let typeScore = 0;
-    let academicScore = 0;
-    let ofstedScore = 0;
+    let locScore = 0;
+    let acadScore = 0;
+    let progScore = 0;
+    let subjScore = 0;
+    let abilityScore = 0;
 
-    const cExam = (candidate.entranceExamType || '').toLowerCase();
-    const cType = (candidate.schoolType || '').toLowerCase();
-    const cOfsted = (candidate.ofstedRating || '').toLowerCase();
+    const locResult = calculateLocationProximityScore(candidate, activeTargetLoc, userSchools);
+    locScore = locResult.score;
 
-    // 1. Location / Proximity score via multi-tier postcode & spatial distance
-    const locResult = calculateLocationProximityScore(candidate, targetLocation, userSchools);
-    const locScore = locResult.score;
-
-    // 2. Exam Type score
-    if (userExamTypes.has(cExam)) {
-      examScore = 1.0;
-    } else {
-      userExamTypes.forEach(uExam => {
-        if (cExam && uExam && (cExam.includes(uExam) || uExam.includes(cExam))) examScore = Math.max(examScore, 0.7);
-      });
-    }
-
-    // 3. School Type score
-    if (userSchoolTypes.has(cType)) {
-      typeScore = 1.0;
-    } else {
-      userSchoolTypes.forEach(uType => {
-        if (cType && uType && (cType.includes(uType) || uType.includes(cType))) typeScore = Math.max(typeScore, 0.6);
-      });
-    }
-
-    // 4. Academic Performance score (GCSE Attainment 8 & Progress 8 vs benchmark)
+    // Academic Attainment Score (Attainment 8 / EBacc)
     const cAttainment = typeof candidate.gcseAttainment8 === 'number' ? candidate.gcseAttainment8 : null;
-    const cProgress = typeof candidate.gcseProgress8 === 'number' ? candidate.gcseProgress8 : null;
-
     if (cAttainment !== null) {
-      if (cAttainment >= avgUserAttainment8 + 5) academicScore = 1.0;
-      else if (cAttainment >= avgUserAttainment8 - 5) academicScore = 0.85;
-      else if (cAttainment >= 50) academicScore = 0.65;
-      else academicScore = 0.40;
-    } else if (cProgress !== null) {
-      if (cProgress >= 0.7) academicScore = 0.95;
-      else if (cProgress >= 0.3) academicScore = 0.75;
-      else academicScore = 0.50;
+      if (cAttainment >= 75) acadScore = 1.0;
+      else if (cAttainment >= 60) acadScore = 0.80;
+      else if (cAttainment >= 50) acadScore = 0.60;
+      else acadScore = 0.40;
     } else {
-      academicScore = 0.50; // default baseline for unrated
+      acadScore = 0.50;
     }
 
-    // 5. Ofsted Rating score
-    if (cOfsted.includes('outstanding') || cOfsted.includes('excellent')) {
-      ofstedScore = 1.0;
-    } else if (cOfsted.includes('good')) {
-      ofstedScore = 0.80;
-    } else if (cOfsted.includes('requires improvement')) {
-      ofstedScore = 0.40;
+    // Progress 8 Value-Added Score
+    const cProgress = typeof candidate.gcseProgress8 === 'number' ? candidate.gcseProgress8 : null;
+    if (cProgress !== null) {
+      if (cProgress >= 0.75) progScore = 1.0;
+      else if (cProgress >= 0.40) progScore = 0.85;
+      else if (cProgress >= 0.0) progScore = 0.65;
+      else progScore = 0.40;
     } else {
-      ofstedScore = 0.50;
+      progScore = 0.50;
     }
 
-    // Weighted composite score (0 - 100)
-    const wLoc = weights.location ?? 35;
-    const wExam = weights.examType ?? 25;
-    const wAcad = weights.academicPerformance ?? 20;
-    const wOfsted = weights.ofstedRating ?? 10;
-    const wType = weights.schoolType ?? 10;
+    // Subject Variety Score
+    let subjectsCount = Array.isArray(candidate.gcseSubjects) ? candidate.gcseSubjects.length : 0;
+    if (subjectsCount >= 10) subjScore = 1.0;
+    else if (subjectsCount >= 6) subjScore = 0.75;
+    else subjScore = 0.40;
 
-    const totalWeight = wLoc + wExam + wAcad + wOfsted + wType;
-    const score = (
+    // Child Ability Alignment Match
+    const cType = (candidate.schoolType || '').toLowerCase();
+    if (childAbility === 'top_class' || childAbility === 'above_average') {
+      if (cType.includes('grammar') || cType.includes('independent') || (cAttainment && cAttainment >= 70)) {
+        abilityScore = 1.0;
+      } else {
+        abilityScore = 0.60;
+      }
+    } else if (childAbility === 'average' || childAbility === 'below_average') {
+      if (cProgress && cProgress >= 0.3 && !cType.includes('grammar')) {
+        abilityScore = 1.0;
+      } else {
+        abilityScore = 0.70;
+      }
+    } else {
+      abilityScore = 0.50;
+    }
+
+    // Weighted composite calculation
+    let wLoc = wProxMult * 35;
+    let wAcad = wAcadMult * 30;
+    let wProg = wProgMult * 20;
+    let wSubj = wSubjMult * 15;
+    let wAbility = childAbility !== 'NA' ? 20 : 0;
+
+    let totalWeight = wLoc + wAcad + wProg + wSubj + wAbility;
+    if (totalWeight === 0) totalWeight = 1;
+
+    let finalScore = (
       (locScore * wLoc) +
-      (examScore * wExam) +
-      (academicScore * wAcad) +
-      (ofstedScore * wOfsted) +
-      (typeScore * wType)
-    ) / (totalWeight || 1) * 100;
+      (acadScore * wAcad) +
+      (progScore * wProg) +
+      (subjScore * wSubj) +
+      (abilityScore * wAbility)
+    ) / totalWeight * 100;
 
-    // Nuanced recommendation rationale strings
     const reasons = [];
     if (locScore > 0 && locResult.reason) reasons.push(locResult.reason);
-    if (examScore > 0) reasons.push(`Matching exam format (${candidate.entranceExamType})`);
-    if (academicScore >= 0.85 && cAttainment !== null) reasons.push(`High Academic Attainment 8 (${cAttainment})`);
-    if (ofstedScore >= 0.80 && candidate.ofstedRating) reasons.push(`Ofsted ${candidate.ofstedRating}`);
-    if (typeScore > 0) reasons.push(`Matching school type (${candidate.schoolType})`);
+    if (acadScore >= 0.80 && cAttainment) reasons.push(`High Academic Attainment 8 (${cAttainment})`);
+    if (progScore >= 0.85 && cProgress !== null) reasons.push(`Strong Pupil Growth (Progress 8: +${cProgress})`);
+    if (abilityScore >= 0.90 && childAbility !== 'NA') reasons.push(`Ideal Match for ${childAbility.replace('_', ' ').toUpperCase()} Child`);
+    if (candidate.ofstedRating) reasons.push(`Ofsted ${candidate.ofstedRating}`);
 
     return {
       school: candidate,
-      matchScore: Math.round(score),
+      matchScore: Math.round(finalScore),
       reasons: reasons.length > 0 ? reasons : ['General high school recommendation']
     };
   });
 
-  // Sort by match score descending
   scored.sort((a, b) => b.matchScore - a.matchScore);
 
   res.json({
     totalCandidates: candidates.length,
-    recommendations: scored.slice(0, 30) // top 30 recommendations
+    recommendations: scored.slice(0, 30)
   });
 });
 

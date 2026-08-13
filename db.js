@@ -191,6 +191,34 @@ function initTables() {
       expiresAt TEXT NOT NULL
     );
   `);
+
+  // 7. User Field Ratings & Custom Overrides table
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS user_field_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId TEXT NOT NULL,
+      schoolId TEXT NOT NULL,
+      fieldName TEXT NOT NULL,
+      status TEXT NOT NULL,
+      originalValue TEXT,
+      customValue TEXT,
+      reportedAt TEXT NOT NULL,
+      UNIQUE(userId, schoolId, fieldName)
+    );
+  `);
+
+  // 8. User Recommendation Preferences table
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS user_recommendation_preferences (
+      userId TEXT PRIMARY KEY,
+      targetPostcode TEXT,
+      targetBorough TEXT,
+      childAbilityLevel TEXT DEFAULT 'NA',
+      binaryFiltersJson TEXT NOT NULL,
+      qualitativeWeightsJson TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+  `);
 }
 
 // Convert school SQLite record to JS object
@@ -204,7 +232,16 @@ function recordToSchool(row) {
 
   let gcseSubjects = [];
   if (row.gcseSubjects) {
-    try { gcseSubjects = JSON.parse(row.gcseSubjects); } catch (e) { gcseSubjects = row.gcseSubjects; }
+    if (Array.isArray(row.gcseSubjects)) {
+      gcseSubjects = row.gcseSubjects;
+    } else {
+      try {
+        const parsed = JSON.parse(row.gcseSubjects);
+        gcseSubjects = Array.isArray(parsed) ? parsed : String(row.gcseSubjects).split(',').map(s => s.trim()).filter(Boolean);
+      } catch (e) {
+        gcseSubjects = String(row.gcseSubjects).split(',').map(s => s.trim()).filter(Boolean);
+      }
+    }
   }
 
   let _csv = null;
@@ -719,6 +756,184 @@ function deleteSession(sessionId) {
   stmt.run(sessionId);
 }
 
+// User Field Ratings & Custom Overrides CRUD Operations
+function saveFieldReport(report) {
+  const sqlite = getDb();
+  const reportedAt = new Date().toISOString();
+  const stmt = sqlite.prepare(`
+    INSERT INTO user_field_reports (userId, schoolId, fieldName, status, originalValue, customValue, reportedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(userId, schoolId, fieldName) DO UPDATE SET
+      status = excluded.status,
+      originalValue = excluded.originalValue,
+      customValue = excluded.customValue,
+      reportedAt = excluded.reportedAt;
+  `);
+  stmt.run(
+    report.userId,
+    report.schoolId,
+    report.fieldName,
+    report.status,
+    report.originalValue !== undefined && report.originalValue !== null ? String(report.originalValue) : '',
+    report.customValue !== undefined && report.customValue !== null ? String(report.customValue) : '',
+    reportedAt
+  );
+  return { ...report, reportedAt };
+}
+
+function getUserFieldReports(userId, schoolId = null) {
+  const sqlite = getDb();
+  if (schoolId) {
+    const stmt = sqlite.prepare('SELECT * FROM user_field_reports WHERE userId = ? AND schoolId = ?');
+    return stmt.all(userId, schoolId);
+  }
+  const stmt = sqlite.prepare('SELECT * FROM user_field_reports WHERE userId = ?');
+  return stmt.all(userId);
+}
+
+function deleteFieldReport(userId, schoolId, fieldName) {
+  const sqlite = getDb();
+  const stmt = sqlite.prepare('DELETE FROM user_field_reports WHERE userId = ? AND schoolId = ? AND fieldName = ?');
+  stmt.run(userId, schoolId, fieldName);
+}
+
+function getAdminReportedErrors() {
+  const sqlite = getDb();
+  const sql = `
+    SELECT 
+      r.schoolId,
+      s.name as schoolName,
+      s.urn as schoolUrn,
+      r.fieldName,
+      r.originalValue,
+      r.customValue,
+      r.userId,
+      r.reportedAt,
+      u.name as userName,
+      u.email as userEmail
+    FROM user_field_reports r
+    LEFT JOIN schools s ON r.schoolId = s.id
+    LEFT JOIN users u ON r.userId = u.id
+    WHERE r.status = 'down'
+    ORDER BY r.schoolId, r.fieldName, r.reportedAt DESC;
+  `;
+  const rows = sqlite.prepare(sql).all();
+
+  const schoolsMap = {};
+  for (const row of rows) {
+    const sId = row.schoolId;
+    if (!schoolsMap[sId]) {
+      schoolsMap[sId] = {
+        schoolId: sId,
+        schoolName: row.schoolName || sId,
+        schoolUrn: row.schoolUrn || 'N/A',
+        totalErrorCount: 0,
+        fieldsMap: {}
+      };
+    }
+    schoolsMap[sId].totalErrorCount++;
+
+    const fName = row.fieldName;
+    if (!schoolsMap[sId].fieldsMap[fName]) {
+      schoolsMap[sId].fieldsMap[fName] = {
+        fieldName: fName,
+        fieldErrorCount: 0,
+        reports: []
+      };
+    }
+    schoolsMap[sId].fieldsMap[fName].fieldErrorCount++;
+    schoolsMap[sId].fieldsMap[fName].reports.push({
+      userId: row.userId,
+      userName: row.userName || row.userId,
+      userEmail: row.userEmail || '',
+      originalValue: row.originalValue,
+      customValue: row.customValue,
+      reportedAt: row.reportedAt
+    });
+  }
+
+  const sortedSchools = Object.values(schoolsMap).sort((a, b) => b.totalErrorCount - a.totalErrorCount);
+
+  for (const schoolObj of sortedSchools) {
+    schoolObj.fields = Object.values(schoolObj.fieldsMap).sort((a, b) => b.fieldErrorCount - a.fieldErrorCount);
+    delete schoolObj.fieldsMap;
+  }
+
+  return sortedSchools;
+}
+
+// User Recommendation Preferences CRUD Operations
+function saveUserRecPreferences(userId, prefs) {
+  const sqlite = getDb();
+  const updatedAt = new Date().toISOString();
+  const stmt = sqlite.prepare(`
+    INSERT INTO user_recommendation_preferences (userId, targetPostcode, targetBorough, childAbilityLevel, binaryFiltersJson, qualitativeWeightsJson, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(userId) DO UPDATE SET
+      targetPostcode = excluded.targetPostcode,
+      targetBorough = excluded.targetBorough,
+      childAbilityLevel = excluded.childAbilityLevel,
+      binaryFiltersJson = excluded.binaryFiltersJson,
+      qualitativeWeightsJson = excluded.qualitativeWeightsJson,
+      updatedAt = excluded.updatedAt;
+  `);
+  stmt.run(
+    userId,
+    prefs.targetPostcode || '',
+    prefs.targetBorough || '',
+    prefs.childAbilityLevel || 'NA',
+    JSON.stringify(prefs.binaryFilters || {}),
+    JSON.stringify(prefs.qualitativeWeights || {}),
+    updatedAt
+  );
+  return getUserRecPreferences(userId);
+}
+
+function getUserRecPreferences(userId) {
+  const sqlite = getDb();
+  const stmt = sqlite.prepare('SELECT * FROM user_recommendation_preferences WHERE userId = ?');
+  const row = stmt.get(userId);
+  if (!row) {
+    return {
+      userId,
+      targetPostcode: '',
+      targetBorough: '',
+      childAbilityLevel: 'NA',
+      binaryFilters: {
+        gender: 'NA',
+        schoolTypes: ['NA'],
+        examFormats: ['NA'],
+        ofstedFloor: 'NA',
+        sixthForm: 'NA',
+        maxDistance: 'NA'
+      },
+      qualitativeWeights: {
+        proximity: 'somewhat',
+        academicExcellence: 'very',
+        pupilProgress: 'somewhat',
+        subjectBreadth: 'NA',
+        schoolSize: 'NA'
+      },
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  let binaryFilters = {};
+  let qualitativeWeights = {};
+  try { binaryFilters = JSON.parse(row.binaryFiltersJson); } catch (e) {}
+  try { qualitativeWeights = JSON.parse(row.qualitativeWeightsJson); } catch (e) {}
+
+  return {
+    userId: row.userId,
+    targetPostcode: row.targetPostcode,
+    targetBorough: row.targetBorough,
+    childAbilityLevel: row.childAbilityLevel,
+    binaryFilters,
+    qualitativeWeights,
+    updatedAt: row.updatedAt
+  };
+}
+
 module.exports = {
   getDb,
   getAllSchools,
@@ -742,5 +957,11 @@ module.exports = {
   saveRecSettings,
   saveSession,
   getSession,
-  deleteSession
+  deleteSession,
+  saveFieldReport,
+  getUserFieldReports,
+  deleteFieldReport,
+  getAdminReportedErrors,
+  saveUserRecPreferences,
+  getUserRecPreferences
 };
