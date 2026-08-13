@@ -2925,57 +2925,51 @@ function renderRecommendations(items) {
     row.style.border = '1px solid #cbd5e1';
     row.style.borderLeft = `5px solid ${matchColor}`;
     row.style.borderRadius = '8px';
-    row.style.padding = '0.75rem 1.1rem';
+    row.style.padding = '0.65rem 1rem';
     row.style.display = 'flex';
-    row.style.justifyContent = 'space-between';
-    row.style.alignItems = 'center';
-    row.style.gap = '1.25rem';
-    row.style.flexWrap = 'wrap';
+    row.style.flexDirection = 'column';
+    row.style.gap = '0.35rem';
 
     row.innerHTML = `
-      <div style="flex: 1 1 500px;">
-        <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.25rem; flex-wrap: wrap;">
-          <span style="font-weight: 800; font-size: 0.82rem; color: ${matchColor}; background: ${matchBg}; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid ${matchColor}44;">
+      <!-- Line 1: Match Score, School Name link, Badges, Borough/Postcode & Actions -->
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+          <span style="font-weight: 800; font-size: 0.78rem; color: ${matchColor}; background: ${matchBg}; padding: 0.15rem 0.55rem; border-radius: 999px; border: 1px solid ${matchColor}44;">
             <i class="fa-solid fa-sparkles"></i> ${score}% Match
           </span>
-          <h4 style="font-size: 1rem; font-weight: 700; color: #1e293b; margin: 0;">
+          <h4 style="font-size: 0.98rem; font-weight: 700; color: #1e293b; margin: 0;">
             <a href="#" onclick="openSchoolDetail('${s.id}'); return false;" style="color: #1e293b; text-decoration: none;">${s.name}</a>
           </h4>
-          ${s.hot ? '<span class="badge-hot" style="font-size:0.7rem; padding:0.1rem 0.4rem;">🔥 Hot</span>' : ''}
-          ${s.official ? '<span class="badge-official" style="font-size:0.7rem; padding:0.1rem 0.4rem;">✓ DfE Official</span>' : ''}
-        </div>
-
-        <div style="display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #475569; margin-bottom: 0.35rem; align-items: center;">
-          <span><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> <strong>${s.la}</strong> (${s.postcode || ''})</span>
-          <span><i class="fa-solid fa-building-columns"></i> ${s.schoolType}</span>
+          ${s.hot ? '<span class="badge-hot" style="font-size:0.68rem; padding:0.1rem 0.35rem;">🔥 Hot</span>' : ''}
+          ${s.official ? '<span class="badge-official" style="font-size:0.68rem; padding:0.1rem 0.35rem;">✓ DfE Official</span>' : ''}
           ${genderTag}
-          <span><i class="fa-solid fa-star" style="color: #eab308;"></i> Ofsted: <strong>${formatOfsted(s.ofstedRating)}</strong></span>
-          ${s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined ? `<span>Attainment 8: <strong>${s.gcseAttainment8}</strong></span>` : ''}
-          ${s.gcseProgress8 !== null && s.gcseProgress8 !== undefined ? `<span>Progress 8: <strong>+${s.gcseProgress8}</strong></span>` : ''}
+          <span style="font-size: 0.78rem; color: #64748b;"><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> <strong>${s.la}</strong> (${s.postcode || 'N/A'})</span>
         </div>
 
-        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; font-size: 0.76rem; color: #64748b;">
-          <span style="background: #f1f5f9; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #cbd5e1;">
-            <i class="fa-solid fa-pen-nib" style="color: #4f46e5;"></i> Exam: ${s.entranceExamType || 'Standard'}
-          </span>
-          ${dates.examDate ? `<span style="background: #fff7ed; color: #c2410c; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #ffedd5;"><i class="fa-solid fa-calendar"></i> Exam Sitting: ${dates.examDate}</span>` : ''}
-          ${dates.registrationDeadline ? `<span style="background: #eff6ff; color: #1d4ed8; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #bfdbfe;"><i class="fa-solid fa-clock"></i> Reg Deadline: ${dates.registrationDeadline}</span>` : ''}
-          <span style="background: #f8fafc; color: #334155; padding: 0.15rem 0.5rem; border-radius: 4px; border: 1px solid #e2e8f0;">
-            <strong>Match Reason:</strong> ${reasons[0] || 'Fits parent profile'}
-          </span>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <button class="btn btn-outline" onclick="openSchoolDetail('${s.id}')" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
+            <i class="fa-solid fa-eye"></i> Details
+          </button>
+          <button class="btn ${isAlreadyAdded ? 'btn-secondary' : 'btn-primary'} btn-add-rec" data-id="${s.id}" style="font-size: 0.75rem; padding: 0.3rem 0.75rem; ${isAlreadyAdded ? 'background:#e2e8f0; color:#475569; border:none;' : ''}">
+            <i class="fa-solid ${isAlreadyAdded ? 'fa-check' : 'fa-plus'}"></i> ${isAlreadyAdded ? 'Shortlisted' : 'Add to Shortlist'}
+          </button>
+          <button class="btn-text btn-remove-rec" data-id="${s.id}" style="color: #94a3b8; font-size: 0.75rem; cursor: pointer; padding: 0.15rem 0.35rem;" title="Remove from suggestions">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
         </div>
       </div>
 
-      <div style="display: flex; align-items: center; gap: 0.6rem;">
-        <button class="btn btn-outline" onclick="openSchoolDetail('${s.id}')" style="font-size: 0.78rem; padding: 0.45rem 0.75rem;">
-          <i class="fa-solid fa-eye"></i> Details
-        </button>
-        <button class="btn ${isAlreadyAdded ? 'btn-secondary' : 'btn-primary'} btn-add-rec" data-id="${s.id}" style="font-size: 0.78rem; padding: 0.45rem 0.85rem; ${isAlreadyAdded ? 'background:#e2e8f0; color:#475569; border:none;' : ''}">
-          <i class="fa-solid ${isAlreadyAdded ? 'fa-check' : 'fa-plus'}"></i> ${isAlreadyAdded ? 'Shortlisted' : 'Add to Shortlist'}
-        </button>
-        <button class="btn-text btn-remove-rec" data-id="${s.id}" style="color: #94a3b8; font-size: 0.8rem; cursor: pointer; padding: 0.2rem 0.4rem;" title="Remove from suggestions">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
+      <!-- Line 2: Type, Specs, Exam Dates & Match Reason -->
+      <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; font-size: 0.76rem; color: #475569; border-top: 1px dashed #f1f5f9; padding-top: 0.3rem;">
+        <span><i class="fa-solid fa-building-columns"></i> ${s.schoolType}</span>
+        <span><i class="fa-solid fa-star" style="color: #eab308;"></i> Ofsted: <strong>${formatOfsted(s.ofstedRating)}</strong></span>
+        ${s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined ? `<span>Attainment 8: <strong>${s.gcseAttainment8}</strong></span>` : ''}
+        ${s.gcseProgress8 !== null && s.gcseProgress8 !== undefined ? `<span>Progress 8: <strong>+${s.gcseProgress8}</strong></span>` : ''}
+        <span style="color: #4338ca;"><i class="fa-solid fa-pen-nib"></i> Exam: <strong>${s.entranceExamType || 'Standard'}</strong></span>
+        ${dates.examDate ? `<span style="color: #c2410c;"><i class="fa-solid fa-calendar"></i> Sitting: <strong>${dates.examDate}</strong></span>` : ''}
+        <span style="background: #f8fafc; color: #334155; padding: 0.1rem 0.45rem; border-radius: 4px; border: 1px solid #cbd5e1; margin-left: auto;">
+          <strong>Match Reason:</strong> ${reasons[0] || 'Fits parent profile'}
+        </span>
       </div>
     `;
 

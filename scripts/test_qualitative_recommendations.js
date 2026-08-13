@@ -43,6 +43,13 @@ assert.strictEqual(saved1.binaryFilters.gender, 'girls', 'Gender constraint must
 assert.deepStrictEqual(saved1.binaryFilters.examFormats, ['11+ GL Assessment', 'Sutton SET'], 'Multi-select exam formats must save');
 assert.strictEqual(saved1.qualitativeWeights.academicExcellence, 'top_priority', 'Qualitative weight step must save');
 
+// Test Girls + Co-Ed preference saving
+const prefsGirlsCoed = {
+  binaryFilters: { gender: 'girls_coed' }
+};
+const savedGirlsCoed = db.saveUserRecPreferences(testUserId1, prefsGirlsCoed);
+assert.strictEqual(savedGirlsCoed.binaryFilters.gender, 'girls_coed', 'Girls + Co-Ed gender option must save');
+
 console.log('✓ Parent 1 qualitative recommendation preferences saved and retrieved cleanly!');
 
 // 2. Test Second Isolated Parent Profile (Independent settings)

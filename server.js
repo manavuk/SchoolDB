@@ -1211,9 +1211,15 @@ app.post('/api/recommendations', (req, res) => {
   if (effGender && effGender !== 'all' && effGender !== 'NA') {
     candidates = candidates.filter(s => {
       const g = (s.gender || '').toLowerCase();
-      if (effGender === 'boys') return g.includes('boy') || (includeCoed && (g.includes('mixed') || g.includes('co-ed')));
-      if (effGender === 'girls') return g.includes('girl') || (includeCoed && (g.includes('mixed') || g.includes('co-ed')));
-      if (effGender === 'mixed') return g.includes('mixed') || g.includes('co-ed');
+      const isBoys = g.includes('boy') && !g.includes('girl');
+      const isGirls = g.includes('girl') && !g.includes('boy');
+      const isCoed = g.includes('mixed') || g.includes('co-ed');
+
+      if (effGender === 'boys') return isBoys;
+      if (effGender === 'girls') return isGirls;
+      if (effGender === 'boys_coed') return isBoys || isCoed;
+      if (effGender === 'girls_coed') return isGirls || isCoed;
+      if (effGender === 'mixed') return isCoed;
       return true;
     });
   }
