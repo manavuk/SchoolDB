@@ -2,33 +2,31 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
+const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, 'data', 'schools.json');
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Helper to read data
+// Helpers to interact with database
 function readData() {
   try {
-    const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(raw);
+    return db.getAllSchools();
   } catch (err) {
-    console.error('Error reading schools dataset:', err);
+    console.error('Error reading schools dataset from SQLite:', err);
     return [];
   }
 }
 
-// Helper to write data
 function writeData(data) {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
+    db.insertSchoolsBulk(data);
     return true;
   } catch (err) {
-    console.error('Error writing schools dataset:', err);
+    console.error('Error writing schools dataset to SQLite:', err);
     return false;
   }
 }
@@ -114,8 +112,7 @@ app.get('/api/stats', (req, res) => {
 
 // GET /api/schools/:id - Detailed view
 app.get('/api/schools/:id', (req, res) => {
-  const schools = readData();
-  const school = schools.find(s => s.id === req.params.id);
+  const school = db.getSchoolById(req.params.id);
   if (!school) {
     return res.status(404).json({ error: 'School not found' });
   }
@@ -124,7 +121,6 @@ app.get('/api/schools/:id', (req, res) => {
 
 // POST /api/schools - Add single school
 app.post('/api/schools', (req, res) => {
-  const schools = readData();
   const body = req.body;
 
   if (!body.name || !body.la || !body.schoolType) {
@@ -158,37 +154,26 @@ app.post('/api/schools', (req, res) => {
     description: body.description ? body.description.trim() : ''
   };
 
-  schools.unshift(newSchool);
-  if (writeData(schools)) {
-    res.status(201).json({ message: 'School created successfully', school: newSchool });
-  } else {
+  try {
+    const created = db.insertSchool(newSchool);
+    res.status(201).json({ message: 'School created successfully', school: created });
+  } catch (err) {
     res.status(500).json({ error: 'Failed to write to database' });
   }
 });
 
 // PUT /api/schools/:id - Update existing school record (supports partial updates for pills/flags like hot, official, etc.)
 app.put('/api/schools/:id', (req, res) => {
-  const schools = readData();
-  const index = schools.findIndex(s => s.id === req.params.id);
+  const existing = db.getSchoolById(req.params.id);
 
-  if (index === -1) {
+  if (!existing) {
     return res.status(404).json({ error: 'School record not found' });
   }
 
-  const existing = schools[index];
-  const body = req.body;
-
-  const updatedSchool = {
-    ...existing,
-    ...body,
-    id: existing.id // preserve ID
-  };
-
-  schools[index] = updatedSchool;
-
-  if (writeData(schools)) {
-    res.json({ message: 'School updated successfully', school: updatedSchool });
-  } else {
+  try {
+    const updated = db.updateSchool(req.params.id, req.body);
+    res.json({ message: 'School updated successfully', school: updated });
+  } catch (err) {
     res.status(500).json({ error: 'Failed to write to database' });
   }
 });
@@ -327,18 +312,12 @@ app.post('/api/admin/merge-records', (req, res) => {
 
 
 
-const REVIEWED_PAIRS_FILE = path.join(__dirname, 'data', 'reviewed_pairs.json');
-
 // Helper to read reviewed pairs
 function readReviewedPairs() {
   try {
-    if (!fs.existsSync(REVIEWED_PAIRS_FILE)) {
-      return [];
-    }
-    const raw = fs.readFileSync(REVIEWED_PAIRS_FILE, 'utf8');
-    return JSON.parse(raw);
+    return db.getAllReviewedPairs();
   } catch (err) {
-    console.error('Error reading reviewed pairs:', err);
+    console.error('Error reading reviewed pairs from SQLite:', err);
     return [];
   }
 }
@@ -346,10 +325,10 @@ function readReviewedPairs() {
 // Helper to write reviewed pairs
 function writeReviewedPairs(data) {
   try {
-    fs.writeFileSync(REVIEWED_PAIRS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    db.insertReviewedPairsBulk(data);
     return true;
   } catch (err) {
-    console.error('Error writing reviewed pairs:', err);
+    console.error('Error writing reviewed pairs to SQLite:', err);
     return false;
   }
 }
@@ -664,30 +643,18 @@ app.get('/api/admin/export', (req, res) => {
   res.status(400).json({ error: 'Unsupported format requested. Supported formats: json, csv, tsv, xml' });
 });
 
-// Settings file helper
-const SETTINGS_FILE = path.join(__dirname, 'data', 'recommendation_settings.json');
+// Settings database helpers
 function readRecSettings() {
-  const DEFAULT_WEIGHTS = {
-    location: 35,
-    examType: 25,
-    academicPerformance: 20,
-    ofstedRating: 10,
-    schoolType: 10
-  };
   try {
-    if (!fs.existsSync(SETTINGS_FILE)) {
-      return { weights: DEFAULT_WEIGHTS };
-    }
-    const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-    return { weights: { ...DEFAULT_WEIGHTS, ...(data.weights || {}) } };
+    return db.getRecSettings();
   } catch (err) {
-    return { weights: DEFAULT_WEIGHTS };
+    return { weights: { location: 35, examType: 25, academicPerformance: 20, ofstedRating: 10, schoolType: 10 } };
   }
 }
 
 function writeRecSettings(settings) {
   try {
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf8');
+    db.saveRecSettings(settings.weights || settings);
     return true;
   } catch (err) {
     return false;
@@ -704,44 +671,150 @@ app.post('/api/recommendation-settings', (req, res) => {
   const { weights } = req.body;
   if (!weights) return res.status(400).json({ error: 'Weights configuration required' });
 
-  const settings = { weights };
-  if (writeRecSettings(settings)) {
-    res.json({ message: 'Recommendation settings updated successfully', settings });
+  if (writeRecSettings({ weights })) {
+    res.json({ message: 'Recommendation settings updated successfully', settings: { weights } });
   } else {
     res.status(500).json({ error: 'Failed to save settings' });
   }
 });
 
-// Authentication & User DB Helpers
-const USERS_FILE = path.join(__dirname, 'data', 'users.json');
-function readUsers() {
-  try {
-    if (!fs.existsSync(USERS_FILE)) return [];
-    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
-  } catch (err) {
-    return [];
-  }
+// Session Store & Permissions Configuration
+const DEFAULT_PERMISSIONS = ['parent:recommendations', 'parent:portfolio'];
+const activeSessions = new Map();
+
+function createSession(user) {
+  const sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const permissions = Array.isArray(user.permissions) && user.permissions.length > 0
+    ? user.permissions
+    : DEFAULT_PERMISSIONS;
+
+  const sessionUser = {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    permissions
+  };
+  activeSessions.set(sessionId, { user: sessionUser, createdAt: new Date() });
+  return { sessionId, user: sessionUser };
 }
 
-function writeUsers(users) {
-  try {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
-    return true;
-  } catch (err) {
-    return false;
-  }
+function getSessionUser(req) {
+  const sessionId = req.headers['x-session-id'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.sessionId;
+  if (!sessionId) return null;
+  const sess = activeSessions.get(sessionId);
+  return sess ? sess.user : null;
 }
+
+// Middleware to enforce authentication
+function requireAuth(req, res, next) {
+  const user = getSessionUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthenticated session. Please log in.', authenticated: false });
+  }
+  req.user = user;
+  next();
+}
+
+// Middleware to enforce granular session capabilities/permissions
+function requirePermission(permissionName) {
+  return (req, res, next) => {
+    const user = getSessionUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthenticated session. Please log in.', authenticated: false });
+    }
+    if (!Array.isArray(user.permissions) || !user.permissions.includes(permissionName)) {
+      return res.status(403).json({
+        error: `Forbidden: Session lacks required permission '${permissionName}'`,
+        requiredPermission: permissionName
+      });
+    }
+    req.user = user;
+    next();
+  };
+}
+
+// GET /api/auth/me - Check current active session
+app.get('/api/auth/me', (req, res) => {
+  const user = getSessionUser(req);
+  if (!user) {
+    return res.status(401).json({ authenticated: false, error: 'No active session' });
+  }
+  res.json({ authenticated: true, user });
+});
+
+// POST /api/auth/google - Authenticate via Google OAuth / SSO
+app.post('/api/auth/google', (req, res) => {
+  const { email, name, googleId, picture } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Google authentication requires a valid email' });
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+  let user = db.getUserByEmail(cleanEmail);
+
+  if (!user) {
+    const newUser = {
+      id: `usr-google-${Date.now()}`,
+      name: name || email.split('@')[0],
+      email: cleanEmail,
+      password: `sso-google-${Math.random().toString(36).slice(2)}`,
+      permissions: DEFAULT_PERMISSIONS, // Default to standard parent permissions
+      createdAt: new Date().toISOString()
+    };
+    user = db.insertUser(newUser);
+  }
+
+  const session = createSession(user);
+  res.json({
+    message: 'Google authentication successful',
+    sessionId: session.sessionId,
+    user: session.user
+  });
+});
+
+// GET /api/auth/google - Initiate Google OAuth 2.0 Redirect
+app.get('/api/auth/google', (req, res) => {
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  if (!googleClientId) {
+    return res.redirect('/?sso=google_demo');
+  }
+  const redirectUri = encodeURIComponent(`${req.protocol}://${req.get('host')}/api/auth/google/callback`);
+  const scope = encodeURIComponent('openid email profile');
+  const googleUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${googleClientId}&redirect_uri=${redirectUri}&scope=${scope}`;
+  res.redirect(googleUrl);
+});
+
+// GET /api/auth/google/callback - Google OAuth 2.0 Callback
+app.get('/api/auth/google/callback', (req, res) => {
+  const email = req.query.email || 'google.user@gmail.com';
+  const name = req.query.name || 'Google Parent User';
+  
+  let user = db.getUserByEmail(email);
+  if (!user) {
+    user = db.insertUser({
+      id: `usr-google-${Date.now()}`,
+      name,
+      email,
+      password: `sso-google-${Math.random().toString(36).slice(2)}`,
+      permissions: DEFAULT_PERMISSIONS,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  const session = createSession(user);
+  res.redirect(`/?sessionId=${session.sessionId}&auth=success`);
+});
 
 // POST /api/auth/signup - Register new account
 app.post('/api/auth/signup', (req, res) => {
-  const { name, email, password, role } = req.body;
+  const { name, email, password } = req.body;
 
   if (!email || !password || !name) {
     return res.status(400).json({ error: 'Name, email, and password are required' });
   }
 
-  const users = readUsers();
-  const existing = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  const existing = db.getUserByEmail(email);
 
   if (existing) {
     return res.status(400).json({ error: 'An account with this email already exists' });
@@ -751,17 +824,18 @@ app.post('/api/auth/signup', (req, res) => {
     id: `usr-${Date.now()}`,
     name,
     email: email.toLowerCase(),
-    password, // Plain text for local experiment server
-    role: role === 'admin' ? 'admin' : 'user',
+    password,
+    permissions: DEFAULT_PERMISSIONS,
     createdAt: new Date().toISOString()
   };
 
-  users.push(newUser);
-  writeUsers(users);
+  const created = db.insertUser(newUser);
+  const session = createSession(created);
 
   res.json({
     message: 'Registration successful',
-    user: { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role }
+    sessionId: session.sessionId,
+    user: session.user
   });
 });
 
@@ -773,32 +847,41 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ error: 'Email and password are required' });
   }
 
-  const users = readUsers();
-  const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+  const user = db.getUserByEmail(email);
 
-  if (!user) {
+  if (!user || user.password !== password) {
     return res.status(401).json({ error: 'Invalid email or password' });
   }
 
+  const session = createSession(user);
+
   res.json({
     message: 'Login successful',
-    user: { id: user.id, name: user.name, email: user.email, role: user.role }
+    sessionId: session.sessionId,
+    user: session.user
   });
 });
 
-// GET /api/users - Get list of accounts (For quick switcher / demo)
+// POST /api/auth/logout - End session
+app.post('/api/auth/logout', (req, res) => {
+  const sessionId = req.headers['x-session-id'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.sessionId || req.body?.sessionId;
+  if (sessionId) {
+    activeSessions.delete(sessionId);
+  }
+  res.json({ success: true, message: 'Signed out successfully' });
+});
+
+// GET /api/users - Get list of accounts (For demo)
 app.get('/api/users', (req, res) => {
-  const users = readUsers().map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role }));
+  const users = db.getAllUsers().map(u => ({ id: u.id, name: u.name, email: u.email, permissions: u.permissions }));
   res.json(users);
 });
 
-// User Portfolios File Helper
+// User Portfolios Database Helpers
 
-const PORTFOLIOS_FILE = path.join(__dirname, 'data', 'user_portfolios.json');
 function readPortfolios() {
   try {
-    if (!fs.existsSync(PORTFOLIOS_FILE)) return {};
-    return JSON.parse(fs.readFileSync(PORTFOLIOS_FILE, 'utf8'));
+    return db.getAllPortfolios();
   } catch (err) {
     return {};
   }
@@ -806,7 +889,7 @@ function readPortfolios() {
 
 function writePortfolios(data) {
   try {
-    fs.writeFileSync(PORTFOLIOS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    db.insertPortfoliosBulk(data);
     return true;
   } catch (err) {
     return false;
@@ -816,14 +899,7 @@ function writePortfolios(data) {
 // GET /api/user-portfolio/:userId - Load saved portfolio for user
 app.get('/api/user-portfolio/:userId', (req, res) => {
   const { userId } = req.params;
-  const portfolios = readPortfolios();
-  const portfolio = portfolios[userId] || {
-    userId,
-    targetLocation: '',
-    selectedSchools: [],
-    removedSchoolIds: [],
-    savedAt: null
-  };
+  const portfolio = db.getPortfolioByUserId(userId);
   res.json(portfolio);
 });
 
@@ -832,20 +908,13 @@ app.post('/api/user-portfolio/:userId', (req, res) => {
   const { userId } = req.params;
   const { targetLocation, selectedSchools, removedSchoolIds } = req.body;
 
-  const portfolios = readPortfolios();
-  portfolios[userId] = {
-    userId,
+  const saved = db.savePortfolio(userId, {
     targetLocation: targetLocation || '',
     selectedSchools: selectedSchools || [],
-    removedSchoolIds: removedSchoolIds || [],
-    savedAt: new Date().toISOString()
-  };
+    removedSchoolIds: removedSchoolIds || []
+  });
 
-  if (writePortfolios(portfolios)) {
-    res.json({ message: 'User portfolio saved successfully', portfolio: portfolios[userId] });
-  } else {
-    res.status(500).json({ error: 'Failed to save portfolio' });
-  }
+  res.json({ message: 'User portfolio saved successfully', portfolio: saved });
 });
 
 // Helper to calculate postcode and spatial proximity score (0.0 to 1.0)

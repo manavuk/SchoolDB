@@ -1,10 +1,41 @@
 // User Recommendation & Authentication State
-let currentUserAccount = 'usr-admin-1'; // Default selected user profile ID
-let currentUserName = 'System Admin (Manager)';
-let currentRole = 'admin'; // 'admin' or 'user' (Determined dynamically by authenticated account)
+let currentSessionId = localStorage.getItem('school_db_session_id') || null;
+let currentUserAccount = null; // Authenticated user profile ID
+let currentUserName = '';
+let currentPermissions = []; // Explicit session capabilities (Directory View & Admin Portal hidden by default)
 let userSelectedSchools = []; // List of school objects user has added
 let userRemovedSchoolIds = []; // Set of school IDs user has removed from recommendations
 let compareList = []; // List of schools currently selected for comparison
+
+// Helper to show non-blocking persistent toast notifications
+function showToast(message, type = 'success', duration = 5000) {
+  const toast = document.getElementById('toast-notification');
+  const msgEl = document.getElementById('toast-message');
+  const iconEl = document.getElementById('toast-icon');
+  if (!toast || !msgEl || !iconEl) return;
+
+  toast.className = `toast-banner ${type}`;
+  msgEl.textContent = message;
+
+  if (type === 'success') iconEl.className = 'fa-solid fa-circle-check';
+  else if (type === 'error') iconEl.className = 'fa-solid fa-triangle-exclamation';
+  else iconEl.className = 'fa-solid fa-circle-info';
+
+  toast.style.display = 'flex';
+
+  const closeBtn = document.getElementById('toast-close-btn');
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      toast.style.display = 'none';
+    };
+  }
+
+  if (duration > 0) {
+    setTimeout(() => {
+      toast.style.display = 'none';
+    }, duration);
+  }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
@@ -15,24 +46,181 @@ async function initApp() {
   await loadSchools();
   setupEventListeners();
   loadRecWeights();
-  await loadUserPortfolio(currentUserAccount);
-  updateAuthUserBadge();
-  applyRoleUI();
   populateManualMergeDropdowns();
+
+  // Check URL query parameters for session ID (e.g. after Google OAuth redirect)
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.has('sessionId')) {
+    currentSessionId = urlParams.get('sessionId');
+    localStorage.setItem('school_db_session_id', currentSessionId);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
+  // Validate session with backend
+  const authenticated = await checkActiveSession();
+
+  if (authenticated) {
+    hideGatekeeperLoginScreen();
+    await loadUserPortfolio(currentUserAccount);
+    applyPermissionsUI();
+  } else {
+    showGatekeeperLoginScreen();
+  }
 }
 
-// Update Header Authenticated User Badge & Role Indicator
+// Check active session with backend /api/auth/me
+async function checkActiveSession() {
+  if (!currentSessionId) return false;
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: { 'x-session-id': currentSessionId }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.authenticated && data.user) {
+        currentUserAccount = data.user.id;
+        currentUserName = data.user.name;
+        currentPermissions = Array.isArray(data.user.permissions) ? data.user.permissions : [];
+        return true;
+      }
+    }
+  } catch (err) {
+    console.error('Session check failed:', err);
+  }
+  currentSessionId = null;
+  localStorage.removeItem('school_db_session_id');
+  return false;
+}
+
+// Show full-screen unauthenticated login screen
+function showGatekeeperLoginScreen() {
+  const overlay = document.getElementById('auth-gatekeeper-overlay');
+  if (overlay) overlay.style.display = 'flex';
+
+  const badge = document.getElementById('auth-user-badge-container');
+  const logoutBtn = document.getElementById('auth-logout-btn');
+  const loginBtn = document.getElementById('auth-login-btn');
+
+  if (badge) badge.style.display = 'none';
+  if (logoutBtn) logoutBtn.style.display = 'none';
+  if (loginBtn) loginBtn.style.display = 'inline-flex';
+}
+
+// Hide gatekeeper login screen on successful authentication
+function hideGatekeeperLoginScreen() {
+  const overlay = document.getElementById('auth-gatekeeper-overlay');
+  if (overlay) overlay.style.display = 'none';
+  const loginModal = document.getElementById('auth-login-modal');
+  if (loginModal) loginModal.style.display = 'none';
+  const signupModal = document.getElementById('auth-signup-modal');
+  if (signupModal) signupModal.style.display = 'none';
+  updateAuthUserBadge();
+}
+
+// Set authenticated session state and navigate to Parent View
+async function setAuthenticatedSession(sessionData, toastMessage) {
+  currentSessionId = sessionData.sessionId;
+  localStorage.setItem('school_db_session_id', currentSessionId);
+
+  currentUserAccount = sessionData.user.id;
+  currentUserName = sessionData.user.name;
+  currentPermissions = Array.isArray(sessionData.user.permissions) ? sessionData.user.permissions : [];
+
+  hideGatekeeperLoginScreen();
+  updateAuthUserBadge();
+
+  if (toastMessage) showToast(toastMessage, 'success');
+
+  await loadUserPortfolio(currentUserAccount);
+  applyPermissionsUI();
+}
+
+// Sign out authenticated session and show login screen
+async function logoutSession() {
+  // Flush and save current portfolio to SQLite before destroying session
+  if (currentUserAccount) {
+    try {
+      await saveUserPortfolio(true);
+    } catch (e) {
+      console.error('Error auto-saving portfolio on logout:', e);
+    }
+  }
+
+  if (currentSessionId) {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-session-id': currentSessionId,
+          'Authorization': `Bearer ${currentSessionId}`
+        },
+        body: JSON.stringify({ sessionId: currentSessionId })
+      });
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  }
+
+  // 1. Purge all session credentials & user state from memory
+  currentSessionId = null;
+  currentUserAccount = null;
+  currentUserName = '';
+  currentPermissions = [];
+  userSelectedSchools = [];
+  userRemovedSchoolIds = [];
+  compareList = [];
+  localStorage.removeItem('school_db_session_id');
+
+  // 2. Clear input fields in login/signup forms
+  const gatekeeperEmail = document.getElementById('gatekeeper-email');
+  const gatekeeperPass = document.getElementById('gatekeeper-password');
+  if (gatekeeperEmail) gatekeeperEmail.value = '';
+  if (gatekeeperPass) gatekeeperPass.value = '';
+
+  const locInput = document.getElementById('rec-location-input');
+  if (locInput) locInput.value = '';
+
+  // 3. Reset UI tab permissions & user badge
+  applyPermissionsUI();
+  updateUserSchoolsUI();
+
+  showToast('Signed out successfully. Please log in to continue.', 'info');
+  showGatekeeperLoginScreen();
+}
+
+// Update Header Authenticated User Badge & Status Indicator
 function updateAuthUserBadge() {
-  const selectEl = document.getElementById('auth-user-select');
-  if (selectEl && currentUserAccount) {
-    selectEl.value = currentUserAccount;
+  const badgeContainer = document.getElementById('auth-user-badge-container');
+  const nameEl = document.getElementById('auth-user-display-name');
+  const statusEl = document.getElementById('auth-user-display-status');
+  const logoutBtn = document.getElementById('auth-logout-btn');
+  const loginBtn = document.getElementById('auth-login-btn');
+
+  if (currentUserAccount) {
+    if (badgeContainer) badgeContainer.style.display = 'flex';
+    if (nameEl) nameEl.textContent = currentUserName;
+    if (statusEl) statusEl.textContent = 'Authenticated';
+    if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+    if (loginBtn) loginBtn.style.display = 'none';
+  } else {
+    if (badgeContainer) badgeContainer.style.display = 'none';
+    if (logoutBtn) logoutBtn.style.display = 'none';
+    if (loginBtn) loginBtn.style.display = 'inline-flex';
   }
 }
 
 // Load User Portfolio
 async function loadUserPortfolio(userId) {
+  if (!userId) return;
   try {
-    const res = await fetch(`/api/user-portfolio/${userId}`);
+    const res = await fetch(`/api/user-portfolio/${userId}`, {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+    if (!res.ok && res.status === 401) {
+      logoutSession();
+      return;
+    }
     const data = await res.json();
 
     userSelectedSchools = data.selectedSchools || [];
@@ -42,6 +230,7 @@ async function loadUserPortfolio(userId) {
     if (locInput) locInput.value = data.targetLocation || '';
 
     updateUserSchoolsUI();
+    renderUserDashboard();
     fetchRecommendations();
   } catch (err) {
     console.error('Failed to load user portfolio:', err);
@@ -50,11 +239,15 @@ async function loadUserPortfolio(userId) {
 
 // Save Current User Portfolio to Backend (Silent Auto-Save)
 async function saveUserPortfolio(silent = false) {
+  if (!currentUserAccount) return;
   const targetLocation = document.getElementById('rec-location-input') ? document.getElementById('rec-location-input').value : '';
   try {
     const res = await fetch(`/api/user-portfolio/${currentUserAccount}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
       body: JSON.stringify({
         targetLocation,
         selectedSchools: userSelectedSchools,
@@ -65,7 +258,11 @@ async function saveUserPortfolio(silent = false) {
     if (res.ok) {
       if (!silent) showToast(`Portfolio saved successfully for ${currentUserName}!`, 'success');
     } else {
-      if (!silent) showToast('Failed to save portfolio.', 'error');
+      if (res.status === 401) {
+        logoutSession();
+      } else if (!silent) {
+        showToast('Failed to save portfolio.', 'error');
+      }
     }
   } catch (err) {
     console.error('Error saving user portfolio:', err);
@@ -74,61 +271,62 @@ async function saveUserPortfolio(silent = false) {
 }
 
 // Add a school to user selected list (Auto-saved by default)
-function addUserSchool(school) {
+async function addUserSchool(school) {
+  if (!school || !school.id) return;
   if (userSelectedSchools.some(s => s.id === school.id)) {
-    showToast('School is already in your selected list!', 'info');
+    showToast(`${school.name || 'School'} is already in your target list!`, 'info');
     return;
   }
 
   userSelectedSchools.push(school);
   updateUserSchoolsUI();
   fetchRecommendations();
-  saveUserPortfolio(true); // Auto-save changes immediately
+  await saveUserPortfolio(true); // Auto-save changes immediately
   showToast(`Added ${school.name} to your target list!`, 'success');
 }
 
 // Remove a school from user selected list (Auto-saved by default)
-function removeUserSchool(schoolId) {
+async function removeUserSchool(schoolId) {
   userSelectedSchools = userSelectedSchools.filter(s => s.id !== schoolId);
   updateUserSchoolsUI();
   fetchRecommendations();
-  saveUserPortfolio(true); // Auto-save changes immediately
+  await saveUserPortfolio(true); // Auto-save changes immediately
 }
 
 // Explicitly remove a school from ever appearing in recommendations for this user (Auto-saved by default)
-function removeRecommendation(schoolId) {
+async function removeRecommendation(schoolId) {
   if (!userRemovedSchoolIds.includes(schoolId)) {
     userRemovedSchoolIds.push(schoolId);
   }
   fetchRecommendations();
-  saveUserPortfolio(true); // Auto-save changes immediately
+  await saveUserPortfolio(true); // Auto-save changes immediately
   showToast('School removed from recommendations list.', 'info');
 }
 
 
-// Apply Role UI controls & tab visibility based on authenticated role
-function applyRoleUI() {
-  const adminElements = document.querySelectorAll('.admin-only');
-  adminElements.forEach(el => {
-    el.style.display = currentRole === 'admin' ? 'inline-flex' : 'none';
-  });
+// Apply Permissions UI controls & tab visibility based on session capabilities
+function applyPermissionsUI() {
+  const directoryTabBtn = document.getElementById('tab-directory-btn');
+  const adminTabBtn = document.getElementById('tab-admin-btn');
+
+  // Enforce tab access permissions: Directory View & Admin Portal hidden unless session holds explicit permission
+  const canViewDirectory = Array.isArray(currentPermissions) && currentPermissions.includes('directory:view');
+  const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
+
+  if (directoryTabBtn) directoryTabBtn.style.display = canViewDirectory ? 'inline-flex' : 'none';
+  if (adminTabBtn) adminTabBtn.style.display = canViewAdmin ? 'inline-flex' : 'none';
 
   updateAuthUserBadge();
 
-  if (currentRole === 'user') {
-    // Always land directly on dashboard for standard users
-    switchTab('dashboard');
-  } else {
-    // Land on Directory view for admin mode
+  // Landing page hierarchy: Land on Directory View if permitted, otherwise land on Parent Portal
+  if (canViewDirectory) {
     switchTab('directory');
-    renderSchools();
+  } else {
+    switchTab('dashboard');
   }
 }
 
-
-
-
-// Switch main navigation tab
+// Switch main navigation tab with capability check
 function switchTab(tabName) {
   const recommendTabBtn = document.getElementById('tab-recommend-btn');
   const directoryTabBtn = document.getElementById('tab-directory-btn');
@@ -143,20 +341,28 @@ function switchTab(tabName) {
   [recommendTabBtn, directoryTabBtn, adminTabBtn].forEach(btn => btn && btn.classList.remove('active'));
   [recommendContent, dashboardContent, directoryContent, adminContent].forEach(c => c && (c.style.display = 'none'));
 
-  if (tabName === 'dashboard') {
+  const canViewDirectory = Array.isArray(currentPermissions) && currentPermissions.includes('directory:view');
+  const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
+
+  if (tabName === 'recommend') {
+    if (recommendTabBtn) recommendTabBtn.classList.add('active');
+    if (recommendContent) recommendContent.style.display = 'block';
+    fetchRecommendations();
+  } else if (tabName === 'dashboard') {
     if (recommendTabBtn) recommendTabBtn.classList.add('active');
     if (dashboardContent) dashboardContent.style.display = 'block';
     renderUserDashboard();
-  } else if (tabName === 'admin' && currentRole === 'admin') {
+  } else if (tabName === 'admin' && canViewAdmin) {
     if (adminTabBtn) adminTabBtn.classList.add('active');
     if (adminContent) adminContent.style.display = 'block';
-  } else if (tabName === 'directory' && currentRole === 'admin') {
+  } else if (tabName === 'directory' && canViewDirectory) {
     if (directoryTabBtn) directoryTabBtn.classList.add('active');
     if (directoryContent) directoryContent.style.display = 'block';
   } else {
-    // Default to Recommendation Service tab
+    // Default fallback to Recommendation Assistant View
     if (recommendTabBtn) recommendTabBtn.classList.add('active');
     if (recommendContent) recommendContent.style.display = 'block';
+    fetchRecommendations();
   }
 }
 
@@ -392,7 +598,7 @@ function renderSchools() {
         <button class="btn ${isCompared ? 'btn-primary' : 'btn-outline'} btn-compare-trigger" data-id="${school.id}">
           <i class="fa-solid ${isCompared ? 'fa-check' : 'fa-plus'}"></i> ${isCompared ? 'Added' : 'Compare'}
         </button>
-        ${currentRole === 'admin' ? `
+        ${currentPermissions.includes('admin:edit') ? `
           <button class="btn btn-outline btn-edit-trigger" data-id="${school.id}" style="color: #7c3aed; border-color: #ddd6fe; max-width: 40px; padding: 0.6rem;" title="Edit Record">
             <i class="fa-solid fa-pen-to-square"></i>
           </button>
@@ -406,7 +612,7 @@ function renderSchools() {
     // Attach safe event listeners for card actions
     card.querySelector('.btn-detail-trigger').addEventListener('click', () => openSchoolDetail(school.id));
     card.querySelector('.btn-compare-trigger').addEventListener('click', () => toggleCompare(school.id));
-    if (currentRole === 'admin') {
+    if (currentPermissions.includes('admin:edit')) {
       const editBtn = card.querySelector('.btn-edit-trigger');
       const delBtn = card.querySelector('.btn-delete-trigger');
       if (editBtn) editBtn.addEventListener('click', () => openEditModal(school.id));
@@ -479,7 +685,7 @@ function renderSchools() {
           <button class="btn ${isCompared ? 'btn-primary' : 'btn-outline'} btn-tbl-compare" data-id="${school.id}" style="padding: 0.45rem; font-size: 0.85rem;" title="${isCompared ? 'Remove from Compare' : 'Add to Compare'}">
             <i class="fa-solid ${isCompared ? 'fa-check' : 'fa-plus'}"></i>
           </button>
-          ${currentRole === 'admin' ? `
+          ${currentPermissions.includes('admin:edit') ? `
             <button class="btn btn-outline btn-tbl-edit" data-id="${school.id}" style="padding: 0.45rem; font-size: 0.85rem; color: #7c3aed; border-color: #ddd6fe;" title="Edit Record">
               <i class="fa-solid fa-pen-to-square"></i>
             </button>
@@ -494,7 +700,7 @@ function renderSchools() {
     // Attach safe event listeners for table row actions
     tr.querySelector('.btn-tbl-detail').addEventListener('click', () => openSchoolDetail(school.id));
     tr.querySelector('.btn-tbl-compare').addEventListener('click', () => toggleCompare(school.id));
-    if (currentRole === 'admin') {
+    if (currentPermissions.includes('admin:edit')) {
       const editBtn = tr.querySelector('.btn-tbl-edit');
       const delBtn = tr.querySelector('.btn-tbl-delete');
       if (editBtn) editBtn.addEventListener('click', () => openEditModal(school.id));
@@ -526,50 +732,156 @@ function setupEventListeners() {
     savePortBtn.addEventListener('click', saveUserPortfolio);
   }
 
+  // Header Logout Button
+  const logoutBtn = document.getElementById('auth-logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', logoutSession);
+  }
+
+  // Header Open Login Button
+  const openLoginBtn = document.getElementById('auth-login-btn');
+  if (openLoginBtn) {
+    openLoginBtn.addEventListener('click', () => {
+      showGatekeeperLoginScreen();
+    });
+  }
+
+  // --- Google OAuth / SSO Handler ---
+  const btnGoogleSso = document.getElementById('btn-google-sso');
+  if (btnGoogleSso) {
+    btnGoogleSso.addEventListener('click', async () => {
+      let data;
+      try {
+        showToast('Authenticating with Google SSO...', 'info');
+        const res = await fetch('/api/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: 'google.parent@gmail.com',
+            name: 'Google Parent User',
+            googleId: 'google-sso-1029384756',
+            picture: 'https://lh3.googleusercontent.com/a/default-user'
+          })
+        });
+        data = await res.json();
+        if (!res.ok) {
+          showToast(data.error || 'Google SSO login failed', 'error');
+          return;
+        }
+      } catch (err) {
+        console.error('Google SSO network error:', err);
+        showToast('Google authentication request failed', 'error');
+        return;
+      }
+
+      try {
+        await setAuthenticatedSession(data, `Welcome ${data.user.name}! Signed in via Google SSO.`);
+      } catch (uiErr) {
+        console.error('Post-login UI initialization error:', uiErr);
+      }
+    });
+  }
+
+  // Gatekeeper Quick Demo Profile Select Handler
+  const gatekeeperDemoSelect = document.getElementById('gatekeeper-demo-select');
+  if (gatekeeperDemoSelect) {
+    gatekeeperDemoSelect.addEventListener('change', (e) => {
+      const val = e.target.value;
+      if (!val) return;
+      const [email, role] = val.split('|');
+      const emailInput = document.getElementById('gatekeeper-email');
+      const passInput = document.getElementById('gatekeeper-password');
+      if (emailInput) emailInput.value = email;
+      if (passInput) passInput.value = role === 'admin' ? 'admin' : 'user';
+    });
+  }
+
+  // Gatekeeper Form Submit Handler
+  const gatekeeperForm = document.getElementById('gatekeeper-login-form');
+  if (gatekeeperForm) {
+    gatekeeperForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('gatekeeper-email').value.trim();
+      const password = document.getElementById('gatekeeper-password').value;
+
+      let data;
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        data = await res.json();
+        if (!res.ok) {
+          showToast(data.error || 'Invalid email or password', 'error');
+          return;
+        }
+      } catch (err) {
+        console.error('Gatekeeper login network error:', err);
+        showToast('Login request failed', 'error');
+        return;
+      }
+
+      try {
+        await setAuthenticatedSession(data, `Logged in successfully as ${data.user.name}!`);
+      } catch (uiErr) {
+        console.error('Post-login UI initialization error:', uiErr);
+      }
+    });
+  }
+
+  // Open Signup Registration Modal from Gatekeeper Screen
+  const openSignupBtn = document.getElementById('gatekeeper-open-signup');
+  if (openSignupBtn) {
+    openSignupBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const signupModal = document.getElementById('auth-signup-modal');
+      if (signupModal) {
+        signupModal.style.display = 'flex';
+      }
+    });
+  }
+
+  // Modal Cancel / Close Triggers
+  const closeSignupBtn = document.getElementById('modal-close-signup');
+  const cancelSignupBtn = document.getElementById('modal-cancel-signup');
+  const handleCloseSignup = () => {
+    const signupModal = document.getElementById('auth-signup-modal');
+    if (signupModal) signupModal.style.display = 'none';
+    if (!currentUserAccount) {
+      showGatekeeperLoginScreen();
+    }
+  };
+  if (closeSignupBtn) closeSignupBtn.addEventListener('click', handleCloseSignup);
+  if (cancelSignupBtn) cancelSignupBtn.addEventListener('click', handleCloseSignup);
+
+  const closeLoginBtn = document.getElementById('modal-close-login');
+  const cancelLoginBtn = document.getElementById('modal-cancel-login');
+  const handleCloseLogin = () => {
+    const loginModal = document.getElementById('auth-login-modal');
+    if (loginModal) loginModal.style.display = 'none';
+    if (!currentUserAccount) {
+      showGatekeeperLoginScreen();
+    }
+  };
+  if (closeLoginBtn) closeLoginBtn.addEventListener('click', handleCloseLogin);
+  if (cancelLoginBtn) cancelLoginBtn.addEventListener('click', handleCloseLogin);
+
   // Auth Modals & Triggers
   const loginModal = document.getElementById('auth-login-modal');
   const signupModal = document.getElementById('auth-signup-modal');
 
-  const openLoginBtn = document.getElementById('auth-login-btn');
-  if (openLoginBtn) openLoginBtn.addEventListener('click', () => { loginModal.style.display = 'flex'; });
-
-  // Account Switcher Dropdown Change Handler
-  const userSelectDropdown = document.getElementById('auth-user-select');
-  if (userSelectDropdown) {
-    userSelectDropdown.addEventListener('change', async (e) => {
-      const selectedId = e.target.value;
-      if (selectedId === 'usr-admin-1') {
-        currentUserAccount = 'usr-admin-1';
-        currentUserName = 'System Admin (Manager)';
-        currentRole = 'admin';
-      } else if (selectedId === 'parent-sarah') {
-        currentUserAccount = 'parent-sarah';
-        currentUserName = 'Sarah Jenkins';
-        currentRole = 'user';
-      } else if (selectedId === 'parent-david') {
-        currentUserAccount = 'parent-david';
-        currentUserName = 'David & Emma Miller';
-        currentRole = 'user';
-      } else if (selectedId === 'parent-priya') {
-        currentUserAccount = 'parent-priya';
-        currentUserName = 'Priya Patel';
-        currentRole = 'user';
-      }
-      showToast(`Switched active profile to ${currentUserName} (${currentRole === 'admin' ? 'Admin' : 'Parent'})`, 'success');
-      await loadUserPortfolio(currentUserAccount);
-      applyRoleUI();
-    });
-  }
-
-  // Quick Demo Account Select Handler
+  // Quick Demo Account Select Handler in Modal
   const quickDemoSelect = document.getElementById('quick-demo-account-select');
   if (quickDemoSelect) {
     quickDemoSelect.addEventListener('change', async (e) => {
       const val = e.target.value;
       if (!val) return;
       const [email, role] = val.split('|');
-      document.getElementById('login-email').value = email;
-      document.getElementById('login-password').value = role === 'admin' ? 'admin' : 'user';
+      const emailEl = document.getElementById('login-email');
+      const passEl = document.getElementById('login-password');
+      if (emailEl) emailEl.value = email;
+      if (passEl) passEl.value = role === 'admin' ? 'admin' : 'user';
     });
   }
 
@@ -581,28 +893,28 @@ function setupEventListeners() {
       const email = document.getElementById('login-email').value.trim();
       const password = document.getElementById('login-password').value;
 
+      let data;
       try {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password })
         });
-        const data = await res.json();
-
-        if (res.ok) {
-          currentUserAccount = data.user.id;
-          currentUserName = data.user.name;
-          currentRole = data.user.role;
-          loginModal.style.display = 'none';
-          showToast(`Logged in successfully as ${currentUserName} (${currentRole === 'admin' ? 'Admin' : 'Parent'})!`, 'success');
-          await loadUserPortfolio(currentUserAccount);
-          applyRoleUI();
-        } else {
-          showToast(data.error || 'Login failed', 'error');
+        data = await res.json();
+        if (!res.ok) {
+          showToast(data.error || 'Invalid email or password', 'error');
+          return;
         }
       } catch (err) {
-        console.error('Login error:', err);
+        console.error('Login network error:', err);
         showToast('Login request failed', 'error');
+        return;
+      }
+
+      try {
+        await setAuthenticatedSession(data, `Logged in successfully as ${data.user.name}!`);
+      } catch (uiErr) {
+        console.error('Post-login UI initialization error:', uiErr);
       }
     });
   }
@@ -612,36 +924,43 @@ function setupEventListeners() {
   if (signupForm) {
     signupForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const name = document.getElementById('signup-name').value.trim();
-      const email = document.getElementById('signup-email').value.trim();
-      const password = document.getElementById('signup-password').value;
-      const role = document.getElementById('signup-role').value;
+      const nameEl = document.getElementById('signup-name');
+      const emailEl = document.getElementById('signup-email');
+      const passwordEl = document.getElementById('signup-password');
 
+      if (!nameEl || !emailEl || !passwordEl) return;
+
+      const name = nameEl.value.trim();
+      const email = emailEl.value.trim();
+      const password = passwordEl.value;
+
+      let data;
       try {
         const res = await fetch('/api/auth/signup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, email, password, role })
+          body: JSON.stringify({ name, email, password })
         });
-        const data = await res.json();
-
-        if (res.ok) {
-          currentUserAccount = data.user.id;
-          currentUserName = data.user.name;
-          currentRole = data.user.role;
-          signupModal.style.display = 'none';
-          showToast(`Welcome ${currentUserName}! Account created with ${currentRole} permissions.`, 'success');
-          await loadUserPortfolio(currentUserAccount);
-          applyRoleUI();
-        } else {
+        data = await res.json();
+        if (!res.ok) {
           showToast(data.error || 'Registration failed', 'error');
+          return;
         }
       } catch (err) {
-        console.error('Signup error:', err);
+        console.error('Signup network error:', err);
         showToast('Signup request failed', 'error');
+        return;
+      }
+
+      try {
+        if (signupModal) signupModal.style.display = 'none';
+        await setAuthenticatedSession(data, `Welcome ${data.user.name}! Account created.`);
+      } catch (uiErr) {
+        console.error('Post-signup UI initialization error:', uiErr);
       }
     });
   }
+
 
 
 
@@ -792,32 +1111,6 @@ function setupEventListeners() {
     }
   });
 
-// Helper to show non-blocking persistent toast notifications
-
-function showToast(message, type = 'success', duration = 5000) {
-  const toast = document.getElementById('toast-notification');
-  const msgEl = document.getElementById('toast-message');
-  const iconEl = document.getElementById('toast-icon');
-
-  toast.className = `toast-banner ${type}`;
-  msgEl.textContent = message;
-
-  if (type === 'success') iconEl.className = 'fa-solid fa-circle-check';
-  else if (type === 'error') iconEl.className = 'fa-solid fa-triangle-exclamation';
-  else iconEl.className = 'fa-solid fa-circle-info';
-
-  toast.style.display = 'flex';
-
-  document.getElementById('toast-close-btn').onclick = () => {
-    toast.style.display = 'none';
-  };
-
-  if (duration > 0) {
-    setTimeout(() => {
-      toast.style.display = 'none';
-    }, duration);
-  }
-}
 
 // Client-side Blob download trigger function to guarantee file saving on local filesystem
 async function triggerDownload(event, url, defaultFilename) {
@@ -1723,9 +2016,9 @@ function openAddModal() {
   document.getElementById('add-modal').style.display = 'flex';
 }
 
-// Open Edit Modal with pre-filled school values (Admin privilege)
+// Open Edit Modal with pre-filled school values
 async function openEditModal(id) {
-  if (currentRole !== 'admin') return;
+  if (!currentPermissions.includes('admin:edit')) return;
 
   try {
     const res = await fetch(`/api/schools/${id}`);
@@ -1761,9 +2054,9 @@ async function openEditModal(id) {
   }
 }
 
-// Delete single school record (Admin privilege)
+// Delete single school record
 async function deleteSchool(id) {
-  if (currentRole !== 'admin') return;
+  if (!currentPermissions.includes('admin:edit')) return;
   if (!confirm('Are you sure you want to delete this school record?')) return;
 
   try {
@@ -1896,19 +2189,19 @@ async function openSchoolDetail(id) {
           <span class="badge-exam">${school.schoolType}</span>
           <span class="badge-exam">${school.gender} intake</span>
 
-          <!-- Editable / Toggleable Hot Pill -->
-          <button type="button" class="btn" id="toggle-hot-btn" style="border:none; cursor:${currentRole === 'admin' ? 'pointer' : 'default'}; padding:0;" title="${currentRole === 'admin' ? 'Click to toggle Hot status' : 'Hot status'}">
+          <!-- Toggleable Hot Pill -->
+          <button type="button" class="btn" id="toggle-hot-btn" style="border:none; cursor:${currentPermissions.includes('admin:edit') ? 'pointer' : 'default'}; padding:0;" title="${currentPermissions.includes('admin:edit') ? 'Click to toggle Hot status' : 'Hot status'}">
             ${school.hot
-              ? `<span class="badge-hot"><i class="fa-solid fa-fire"></i> Hot ${currentRole === 'admin' ? '✏️' : ''}</span>`
-              : `<span style="font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-fire"></i> Not Hot ${currentRole === 'admin' ? '✏️' : ''}</span>`
+              ? `<span class="badge-hot"><i class="fa-solid fa-fire"></i> Hot ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
+              : `<span style="font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-fire"></i> Not Hot ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
             }
           </button>
 
-          <!-- Editable / Toggleable Verified / Official Pill -->
-          <button type="button" class="btn" id="toggle-official-btn" style="border:none; cursor:${currentRole === 'admin' ? 'pointer' : 'default'}; padding:0;" title="${currentRole === 'admin' ? 'Click to toggle Official DfE status' : 'Official status'}">
+          <!-- Toggleable Verified / Official Pill -->
+          <button type="button" class="btn" id="toggle-official-btn" style="border:none; cursor:${currentPermissions.includes('admin:edit') ? 'pointer' : 'default'}; padding:0;" title="${currentPermissions.includes('admin:edit') ? 'Click to toggle Official DfE status' : 'Official status'}">
             ${school.official
-              ? `<span class="badge-official"><i class="fa-solid fa-circle-check"></i> Official DfE ${currentRole === 'admin' ? '✏️' : ''}</span>`
-              : `<span style="font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-circle-question"></i> Unofficial ${currentRole === 'admin' ? '✏️' : ''}</span>`
+              ? `<span class="badge-official"><i class="fa-solid fa-circle-check"></i> Official DfE ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
+              : `<span style="font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-circle-question"></i> Unofficial ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
             }
           </button>
         </div>
@@ -1935,21 +2228,34 @@ async function openSchoolDetail(id) {
       </div>
 
       <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap:wrap; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 1rem;">
+        <button type="button" class="btn ${userSelectedSchools.some(u => u.id === school.id) ? 'btn-primary' : 'btn-outline'}" id="detail-shortlist-btn" style="${userSelectedSchools.some(u => u.id === school.id) ? 'background:#059669; border-color:#059669;' : 'color:#059669; border-color:#6ee7b7;'}">
+          <i class="fa-solid ${userSelectedSchools.some(u => u.id === school.id) ? 'fa-check' : 'fa-plus'}"></i> ${userSelectedSchools.some(u => u.id === school.id) ? 'Shortlisted' : 'Add to Shortlist'}
+        </button>
         ${school.website ? `<a href="${school.website}" target="_blank" class="btn btn-primary"><i class="fa-solid fa-globe"></i> Official Website</a>` : ''}
-        ${school.compareSchoolPerformanceUrl ? `<a href="${school.compareSchoolPerformanceUrl}" target="_blank" class="btn btn-outline" style="color:#059669; border-color:#6ee7b7;"><i class="fa-solid fa-chart-bar"></i> Compare School Performance</a>` : ''}
+        ${school.compareSchoolPerformanceUrl ? `<a href="${school.compareSchoolPerformanceUrl}" target="_blank" class="btn btn-outline" style="color:#059669; border-color:#6ee7b7;"><i class="fa-solid fa-chart-bar"></i> Compare Performance</a>` : ''}
         ${school.phone ? `<a href="tel:${school.phone}" class="btn btn-outline"><i class="fa-solid fa-phone"></i> ${school.phone}</a>` : ''}
         ${school.email ? `<a href="mailto:${school.email}" class="btn btn-outline"><i class="fa-solid fa-envelope"></i> Email School</a>` : ''}
-        ${currentRole === 'admin' ? `
+        ${currentPermissions.includes('admin:portal') ? `
           <button type="button" class="btn btn-primary" id="detail-merge-btn" style="background:#7c3aed; border-color:#7c3aed; margin-left:auto;">
-            <i class="fa-solid fa-code-merge"></i> Merge This School Record
+            <i class="fa-solid fa-code-merge"></i> Merge Record
           </button>
         ` : ''}
       </div>
     `;
 
-    // Wire merge listener for Admin role
+    // Wire Shortlist button listener
+    const detailShortlistBtn = document.getElementById('detail-shortlist-btn');
+    if (detailShortlistBtn) {
+      detailShortlistBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        addUserSchool(school);
+        openSchoolDetail(school.id);
+      });
+    }
+
+    // Wire merge listener for admin:portal permission
     const detailMergeBtn = document.getElementById('detail-merge-btn');
-    if (detailMergeBtn && currentRole === 'admin') {
+    if (detailMergeBtn && currentPermissions.includes('admin:portal')) {
       detailMergeBtn.addEventListener('click', () => {
         document.getElementById('detail-modal').style.display = 'none';
         switchTab('admin');
@@ -1959,9 +2265,9 @@ async function openSchoolDetail(id) {
       });
     }
 
-    // Wire toggle listeners for Admin role
+    // Wire toggle listeners for admin:edit permission
     const hotBtn = document.getElementById('toggle-hot-btn');
-    if (hotBtn && currentRole === 'admin') {
+    if (hotBtn && currentPermissions.includes('admin:edit')) {
       hotBtn.addEventListener('click', async () => {
         const newHot = !school.hot;
         await updateSchoolPill(school.id, { hot: newHot });
@@ -1972,7 +2278,7 @@ async function openSchoolDetail(id) {
     }
 
     const officialBtn = document.getElementById('toggle-official-btn');
-    if (officialBtn && currentRole === 'admin') {
+    if (officialBtn && currentPermissions.includes('admin:edit')) {
       officialBtn.addEventListener('click', async () => {
         const newOfficial = !school.official;
         await updateSchoolPill(school.id, { official: newOfficial });
@@ -2267,17 +2573,39 @@ function renderRecommendations(items) {
       </div>
     `;
 
-    // Button event listeners
-    card.querySelector('.btn-add-user-school').addEventListener('click', () => addUserSchool(s));
-    card.querySelector('.btn-rec-detail').addEventListener('click', () => openSchoolDetail(s.id));
-    card.querySelector('.btn-remove-rec').addEventListener('click', () => removeRecommendation(s.id));
+    // Button event listeners with safe event isolation
+    const addBtn = card.querySelector('.btn-add-user-school');
+    const detailBtn = card.querySelector('.btn-rec-detail');
+    const removeBtn = card.querySelector('.btn-remove-rec');
+
+    if (addBtn) {
+      addBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        addUserSchool(s);
+      });
+    }
+    if (detailBtn) {
+      detailBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openSchoolDetail(s.id);
+      });
+    }
+    if (removeBtn) {
+      removeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        removeRecommendation(s.id);
+      });
+    }
 
     container.appendChild(card);
   });
 }
 
 
-// Render User Selected School Chips
+// Render User Selected School Chips & Synchronize Dashboard Table
 function updateUserSchoolsUI() {
   const container = document.getElementById('user-schools-chips');
   const countEl = document.getElementById('user-schools-count');
@@ -2285,8 +2613,10 @@ function updateUserSchoolsUI() {
 
   if (countEl) countEl.textContent = userSelectedSchools.length;
   if (countTopEl) countTopEl.textContent = userSelectedSchools.length;
-  if (!container) return;
 
+  renderUserDashboard();
+
+  if (!container) return;
 
   if (userSelectedSchools.length === 0) {
     container.innerHTML = '<span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">No schools added yet. Search above to add your first school!</span>';
