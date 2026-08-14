@@ -65,6 +65,7 @@ async function initApp() {
   // 4. Fetch user portfolio & load application data
   if (authenticated) {
     await loadUserPortfolio(currentUserAccount);
+    await loadUserRecProfile();
     applyPermissionsUI();
   }
 
@@ -72,6 +73,9 @@ async function initApp() {
   await loadSchools();
   loadRecWeights();
   populateManualMergeDropdowns();
+
+  // 5. Always fetch & render recommendations on load so landing page is populated with top schools immediately
+  await fetchRecommendations();
 }
 
 // Check active session with backend /api/auth/me
@@ -121,11 +125,28 @@ async function checkActiveSession() {
   return false;
 }
 
+// Trigger Google Sign-In Workflow across application
+function triggerGoogleSignInWorkflow(e) {
+  if (e) {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+  }
+
+  const overlay = document.getElementById('auth-gatekeeper-overlay');
+  if (overlay) overlay.style.display = 'none';
+
+  // Direct redirect to Google OAuth 2.0 Protocol for Google Verification
+  window.location.href = '/api/auth/google';
+}
+
 // Show full-screen unauthenticated login screen
 function showGatekeeperLoginScreen() {
   document.documentElement.classList.remove('session-pending');
   const overlay = document.getElementById('auth-gatekeeper-overlay');
-  if (overlay) overlay.style.display = 'flex';
+  if (overlay) {
+    overlay.style.display = 'flex';
+    overlay.style.zIndex = '20000';
+  }
 
   const badge = document.getElementById('auth-user-badge-container');
   const logoutBtn = document.getElementById('auth-logout-btn');
@@ -839,43 +860,79 @@ function setupEventListeners() {
   // Header Open Login Button
   const openLoginBtn = document.getElementById('auth-login-btn');
   if (openLoginBtn) {
-    openLoginBtn.addEventListener('click', () => {
-      showGatekeeperLoginScreen();
+    openLoginBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      triggerGoogleSignInWorkflow();
+    });
+  }
+
+  // Gatekeeper Close Button
+  const gatekeeperCloseBtn = document.getElementById('gatekeeper-close-btn');
+  if (gatekeeperCloseBtn) {
+    gatekeeperCloseBtn.addEventListener('click', () => {
+      const overlay = document.getElementById('auth-gatekeeper-overlay');
+      if (overlay) overlay.style.display = 'none';
     });
   }
 
   // --- Google OAuth / SSO Handler ---
   const btnGoogleSso = document.getElementById('btn-google-sso');
+  const googleSsoModal = document.getElementById('google-sso-modal');
+  const googleSsoForm = document.getElementById('google-sso-form');
+  const closeGoogleModalBtn = document.getElementById('modal-close-google-sso');
+  const cancelGoogleModalBtn = document.getElementById('modal-cancel-google-sso');
+
+  const hideGoogleSsoModal = () => {
+    if (googleSsoModal) googleSsoModal.style.display = 'none';
+  };
+
   if (btnGoogleSso) {
-    btnGoogleSso.addEventListener('click', async () => {
-      let data;
+    btnGoogleSso.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      triggerGoogleSignInWorkflow();
+    });
+  }
+
+  if (closeGoogleModalBtn) closeGoogleModalBtn.addEventListener('click', hideGoogleSsoModal);
+  if (cancelGoogleModalBtn) cancelGoogleModalBtn.addEventListener('click', hideGoogleSsoModal);
+
+  if (googleSsoForm) {
+    googleSsoForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const emailVal = document.getElementById('google-sso-email-input').value.trim();
+      const nameVal = document.getElementById('google-sso-name-input').value.trim();
+
+      if (!emailVal) {
+        showToast('Please enter a valid Google Account email', 'error');
+        return;
+      }
+
+      hideGoogleSsoModal();
+      showToast(`Authenticating Google Account (${emailVal})...`, 'info');
+
       try {
-        showToast('Authenticating with Google SSO...', 'info');
         const res = await fetch('/api/auth/google', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email: 'google.parent@gmail.com',
-            name: 'Google Parent User',
-            googleId: 'google-sso-1029384756',
-            picture: 'https://lh3.googleusercontent.com/a/default-user'
+            email: emailVal,
+            name: nameVal,
+            googleId: `google-${Date.now()}`
           })
         });
-        data = await res.json();
+
+        const data = await res.json();
         if (!res.ok) {
-          showToast(data.error || 'Google SSO login failed', 'error');
+          showToast(data.error || 'Google authentication failed', 'error');
           return;
         }
-      } catch (err) {
-        console.error('Google SSO network error:', err);
-        showToast('Google authentication request failed', 'error');
-        return;
-      }
 
-      try {
-        await setAuthenticatedSession(data, `Welcome ${data.user.name}! Signed in via Google SSO.`);
-      } catch (uiErr) {
-        console.error('Post-login UI initialization error:', uiErr);
+        await setAuthenticatedSession(data, `Welcome ${data.user.name}! Authenticated with Google Account.`);
+      } catch (err) {
+        console.error('Google authentication error:', err);
+        showToast('Google authentication request failed', 'error');
       }
     });
   }
@@ -928,30 +985,7 @@ function setupEventListeners() {
     });
   }
 
-  // Open Signup Registration Modal from Gatekeeper Screen
-  const openSignupBtn = document.getElementById('gatekeeper-open-signup');
-  if (openSignupBtn) {
-    openSignupBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const signupModal = document.getElementById('auth-signup-modal');
-      if (signupModal) {
-        signupModal.style.display = 'flex';
-      }
-    });
-  }
-
   // Modal Cancel / Close Triggers
-  const closeSignupBtn = document.getElementById('modal-close-signup');
-  const cancelSignupBtn = document.getElementById('modal-cancel-signup');
-  const handleCloseSignup = () => {
-    const signupModal = document.getElementById('auth-signup-modal');
-    if (signupModal) signupModal.style.display = 'none';
-    if (!currentUserAccount) {
-      showGatekeeperLoginScreen();
-    }
-  };
-  if (closeSignupBtn) closeSignupBtn.addEventListener('click', handleCloseSignup);
-  if (cancelSignupBtn) cancelSignupBtn.addEventListener('click', handleCloseSignup);
 
   const closeLoginBtn = document.getElementById('modal-close-login');
   const cancelLoginBtn = document.getElementById('modal-cancel-login');
@@ -2888,6 +2922,30 @@ function renderRecommendations(items) {
 
   container.innerHTML = '';
 
+  if (!currentUserAccount) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 3rem 1.5rem; background: #f8fafc; border-radius: 12px; border: 1px dashed #cbd5e1;">
+        <i class="fa-solid fa-lock" style="font-size: 2.5rem; color: #4f46e5; margin-bottom: 0.8rem;"></i>
+        <h4 style="font-size: 1.15rem; color: #1e293b; margin-bottom: 0.4rem;">Please Sign In to Access Recommendations</h4>
+        <p style="color: #64748b; font-size: 0.88rem; max-width: 520px; margin: 0 auto 1.25rem; line-height: 1.4;">
+          Sign in with your Google Account or profile to view personalized school recommendations, qualitative matching, and build your target shortlist.
+        </p>
+        <button id="btn-rec-sign-in" class="btn btn-primary" style="background: linear-gradient(135deg, #4285F4 0%, #1a73e8 100%); border: none; font-size: 0.9rem; padding: 0.6rem 1.2rem; font-weight: 700;">
+          <i class="fa-brands fa-google"></i> Sign In with Google Account
+        </button>
+      </div>
+    `;
+
+    const recSignInBtn = document.getElementById('btn-rec-sign-in');
+    if (recSignInBtn) {
+      recSignInBtn.onclick = (e) => {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        triggerGoogleSignInWorkflow();
+      };
+    }
+    return;
+  }
+
   if (items.length === 0) {
     container.innerHTML = `
       <div style="text-align: center; padding: 2.5rem; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1;">
@@ -2978,13 +3036,13 @@ function renderRecommendations(items) {
 
   // Attach event listeners for Add to Shortlist & Remove from suggestions
   container.querySelectorAll('.btn-add-rec').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = btn.getAttribute('data-id');
       const targetSchool = items.find(item => item.school.id === id)?.school;
       if (targetSchool) {
-        addSchoolToUserPortfolio(targetSchool);
-        btn.textContent = '✓ Shortlisted';
+        await addUserSchool(targetSchool);
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Shortlisted';
         btn.className = 'btn btn-secondary btn-add-rec';
         btn.style.background = '#e2e8f0';
         btn.style.color = '#475569';
@@ -2997,11 +3055,7 @@ function renderRecommendations(items) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = btn.getAttribute('data-id');
-      if (!userRemovedSchoolIds.includes(id)) {
-        userRemovedSchoolIds.push(id);
-        saveUserPortfolio(true);
-        fetchRecommendations();
-      }
+      removeRecommendation(id);
     });
   });
 }

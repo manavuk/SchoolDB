@@ -15,25 +15,32 @@ console.log('✓ Unauthenticated session returns 401 / unauthenticated');
 // 2. Verify Google SSO account provision & login
 console.log('2. Testing Google SSO Authentication Endpoint...');
 const googlePayload = {
-  email: 'parent.google.test@gmail.com',
-  name: 'Sarah Google User',
+  email: 'manav.sharma@gmail.com',
+  name: 'Manav Sharma',
   googleId: '10987654321'
 };
 
 let user = db.getUserByEmail(googlePayload.email);
 if (!user) {
+  const derivedName = googlePayload.email.split('@')[0]
+    .split(/[._-]+/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+
   user = db.insertUser({
     id: `usr-google-${Date.now()}`,
-    name: googlePayload.name,
+    name: googlePayload.name || derivedName,
     email: googlePayload.email,
     password: `sso-google-test`,
     role: 'user',
+    permissions: ['parent:recommendations', 'parent:portfolio'],
     createdAt: new Date().toISOString()
   });
 }
 
 assert(user, 'Google SSO user should be created in database');
-assert.strictEqual(user.email, 'parent.google.test@gmail.com', 'Email should match');
+assert.strictEqual(user.email, 'manav.sharma@gmail.com', 'Email should match');
+assert.strictEqual(user.name, 'Manav Sharma', 'Name should match authentic Google user name');
 assert(Array.isArray(user.permissions) && user.permissions.includes('parent:recommendations'), 'All Google OAuth accounts must be created with parent permissions');
 console.log(`✓ Google SSO user created/retrieved: ${user.name} (${user.email}) - Permissions: ${user.permissions.join(', ')}`);
 

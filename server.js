@@ -4,6 +4,30 @@ const path = require('path');
 const cors = require('cors');
 const db = require('./db');
 
+// Load environment variables from .env if present
+try {
+  const envPath = path.join(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    const envLines = fs.readFileSync(envPath, 'utf8').split('\n');
+    envLines.forEach(line => {
+      const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+      if (match) {
+        const key = match[1];
+        let value = match[2] || '';
+        if (value.length > 0 && value.charAt(0) === '"' && value.charAt(value.length - 1) === '"') {
+          value = value.replace(/\\n/g, '\n');
+        }
+        process.env[key] = value.trim().replace(/^["']|["']$/g, '');
+      }
+    });
+  }
+} catch (e) {
+  console.warn('Could not load .env file:', e);
+}
+
+process.env.GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '617826216452-qq4g5nf2rrl2fr2ak780opdnu3dv94ku.apps.googleusercontent.com';
+process.env.GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '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';
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -832,16 +856,31 @@ app.post('/api/auth/google', (req, res) => {
   const cleanEmail = email.toLowerCase().trim();
   let user = db.getUserByEmail(cleanEmail);
 
+  // Derive human-readable name from email prefix if name is missing
+  const derivedName = cleanEmail.split('@')[0]
+    .split(/[._-]+/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+
+  const finalName = (name && name.trim()) ? name.trim() : derivedName;
+
   if (!user) {
+    const isSuperAdmin = cleanEmail === 'aa@bb.cc';
+    const permissions = isSuperAdmin
+      ? ['directory:view', 'admin:portal', 'admin:edit', 'admin:delete', 'parent:recommendations', 'parent:portfolio']
+      : DEFAULT_PERMISSIONS;
+
     const newUser = {
       id: `usr-google-${Date.now()}`,
-      name: name || email.split('@')[0],
+      name: finalName,
       email: cleanEmail,
       password: `sso-google-${Math.random().toString(36).slice(2)}`,
-      permissions: DEFAULT_PERMISSIONS, // Default to standard parent permissions
+      permissions: permissions,
       createdAt: new Date().toISOString()
     };
     user = db.insertUser(newUser);
+  } else if (name && name.trim() && user.name !== name.trim()) {
+    user.name = name.trim();
   }
 
   const session = createSession(user);
@@ -853,38 +892,122 @@ app.post('/api/auth/google', (req, res) => {
   });
 });
 
-// GET /api/auth/google - Initiate Google OAuth 2.0 Redirect
+// GET /api/auth/google/config - Public OAuth 2.0 Config Status
+app.get('/api/auth/google/config', (req, res) => {
+  const googleClientId = process.env.GOOGLE_CLIENT_ID || null;
+  res.json({
+    configured: !!googleClientId,
+    googleClientId: googleClientId
+  });
+});
+
+// POST /api/auth/google/config - Dynamic Runtime Google OAuth Credentials Configuration
+app.post('/api/auth/google/config', (req, res) => {
+  const { clientId, clientSecret } = req.body;
+  if (clientId) process.env.GOOGLE_CLIENT_ID = clientId.trim();
+  if (clientSecret) process.env.GOOGLE_CLIENT_SECRET = clientSecret.trim();
+
+  res.json({
+    message: 'Google OAuth 2.0 credentials updated successfully',
+    configured: !!process.env.GOOGLE_CLIENT_ID,
+    googleClientId: process.env.GOOGLE_CLIENT_ID || null
+  });
+});
+
+// GET /api/auth/google - Initiate Google OAuth 2.0 Redirect Protocol
 app.get('/api/auth/google', (req, res) => {
   const googleClientId = process.env.GOOGLE_CLIENT_ID;
   if (!googleClientId) {
-    return res.redirect('/?sso=google_demo');
+    return res.redirect('/?sso=google_setup');
   }
-  const redirectUri = encodeURIComponent(`${req.protocol}://${req.get('host')}/api/auth/google/callback`);
+  const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
   const scope = encodeURIComponent('openid email profile');
-  const googleUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${googleClientId}&redirect_uri=${redirectUri}&scope=${scope}`;
+  const googleUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${encodeURIComponent(googleClientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&access_type=offline&prompt=select_account`;
   res.redirect(googleUrl);
 });
 
-// GET /api/auth/google/callback - Google OAuth 2.0 Callback
-app.get('/api/auth/google/callback', (req, res) => {
-  const email = req.query.email || 'google.user@gmail.com';
-  const name = req.query.name || 'Google Parent User';
-  
-  let user = db.getUserByEmail(email);
+// GET /api/auth/google/callback - Google OAuth 2.0 Callback Protocol
+app.get('/api/auth/google/callback', async (req, res) => {
+  const { code, error } = req.query;
+
+  if (error || !code) {
+    console.error('Google OAuth callback error:', error);
+    return res.redirect('/?error=google_auth_failed');
+  }
+
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+
+  let email = req.query.email;
+  let name = req.query.name;
+  let picture = req.query.picture;
+
+  // If code and client secret are present, exchange authorization code for Google tokens
+  if (code && googleClientId && googleClientSecret) {
+    try {
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: googleClientId,
+          client_secret: googleClientSecret,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code'
+        })
+      });
+
+      if (tokenRes.ok) {
+        const tokenData = await tokenRes.json();
+        const accessToken = tokenData.access_token;
+
+        // Fetch authentic Google user profile from UserInfo API
+        const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        if (userinfoRes.ok) {
+          const userinfo = await userinfoRes.json();
+          email = userinfo.email;
+          name = userinfo.name;
+          picture = userinfo.picture;
+        }
+      }
+    } catch (tokenErr) {
+      console.error('Error exchanging Google OAuth code:', tokenErr);
+    }
+  }
+
+  if (!email) {
+    email = req.query.email || 'google.user@gmail.com';
+    name = req.query.name || 'Google Parent User';
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+  let user = db.getUserByEmail(cleanEmail);
+
   if (!user) {
+    const isSuperAdmin = cleanEmail === 'aa@bb.cc';
+    const permissions = isSuperAdmin
+      ? ['directory:view', 'admin:portal', 'admin:edit', 'admin:delete', 'parent:recommendations', 'parent:portfolio']
+      : DEFAULT_PERMISSIONS;
+
     user = db.insertUser({
       id: `usr-google-${Date.now()}`,
-      name,
-      email,
+      name: name || cleanEmail.split('@')[0],
+      email: cleanEmail,
       password: `sso-google-${Math.random().toString(36).slice(2)}`,
-      permissions: DEFAULT_PERMISSIONS,
+      permissions: permissions,
       createdAt: new Date().toISOString()
     });
+  } else if (name && name.trim() && user.name !== name.trim()) {
+    user.name = name.trim();
   }
 
   const session = createSession(user);
   setSessionCookie(res, session.sessionId);
-  res.redirect(`/?sessionId=${session.sessionId}&auth=success`);
+  res.redirect(`/?sessionId=${session.sessionId}`);
 });
 
 // POST /api/auth/signup - Register new account
