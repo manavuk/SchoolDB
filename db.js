@@ -80,6 +80,7 @@ function initTables() {
       postcode TEXT,
       address TEXT,
       schoolType TEXT,
+      rawSchoolType TEXT,
       gender TEXT,
       ageRange TEXT,
       pupilCount INTEGER,
@@ -107,6 +108,13 @@ function initTables() {
       extra_json TEXT
     );
   `);
+
+  // Migration safeguard: add rawSchoolType column if missing
+  try {
+    sqlite.exec(`ALTER TABLE schools ADD COLUMN rawSchoolType TEXT;`);
+  } catch (e) {
+    // Column already exists
+  }
 
   // Index for fast search and filtering
   sqlite.exec(`
@@ -151,17 +159,25 @@ function initTables() {
     console.error('Error seeding aa@bb.cc admin user:', e);
   }
 
-  // 3. User Portfolios table
+  // 3. User Portfolios table (supports Classic Shortlist & Parent Portal 2.0 Dual Track)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS user_portfolios (
       userId TEXT PRIMARY KEY,
       targetLocation TEXT,
       selectedSchools TEXT,
       removedSchoolIds TEXT,
+      cafRankings TEXT,
+      independentSchools TEXT,
+      parentNotes TEXT,
       savedAt TEXT,
       FOREIGN KEY(userId) REFERENCES users(id)
     );
   `);
+
+  // Migration safeguards: add Parent 2.0 dual-track columns if missing
+  try { sqlite.exec(`ALTER TABLE user_portfolios ADD COLUMN cafRankings TEXT;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE user_portfolios ADD COLUMN independentSchools TEXT;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE user_portfolios ADD COLUMN parentNotes TEXT;`); } catch (e) {}
 
   // 4. Reviewed Pairs table
   sqlite.exec(`
@@ -219,6 +235,58 @@ function initTables() {
       updatedAt TEXT NOT NULL
     );
   `);
+
+  // 9. Field Confidence Votes table
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS field_confidence_votes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId TEXT NOT NULL,
+      schoolId TEXT NOT NULL,
+      fieldName TEXT NOT NULL,
+      vote INTEGER NOT NULL,
+      votedAt TEXT NOT NULL,
+      UNIQUE(userId, schoolId, fieldName)
+    );
+  `);
+
+  // 10. Admin Field Reviews table
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS admin_field_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      schoolId TEXT NOT NULL,
+      fieldName TEXT NOT NULL,
+      reviewedBy TEXT NOT NULL,
+      reviewedAt TEXT NOT NULL,
+      UNIQUE(schoolId, fieldName)
+    );
+  `);
+}
+
+// Helper to normalize school type strictly to Grammar, Independent, or Comprehensive
+function normalizeSchoolType(type, name, ofstedRating) {
+  const current = (type || '').trim();
+  const lowerType = current.toLowerCase();
+  const lowerName = (name || '').toLowerCase();
+
+  // 1. Independent
+  if (lowerType.includes('independent') || lowerType.includes('isi') || (ofstedRating && ofstedRating.includes('ISI'))) {
+    return 'Independent';
+  }
+
+  // 2. Grammar (strip brackets like Grammar (Academy), Grammar (Voluntary Aided), or match grammar schools)
+  if (
+    lowerType.includes('grammar') ||
+    lowerName.includes('grammar') ||
+    lowerName.includes('tiffin') ||
+    lowerName.includes('latymer school') ||
+    lowerName.includes('henrietta barnett') ||
+    lowerName.includes('queen elizabeth\'s school, barnet')
+  ) {
+    return 'Grammar';
+  }
+
+  // 3. Comprehensive (default for all other state-funded / academy / free schools)
+  return 'Comprehensive';
 }
 
 // Convert school SQLite record to JS object
@@ -272,7 +340,8 @@ function recordToSchool(row) {
     region: row.region || '',
     postcode: row.postcode || '',
     address: row.address || '',
-    schoolType: row.schoolType || '',
+    schoolType: normalizeSchoolType(row.schoolType, row.name, row.ofstedRating),
+    rawSchoolType: row.rawSchoolType || row.schoolType || '',
     gender: row.gender || '',
     ageRange: row.ageRange || '',
     pupilCount: typeof row.pupilCount === 'number' ? row.pupilCount : (parseInt(row.pupilCount, 10) || 0),
@@ -308,12 +377,12 @@ function recordToSchool(row) {
 function schoolToParams(s) {
   const knownKeys = new Set([
     'id', 'name', 'urn', 'la', 'region', 'postcode', 'address', 'schoolType',
-    'gender', 'ageRange', 'pupilCount', 'ofstedRating', 'gcseProgress8',
-    'gcseAttainment8', 'ebaccAveragePointScore', 'entranceExamType',
-    'entranceExamDates', 'gcseSubjects', 'admissionsPolicy', 'website',
-    'phone', 'email', 'description', 'official', 'hot', 'officialDataSource',
-    'compareSchoolPerformanceUrl', '_csv', 'pillaiDetails', 'kpsDetails',
-    '_potentialDuplicateOf', '_dedupNote'
+    'rawSchoolType', 'gender', 'ageRange', 'pupilCount', 'ofstedRating',
+    'gcseProgress8', 'gcseAttainment8', 'ebaccAveragePointScore',
+    'entranceExamType', 'entranceExamDates', 'gcseSubjects', 'admissionsPolicy',
+    'website', 'phone', 'email', 'description', 'official', 'hot',
+    'officialDataSource', 'compareSchoolPerformanceUrl', '_csv',
+    'pillaiDetails', 'kpsDetails', '_potentialDuplicateOf', '_dedupNote'
   ]);
 
   const extra = {};
@@ -336,7 +405,8 @@ function schoolToParams(s) {
     region: s.region || 'Greater London',
     postcode: s.postcode || '',
     address: s.address || '',
-    schoolType: s.schoolType || '',
+    schoolType: normalizeSchoolType(s.schoolType, s.name, s.ofstedRating),
+    rawSchoolType: s.rawSchoolType || s.schoolType || '',
     gender: s.gender || '',
     ageRange: s.ageRange || '',
     pupilCount,
@@ -385,14 +455,14 @@ function insertSchool(school) {
   const p = schoolToParams(school);
   const stmt = sqlite.prepare(`
     INSERT OR REPLACE INTO schools (
-      id, name, urn, la, region, postcode, address, schoolType, gender, ageRange,
+      id, name, urn, la, region, postcode, address, schoolType, rawSchoolType, gender, ageRange,
       pupilCount, ofstedRating, gcseProgress8, gcseAttainment8, ebaccAveragePointScore,
       entranceExamType, entranceExamDates, gcseSubjects, admissionsPolicy, website,
       phone, email, description, official, hot, officialDataSource,
       compareSchoolPerformanceUrl, raw_csv, pillaiDetails, kpsDetails,
       potentialDuplicateOf, dedupNote, extra_json
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
@@ -401,7 +471,7 @@ function insertSchool(school) {
     )
   `);
   stmt.run(
-    p.id, p.name, p.urn, p.la, p.region, p.postcode, p.address, p.schoolType, p.gender, p.ageRange,
+    p.id, p.name, p.urn, p.la, p.region, p.postcode, p.address, p.schoolType, p.rawSchoolType, p.gender, p.ageRange,
     p.pupilCount, p.ofstedRating, p.gcseProgress8, p.gcseAttainment8, p.ebaccAveragePointScore,
     p.entranceExamType, p.entranceExamDates, p.gcseSubjects, p.admissionsPolicy, p.website,
     p.phone, p.email, p.description, p.official, p.hot, p.officialDataSource,
@@ -418,6 +488,32 @@ function updateSchool(id, partialSchool) {
   return insertSchool(merged);
 }
 
+function bulkUpdateSchools(schoolIds, partialUpdates) {
+  if (!Array.isArray(schoolIds) || schoolIds.length === 0 || !partialUpdates) {
+    return [];
+  }
+  const updatedList = [];
+  const sqlite = getDb();
+  sqlite.exec('BEGIN TRANSACTION;');
+  try {
+    for (const id of schoolIds) {
+      const existing = getSchoolById(id);
+      if (existing) {
+        const merged = { ...existing, ...partialUpdates, id };
+        const updated = insertSchool(merged);
+        if (updated) {
+          updatedList.push(updated);
+        }
+      }
+    }
+    sqlite.exec('COMMIT;');
+  } catch (err) {
+    sqlite.exec('ROLLBACK;');
+    throw err;
+  }
+  return updatedList;
+}
+
 function deleteSchool(id) {
   const sqlite = getDb();
   const stmt = sqlite.prepare('DELETE FROM schools WHERE id = ?');
@@ -430,14 +526,14 @@ function insertSchoolsBulk(schoolsArray) {
   try {
     const stmt = sqlite.prepare(`
       INSERT OR REPLACE INTO schools (
-        id, name, urn, la, region, postcode, address, schoolType, gender, ageRange,
+        id, name, urn, la, region, postcode, address, schoolType, rawSchoolType, gender, ageRange,
         pupilCount, ofstedRating, gcseProgress8, gcseAttainment8, ebaccAveragePointScore,
         entranceExamType, entranceExamDates, gcseSubjects, admissionsPolicy, website,
         phone, email, description, official, hot, officialDataSource,
         compareSchoolPerformanceUrl, raw_csv, pillaiDetails, kpsDetails,
         potentialDuplicateOf, dedupNote, extra_json
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?,
@@ -449,7 +545,7 @@ function insertSchoolsBulk(schoolsArray) {
     for (const school of schoolsArray) {
       const p = schoolToParams(school);
       stmt.run(
-        p.id, p.name, p.urn, p.la, p.region, p.postcode, p.address, p.schoolType, p.gender, p.ageRange,
+        p.id, p.name, p.urn, p.la, p.region, p.postcode, p.address, p.schoolType, p.rawSchoolType, p.gender, p.ageRange,
         p.pupilCount, p.ofstedRating, p.gcseProgress8, p.gcseAttainment8, p.ebaccAveragePointScore,
         p.entranceExamType, p.entranceExamDates, p.gcseSubjects, p.admissionsPolicy, p.website,
         p.phone, p.email, p.description, p.official, p.hot, p.officialDataSource,
@@ -542,6 +638,9 @@ function getAllPortfolios() {
       targetLocation: row.targetLocation || '',
       selectedSchools: row.selectedSchools ? JSON.parse(row.selectedSchools) : [],
       removedSchoolIds: row.removedSchoolIds ? JSON.parse(row.removedSchoolIds) : [],
+      cafRankings: row.cafRankings ? JSON.parse(row.cafRankings) : [],
+      independentSchools: row.independentSchools ? JSON.parse(row.independentSchools) : [],
+      parentNotes: row.parentNotes ? JSON.parse(row.parentNotes) : {},
       savedAt: row.savedAt
     };
   }
@@ -558,6 +657,9 @@ function getPortfolioByUserId(userId) {
       targetLocation: '',
       selectedSchools: [],
       removedSchoolIds: [],
+      cafRankings: [],
+      independentSchools: [],
+      parentNotes: {},
       savedAt: null
     };
   }
@@ -566,6 +668,9 @@ function getPortfolioByUserId(userId) {
     targetLocation: row.targetLocation || '',
     selectedSchools: row.selectedSchools ? JSON.parse(row.selectedSchools) : [],
     removedSchoolIds: row.removedSchoolIds ? JSON.parse(row.removedSchoolIds) : [],
+    cafRankings: row.cafRankings ? JSON.parse(row.cafRankings) : [],
+    independentSchools: row.independentSchools ? JSON.parse(row.independentSchools) : [],
+    parentNotes: row.parentNotes ? JSON.parse(row.parentNotes) : {},
     savedAt: row.savedAt
   };
 }
@@ -586,8 +691,10 @@ function savePortfolio(userId, data) {
   }
 
   const stmt = sqlite.prepare(`
-    INSERT OR REPLACE INTO user_portfolios (userId, targetLocation, selectedSchools, removedSchoolIds, savedAt)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO user_portfolios (
+      userId, targetLocation, selectedSchools, removedSchoolIds,
+      cafRankings, independentSchools, parentNotes, savedAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const savedAt = new Date().toISOString();
   stmt.run(
@@ -595,6 +702,9 @@ function savePortfolio(userId, data) {
     data.targetLocation || '',
     data.selectedSchools ? JSON.stringify(data.selectedSchools) : JSON.stringify([]),
     data.removedSchoolIds ? JSON.stringify(data.removedSchoolIds) : JSON.stringify([]),
+    data.cafRankings ? JSON.stringify(data.cafRankings) : JSON.stringify([]),
+    data.independentSchools ? JSON.stringify(data.independentSchools) : JSON.stringify([]),
+    data.parentNotes ? JSON.stringify(data.parentNotes) : JSON.stringify({}),
     savedAt
   );
   return getPortfolioByUserId(userId);
@@ -934,12 +1044,119 @@ function getUserRecPreferences(userId) {
   };
 }
 
+// Cast a thumbs up (+1) or thumbs down (-1) vote on a field
+function castFieldConfidenceVote(userId, schoolId, fieldName, vote) {
+  const sqlite = getDb();
+  const votedAt = new Date().toISOString();
+
+  if (vote === 0) {
+    const stmt = sqlite.prepare('DELETE FROM field_confidence_votes WHERE userId = ? AND schoolId = ? AND fieldName = ?');
+    stmt.run(userId, schoolId, fieldName);
+  } else {
+    const normVote = vote > 0 ? 1 : -1;
+    const stmt = sqlite.prepare(`
+      INSERT INTO field_confidence_votes (userId, schoolId, fieldName, vote, votedAt)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(userId, schoolId, fieldName) DO UPDATE SET
+        vote = excluded.vote,
+        votedAt = excluded.votedAt
+    `);
+    stmt.run(userId, schoolId, fieldName, normVote, votedAt);
+  }
+}
+
+// Mark a field as reviewed/updated by an admin (permanently flagged as High Confidence)
+function markFieldAdminReviewed(schoolId, fieldName, reviewedBy = 'admin') {
+  const sqlite = getDb();
+  const reviewedAt = new Date().toISOString();
+  const stmt = sqlite.prepare(`
+    INSERT INTO admin_field_reviews (schoolId, fieldName, reviewedBy, reviewedAt)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(schoolId, fieldName) DO UPDATE SET
+      reviewedBy = excluded.reviewedBy,
+      reviewedAt = excluded.reviewedAt
+  `);
+  stmt.run(schoolId, fieldName, reviewedBy, reviewedAt);
+}
+
+// Compute confidence statistics for a school across all fields
+function getFieldConfidenceStats(schoolId, userId = null) {
+  const sqlite = getDb();
+
+  const adminStmt = sqlite.prepare('SELECT fieldName, reviewedBy, reviewedAt FROM admin_field_reviews WHERE schoolId = ?');
+  const adminReviews = adminStmt.all(schoolId);
+  const adminReviewedFields = new Set(adminReviews.map(r => r.fieldName));
+
+  const voteStmt = sqlite.prepare(`
+    SELECT fieldName,
+           SUM(CASE WHEN vote > 0 THEN 1 ELSE 0 END) as upvotes,
+           SUM(CASE WHEN vote < 0 THEN 1 ELSE 0 END) as downvotes
+    FROM field_confidence_votes
+    WHERE schoolId = ?
+    GROUP BY fieldName
+  `);
+  const votes = voteStmt.all(schoolId);
+
+  let userVotes = {};
+  if (userId) {
+    const userVoteStmt = sqlite.prepare('SELECT fieldName, vote FROM field_confidence_votes WHERE schoolId = ? AND userId = ?');
+    const uVotes = userVoteStmt.all(schoolId, userId);
+    uVotes.forEach(uv => {
+      userVotes[uv.fieldName] = uv.vote;
+    });
+  }
+
+  const confidenceStats = {};
+
+  const voteMap = {};
+  votes.forEach(v => {
+    voteMap[v.fieldName] = { upvotes: v.upvotes || 0, downvotes: v.downvotes || 0 };
+  });
+
+  adminReviews.forEach(ar => {
+    confidenceStats[ar.fieldName] = {
+      score: 100,
+      level: 'High',
+      isAdminVerified: true,
+      label: 'Admin Verified',
+      upvotes: voteMap[ar.fieldName]?.upvotes || 0,
+      downvotes: voteMap[ar.fieldName]?.downvotes || 0,
+      userVote: userVotes[ar.fieldName] || 0
+    };
+  });
+
+  Object.keys(voteMap).forEach(fieldName => {
+    if (adminReviewedFields.has(fieldName)) return;
+
+    const { upvotes, downvotes } = voteMap[fieldName];
+    let score = 60 + (upvotes * 5) - (downvotes * 10);
+    score = Math.max(15, Math.min(98, score));
+
+    let level = 'Medium';
+    if (score >= 85) level = 'High';
+    else if (score < 60) level = 'Low';
+
+    confidenceStats[fieldName] = {
+      score,
+      level,
+      isAdminVerified: false,
+      label: `${score}% Confidence`,
+      upvotes,
+      downvotes,
+      userVote: userVotes[fieldName] || 0
+    };
+  });
+
+  return confidenceStats;
+}
+
 module.exports = {
   getDb,
   getAllSchools,
   getSchoolById,
   insertSchool,
   updateSchool,
+  bulkUpdateSchools,
   deleteSchool,
   insertSchoolsBulk,
   getAllUsers,
@@ -963,5 +1180,8 @@ module.exports = {
   deleteFieldReport,
   getAdminReportedErrors,
   saveUserRecPreferences,
-  getUserRecPreferences
+  getUserRecPreferences,
+  castFieldConfidenceVote,
+  markFieldAdminReviewed,
+  getFieldConfidenceStats
 };

@@ -291,7 +291,7 @@ app.post('/api/admin/bulk-verify', (req, res) => {
       region: item.region ? item.region.trim() : 'Greater London',
       postcode: item.postcode ? item.postcode.trim() : '',
       address: item.address ? item.address.trim() : '',
-      schoolType: item.schoolType ? item.schoolType.trim() : 'Comprehensive (Academy)',
+      schoolType: item.schoolType ? item.schoolType.trim() : 'Comprehensive',
       gender: item.gender ? item.gender.trim() : 'Mixed',
       ageRange: item.ageRange ? item.ageRange.trim() : '11-18',
       pupilCount: parseInt(item.pupilCount, 10) || 0,
@@ -533,6 +533,64 @@ app.post('/api/admin/bulk-commit', (req, res) => {
   }
 });
 
+// POST /api/admin/bulk-edit - Batch update multiple school records
+app.post('/api/admin/bulk-edit', (req, res) => {
+  const { schoolIds, updates } = req.body;
+
+  if (!Array.isArray(schoolIds) || schoolIds.length === 0) {
+    return res.status(400).json({ error: 'schoolIds array is required and cannot be empty' });
+  }
+
+  if (!updates || typeof updates !== 'object' || Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: 'updates object with valid fields is required' });
+  }
+
+  try {
+    const updatedSchools = db.bulkUpdateSchools(schoolIds, updates);
+    res.json({
+      message: `Successfully updated ${updatedSchools.length} schools`,
+      updatedCount: updatedSchools.length,
+      updatedSchools
+    });
+  } catch (err) {
+    console.error('Error during bulk-edit:', err);
+    res.status(500).json({ error: 'Failed to perform bulk update' });
+  }
+});
+
+// GET /api/schools/:id/confidence - Retrieve field-level data confidence scores
+app.get('/api/schools/:id/confidence', (req, res) => {
+  const schoolId = req.params.id;
+  const user = req.user;
+  const stats = db.getFieldConfidenceStats(schoolId, user?.id || null);
+  res.json({
+    schoolId,
+    confidence: stats
+  });
+});
+
+// POST /api/schools/:id/fields/:fieldName/vote - Vote thumbs up (+1) or thumbs down (-1) on data accuracy
+app.post('/api/schools/:id/fields/:fieldName/vote', (req, res) => {
+  const schoolId = req.params.id;
+  const fieldName = req.params.fieldName;
+  const { vote } = req.body;
+  const userId = req.user?.id || req.headers['x-session-id'] || 'anonymous-user';
+
+  if (vote === undefined || vote === null) {
+    return res.status(400).json({ error: 'Vote parameter (+1, -1, 0) is required' });
+  }
+
+  db.castFieldConfidenceVote(userId, schoolId, fieldName, parseInt(vote, 10));
+  const updatedStats = db.getFieldConfidenceStats(schoolId, userId);
+
+  res.json({
+    message: 'Confidence vote recorded successfully',
+    schoolId,
+    fieldName,
+    fieldConfidence: updatedStats[fieldName] || { score: 60, level: 'Medium', isAdminVerified: false, label: '60% Confidence', upvotes: 0, downvotes: 0, userVote: vote }
+  });
+});
+
 // PUT /api/schools/:id - Update school details
 app.put('/api/schools/:id', (req, res) => {
   let schools = readData();
@@ -541,10 +599,15 @@ app.put('/api/schools/:id', (req, res) => {
     return res.status(404).json({ error: 'School not found' });
   }
 
+  const updatedFields = Object.keys(req.body);
   const updatedSchool = { ...schools[index], ...req.body, id: req.params.id };
   schools[index] = updatedSchool;
 
   if (writeData(schools)) {
+    // Automatically mark all updated fields as Admin Verified (100% High Confidence)
+    updatedFields.forEach(field => {
+      db.markFieldAdminReviewed(req.params.id, field, req.user?.name || 'admin');
+    });
     res.json({ message: 'School updated successfully', school: updatedSchool });
   } else {
     res.status(500).json({ error: 'Failed to update database' });
@@ -1107,6 +1170,9 @@ app.post('/api/user-reports', requireAuth, (req, res) => {
     customValue: status === 'down' ? customValue : ''
   });
 
+  // Automatically record field confidence vote (+1 for up, -1 for down)
+  db.castFieldConfidenceVote(req.user.id, schoolId, fieldName, status === 'up' ? 1 : -1);
+
   res.json({ success: true, message: 'Report saved successfully', report });
 });
 
@@ -1124,6 +1190,7 @@ app.delete('/api/user-reports', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'schoolId and fieldName are required' });
   }
   db.deleteFieldReport(req.user.id, schoolId, fieldName);
+  db.castFieldConfidenceVote(req.user.id, schoolId, fieldName, 0);
   res.json({ success: true, message: 'Field report reset successfully' });
 });
 
@@ -1147,6 +1214,9 @@ app.post('/api/admin/apply-field-report', requirePermission('admin:edit'), (req,
   const updateData = {};
   updateData[fieldName] = customValue;
   const updated = db.updateSchool(schoolId, updateData);
+
+  // Automatically mark field as Admin Verified (100% High Confidence)
+  db.markFieldAdminReviewed(schoolId, fieldName, req.user?.name || 'admin');
 
   res.json({ success: true, message: `Master record updated for field '${fieldName}'`, school: updated });
 });
@@ -1180,12 +1250,15 @@ app.get('/api/user-portfolio/:userId', (req, res) => {
 // POST /api/user-portfolio/:userId - Save portfolio for user
 app.post('/api/user-portfolio/:userId', (req, res) => {
   const { userId } = req.params;
-  const { targetLocation, selectedSchools, removedSchoolIds } = req.body;
+  const { targetLocation, selectedSchools, removedSchoolIds, cafRankings, independentSchools, parentNotes } = req.body;
 
   const saved = db.savePortfolio(userId, {
     targetLocation: targetLocation || '',
     selectedSchools: selectedSchools || [],
-    removedSchoolIds: removedSchoolIds || []
+    removedSchoolIds: removedSchoolIds || [],
+    cafRankings: cafRankings || [],
+    independentSchools: independentSchools || [],
+    parentNotes: parentNotes || {}
   });
 
   res.json({ message: 'User portfolio saved successfully', portfolio: saved });

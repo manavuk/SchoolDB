@@ -6,6 +6,17 @@ let currentPermissions = []; // Explicit session capabilities (Directory View & 
 let userSelectedSchools = []; // List of school objects user has added
 let userRemovedSchoolIds = []; // Set of school IDs user has removed from recommendations
 let compareList = []; // List of schools currently selected for comparison
+let currentSchools = []; // Active filtered schools list for directory view
+let allSchools = []; // Full schools dataset
+let currentViewMode = 'table'; // 'table' or 'cards'
+
+// Parent Portal 2.0 Dual-Track State
+let parent2State = {
+  cafList: [],          // Up to 6 State/Grammar schools in preference rank order (1st to 6th)
+  independentList: [],  // Unlimited independent schools
+  parentNotes: {},      // schoolId -> { notes, bursary, scholarship, openDay }
+  activeSubView: 'matchmaker' // 'matchmaker', 'dualtrack', 'matrix', 'calendar'
+};
 
 // Helper to show non-blocking persistent toast notifications
 function showToast(message, type = 'success', duration = 5000) {
@@ -62,19 +73,20 @@ async function initApp() {
   // 3. Register DOM event listeners
   setupEventListeners();
 
-  // 4. Fetch user portfolio & load application data
+  // 4. Fetch initial school catalog & stats before UI permission routing
+  await fetchStats();
+  await loadSchools();
+  loadRecWeights();
+  populateManualMergeDropdowns();
+
+  // 5. Fetch user portfolio & load application data
   if (authenticated) {
     await loadUserPortfolio(currentUserAccount);
     await loadUserRecProfile();
     applyPermissionsUI();
   }
 
-  await fetchStats();
-  await loadSchools();
-  loadRecWeights();
-  populateManualMergeDropdowns();
-
-  // 5. Always fetch & render recommendations on load so landing page is populated with top schools immediately
+  // 6. Always fetch & render recommendations on load so landing page is populated with top schools immediately
   await fetchRecommendations();
 }
 
@@ -281,11 +293,30 @@ async function loadUserPortfolio(userId) {
     userSelectedSchools = data.selectedSchools || [];
     userRemovedSchoolIds = data.removedSchoolIds || [];
 
+    // Populate Parent Portal 2.0 dual track state
+    if (Array.isArray(data.cafRankings) && data.cafRankings.length > 0) {
+      parent2State.cafList = data.cafRankings;
+    } else {
+      parent2State.cafList = userSelectedSchools.filter(s => s.schoolType !== 'Independent').slice(0, 6);
+    }
+
+    if (Array.isArray(data.independentSchools) && data.independentSchools.length > 0) {
+      parent2State.independentList = data.independentSchools;
+    } else {
+      parent2State.independentList = userSelectedSchools.filter(s => s.schoolType === 'Independent');
+    }
+
+    parent2State.parentNotes = data.parentNotes || {};
+
     const locInput = document.getElementById('rec-location-input');
     if (locInput) locInput.value = data.targetLocation || '';
 
+    const p2PostcodeInput = document.getElementById('p2-input-postcode');
+    if (p2PostcodeInput && data.targetLocation) p2PostcodeInput.value = data.targetLocation;
+
     updateUserSchoolsUI();
     renderUserDashboard();
+    renderParent2Views();
     fetchRecommendations();
   } catch (err) {
     console.error('Failed to load user portfolio:', err);
@@ -295,7 +326,11 @@ async function loadUserPortfolio(userId) {
 // Save Current User Portfolio to Backend (Silent Auto-Save)
 async function saveUserPortfolio(silent = false) {
   if (!currentUserAccount) return;
-  const targetLocation = document.getElementById('rec-location-input') ? document.getElementById('rec-location-input').value : '';
+  const targetLocation = document.getElementById('p2-input-postcode')?.value || document.getElementById('rec-location-input')?.value || '';
+  
+  // Ensure userSelectedSchools contains all shortlisted schools from both tracks
+  userSelectedSchools = [...parent2State.cafList, ...parent2State.independentList];
+
   try {
     const res = await fetch(`/api/user-portfolio/${currentUserAccount}`, {
       method: 'POST',
@@ -306,12 +341,16 @@ async function saveUserPortfolio(silent = false) {
       body: JSON.stringify({
         targetLocation,
         selectedSchools: userSelectedSchools,
-        removedSchoolIds: userRemovedSchoolIds
+        removedSchoolIds: userRemovedSchoolIds,
+        cafRankings: parent2State.cafList,
+        independentSchools: parent2State.independentList,
+        parentNotes: parent2State.parentNotes
       })
     });
 
     if (res.ok) {
       if (!silent) showToast(`Portfolio saved successfully for ${currentUserName}!`, 'success');
+      renderParent2Views();
     } else {
       if (res.status === 401) {
         logoutSession();
@@ -328,22 +367,22 @@ async function saveUserPortfolio(silent = false) {
 // Add a school to user selected list (Auto-saved by default)
 async function addUserSchool(school) {
   if (!school || !school.id) return;
-  if (userSelectedSchools.some(s => s.id === school.id)) {
-    showToast(`${school.name || 'School'} is already in your target list!`, 'info');
-    return;
+  
+  if (school.schoolType === 'Independent') {
+    addSchoolToIndependent(school);
+  } else {
+    addSchoolToStateCaf(school);
   }
-
-  userSelectedSchools.push(school);
-  updateUserSchoolsUI();
-  fetchRecommendations();
-  await saveUserPortfolio(true); // Auto-save changes immediately
-  showToast(`Added ${school.name} to your target list!`, 'success');
 }
 
 // Remove a school from user selected list (Auto-saved by default)
 async function removeUserSchool(schoolId) {
-  userSelectedSchools = userSelectedSchools.filter(s => s.id !== schoolId);
+  parent2State.cafList = parent2State.cafList.filter(s => s.id !== schoolId);
+  parent2State.independentList = parent2State.independentList.filter(s => s.id !== schoolId);
+  userSelectedSchools = [...parent2State.cafList, ...parent2State.independentList];
+
   updateUserSchoolsUI();
+  renderParent2Views();
   fetchRecommendations();
   await saveUserPortfolio(true); // Auto-save changes immediately
 }
@@ -363,43 +402,49 @@ async function removeRecommendation(schoolId) {
 function applyPermissionsUI() {
   const directoryTabBtn = document.getElementById('tab-directory-btn');
   const adminTabBtn = document.getElementById('tab-admin-btn');
+  const parent2TabBtn = document.getElementById('tab-parent2-btn');
+  const recommendTabBtn = document.getElementById('tab-recommend-btn');
 
-  // Enforce tab access permissions: Directory View & Admin Portal hidden unless session holds explicit permission
-  const canViewDirectory = Array.isArray(currentPermissions) && currentPermissions.includes('directory:view');
+  // Enforce tab access permissions: Admin Portal hidden unless session holds explicit permission
   const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
 
-  if (directoryTabBtn) directoryTabBtn.style.display = canViewDirectory ? 'inline-flex' : 'none';
+  if (directoryTabBtn) directoryTabBtn.style.display = 'none';
   if (adminTabBtn) adminTabBtn.style.display = canViewAdmin ? 'inline-flex' : 'none';
 
   updateAuthUserBadge();
 
-  // Landing page hierarchy: Land on Directory View if permitted, otherwise land on Parent Portal
-  if (canViewDirectory) {
-    switchTab('directory');
+  // Landing page hierarchy: Land on Admin Portal if admin, otherwise land on Parent Portal 2.0 (New Default)
+  if (canViewAdmin) {
+    switchTab('admin');
   } else {
-    switchTab('dashboard');
+    switchTab('parent2');
   }
 }
 
 // Switch main navigation tab with capability check
 function switchTab(tabName) {
+  const parent2TabBtn = document.getElementById('tab-parent2-btn');
   const recommendTabBtn = document.getElementById('tab-recommend-btn');
   const directoryTabBtn = document.getElementById('tab-directory-btn');
   const adminTabBtn = document.getElementById('tab-admin-btn');
 
+  const parent2Content = document.getElementById('parent2-tab-content');
   const recommendContent = document.getElementById('recommend-tab-content');
   const dashboardContent = document.getElementById('user-dashboard-content');
-  const directoryContent = document.getElementById('directory-tab-content');
   const adminContent = document.getElementById('admin-tab-content');
 
   // Deactivate all tab buttons and hide contents
-  [recommendTabBtn, directoryTabBtn, adminTabBtn].forEach(btn => btn && btn.classList.remove('active'));
-  [recommendContent, dashboardContent, directoryContent, adminContent].forEach(c => c && (c.style.display = 'none'));
+  [parent2TabBtn, recommendTabBtn, directoryTabBtn, adminTabBtn].forEach(btn => btn && btn.classList.remove('active'));
+  [parent2Content, recommendContent, dashboardContent, adminContent].forEach(c => c && (c.style.display = 'none'));
 
-  const canViewDirectory = Array.isArray(currentPermissions) && currentPermissions.includes('directory:view');
   const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
 
-  if (tabName === 'recommend') {
+  if (tabName === 'parent2') {
+    if (parent2TabBtn) parent2TabBtn.classList.add('active');
+    if (parent2Content) parent2Content.style.display = 'block';
+    renderParent2Views();
+    fetchRecommendations();
+  } else if (tabName === 'recommend') {
     if (recommendTabBtn) recommendTabBtn.classList.add('active');
     if (recommendContent) recommendContent.style.display = 'block';
     fetchRecommendations();
@@ -407,18 +452,54 @@ function switchTab(tabName) {
     if (recommendTabBtn) recommendTabBtn.classList.add('active');
     if (dashboardContent) dashboardContent.style.display = 'block';
     renderUserDashboard();
-  } else if (tabName === 'admin' && canViewAdmin) {
+  } else if ((tabName === 'admin' || tabName === 'directory') && canViewAdmin) {
     if (adminTabBtn) adminTabBtn.classList.add('active');
     if (adminContent) adminContent.style.display = 'block';
+    const targetSubTab = tabName === 'directory' ? 'directory' : (localStorage.getItem('admin_active_subtab') || 'directory');
+    switchAdminSubTab(targetSubTab);
     loadAdminFieldReports();
-  } else if (tabName === 'directory' && canViewDirectory) {
-    if (directoryTabBtn) directoryTabBtn.classList.add('active');
-    if (directoryContent) directoryContent.style.display = 'block';
   } else {
-    // Default fallback to Recommendation Assistant View
-    if (recommendTabBtn) recommendTabBtn.classList.add('active');
-    if (recommendContent) recommendContent.style.display = 'block';
+    // Default fallback to Parent Portal 2.0
+    if (parent2TabBtn) parent2TabBtn.classList.add('active');
+    if (parent2Content) parent2Content.style.display = 'block';
+    renderParent2Views();
     fetchRecommendations();
+  }
+}
+
+// Switch sub-tab within Admin Portal
+function switchAdminSubTab(subTabName) {
+  const tabs = document.querySelectorAll('.admin-side-tab');
+  const panes = document.querySelectorAll('.admin-subpane');
+
+  tabs.forEach(tab => {
+    if (tab.getAttribute('data-target-tab') === subTabName) {
+      tab.classList.add('active');
+    } else {
+      tab.classList.remove('active');
+    }
+  });
+
+  panes.forEach(pane => {
+    if (pane.id === `admin-subpane-${subTabName}`) {
+      pane.style.display = 'block';
+      pane.classList.add('active');
+    } else {
+      pane.style.display = 'none';
+      pane.classList.remove('active');
+    }
+  });
+
+  localStorage.setItem('admin_active_subtab', subTabName);
+
+  if (subTabName === 'directory') {
+    renderSchools();
+  } else if (subTabName === 'bulk-edit') {
+    renderBulkEditTable();
+  } else if (subTabName === 'corrections') {
+    loadAdminFieldReports();
+  } else if (subTabName === 'settings') {
+    loadRecWeights();
   }
 }
 
@@ -545,6 +626,10 @@ async function loadSchools() {
     currentSchools = data.schools;
 
     document.getElementById('results-num').textContent = data.total;
+    const quickTotal = document.getElementById('admin-quick-total-schools');
+    if (quickTotal && data.total !== undefined) {
+      quickTotal.textContent = data.total.toLocaleString();
+    }
     renderSchools();
     if (typeof populateManualMergeDropdowns === 'function') {
       populateManualMergeDropdowns();
@@ -1097,9 +1182,111 @@ function setupEventListeners() {
 
 
   // Nav Tab Buttons
+  if (document.getElementById('tab-parent2-btn')) document.getElementById('tab-parent2-btn').addEventListener('click', () => switchTab('parent2'));
   if (document.getElementById('tab-recommend-btn')) document.getElementById('tab-recommend-btn').addEventListener('click', () => switchTab('recommend'));
   if (document.getElementById('tab-directory-btn')) document.getElementById('tab-directory-btn').addEventListener('click', () => switchTab('directory'));
   if (document.getElementById('tab-admin-btn')) document.getElementById('tab-admin-btn').addEventListener('click', () => switchTab('admin'));
+
+  // Parent Portal 2.0 Sub-navigation and Wizard Listeners
+  setupParent2EventListeners();
+
+  // Admin Side Tabs Navigation Buttons
+  document.querySelectorAll('.admin-side-tab').forEach(tabBtn => {
+    tabBtn.addEventListener('click', () => {
+      const target = tabBtn.getAttribute('data-target-tab');
+      if (target) switchAdminSubTab(target);
+    });
+  });
+
+  // Bulk Edit Event Listeners
+  const bulkSearchInput = document.getElementById('bulk-search-input');
+  if (bulkSearchInput) bulkSearchInput.addEventListener('input', debounce(renderBulkEditTable, 200));
+
+  const bulkFilters = ['bulk-la-filter', 'bulk-type-filter', 'bulk-ofsted-filter'];
+  bulkFilters.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', renderBulkEditTable);
+  });
+
+  const bulkResetFilterBtn = document.getElementById('bulk-reset-filter-btn');
+  if (bulkResetFilterBtn) {
+    bulkResetFilterBtn.addEventListener('click', () => {
+      if (bulkSearchInput) bulkSearchInput.value = '';
+      bulkFilters.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+      renderBulkEditTable();
+    });
+  }
+
+  const bulkSelectAllBtn = document.getElementById('bulk-select-all-filtered-btn');
+  if (bulkSelectAllBtn) {
+    bulkSelectAllBtn.addEventListener('click', () => {
+      bulkFilteredSchools.forEach(s => bulkSelectedSchoolIds.add(s.id));
+      renderBulkEditTable();
+    });
+  }
+
+  const bulkDeselectAllBtn = document.getElementById('bulk-deselect-all-btn');
+  if (bulkDeselectAllBtn) {
+    bulkDeselectAllBtn.addEventListener('click', () => {
+      bulkSelectedSchoolIds.clear();
+      renderBulkEditTable();
+    });
+  }
+
+  const bulkInvertBtn = document.getElementById('bulk-invert-selection-btn');
+  if (bulkInvertBtn) {
+    bulkInvertBtn.addEventListener('click', () => {
+      bulkFilteredSchools.forEach(s => {
+        if (bulkSelectedSchoolIds.has(s.id)) {
+          bulkSelectedSchoolIds.delete(s.id);
+        } else {
+          bulkSelectedSchoolIds.add(s.id);
+        }
+      });
+      renderBulkEditTable();
+    });
+  }
+
+  const bulkMasterCheckbox = document.getElementById('bulk-master-checkbox');
+  if (bulkMasterCheckbox) {
+    bulkMasterCheckbox.addEventListener('change', (e) => {
+      const visible = bulkFilteredSchools.slice(0, 250);
+      if (e.target.checked) {
+        visible.forEach(s => bulkSelectedSchoolIds.add(s.id));
+      } else {
+        visible.forEach(s => bulkSelectedSchoolIds.delete(s.id));
+      }
+      renderBulkEditTable();
+    });
+  }
+
+  const bulkFieldSelect = document.getElementById('bulk-field-select');
+  if (bulkFieldSelect) {
+    bulkFieldSelect.addEventListener('change', (e) => {
+      updateBulkValueInput(e.target.value);
+    });
+  }
+
+  const applyBulkBtn = document.getElementById('btn-apply-bulk-edit');
+  if (applyBulkBtn) {
+    applyBulkBtn.addEventListener('click', executeBulkUpdate);
+  }
+
+  // Live Weight Sliders
+  const weightIds = ['location', 'exam', 'academic', 'ofsted', 'type'];
+  weightIds.forEach(key => {
+    const slider = document.getElementById(`weight-${key}`);
+    const label = document.getElementById(`weight-val-${key}`);
+    if (slider && label) {
+      slider.addEventListener('input', () => {
+        label.textContent = `${slider.value}%`;
+        updateTotalWeightsPill();
+      });
+    }
+  });
 
   // Recommendation Event Handlers
   setupRecAutocomplete();
@@ -1124,7 +1311,6 @@ function setupEventListeners() {
 
   const backRecBtn = document.getElementById('btn-back-to-rec');
   if (backRecBtn) backRecBtn.addEventListener('click', () => switchTab('recommend'));
-
 
   const weightsForm = document.getElementById('rec-weights-form');
   if (weightsForm) weightsForm.addEventListener('submit', saveRecWeights);
@@ -1165,8 +1351,10 @@ function setupEventListeners() {
   });
 
   // Add School Modal Trigger
-  document.getElementById('add-school-btn').addEventListener('click', () => {
-    openAddModal();
+  document.querySelectorAll('.add-school-btn-trigger, #add-school-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      openAddModal();
+    });
   });
   document.getElementById('modal-close-add').addEventListener('click', () => {
     document.getElementById('add-modal').style.display = 'none';
@@ -1756,10 +1944,10 @@ async function openManualMergeModal() {
   document.getElementById('load-sample-bulk-btn').addEventListener('click', () => {
     const sampleBatch = [
       {
-        "name": "Queen Elizabeth's School, Barnet", // Intentional duplicate to test de-duplication
-        "urn": "136272",
+        "name": "Queen Elizabeth's School, Barnet",
+        "urn": "136270",
         "la": "Barnet",
-        "schoolType": "Grammar (Academy)",
+        "schoolType": "Grammar",
         "gender": "Boys",
         "pupilCount": 1280,
         "ofstedRating": "Outstanding",
@@ -1770,7 +1958,7 @@ async function openManualMergeModal() {
         "name": "Harris Academy Bermondsey",
         "urn": "135119",
         "la": "Southwark",
-        "schoolType": "Comprehensive (Academy)",
+        "schoolType": "Comprehensive",
         "gender": "Girls",
         "pupilCount": 950,
         "ofstedRating": "Outstanding",
@@ -1783,7 +1971,7 @@ async function openManualMergeModal() {
         "name": "Harris Boys' Academy East Dulwich",
         "urn": "135763",
         "la": "Southwark",
-        "schoolType": "Comprehensive (Academy)",
+        "schoolType": "Comprehensive",
         "gender": "Boys",
         "pupilCount": 880,
         "ofstedRating": "Outstanding",
@@ -1796,7 +1984,7 @@ async function openManualMergeModal() {
         "name": "Harris Boys' Academy East Dulwich", // Duplicate within batch
         "urn": "135763",
         "la": "Southwark",
-        "schoolType": "Comprehensive (Academy)"
+        "schoolType": "Comprehensive"
       }
     ];
     document.getElementById('bulk-json-input').value = JSON.stringify(sampleBatch, null, 2);
@@ -2189,7 +2377,7 @@ async function openEditModal(id) {
     document.getElementById('add-region').value = school.region || 'Greater London';
     document.getElementById('add-address').value = school.address || '';
     document.getElementById('add-postcode').value = school.postcode || '';
-    document.getElementById('add-type').value = school.schoolType || 'Comprehensive (Academy)';
+    document.getElementById('add-type').value = school.schoolType || 'Comprehensive';
     document.getElementById('add-gender').value = school.gender || 'Mixed';
     document.getElementById('add-age-range').value = school.ageRange || '11-18';
     document.getElementById('add-pupils').value = school.pupilCount || '';
@@ -2250,11 +2438,67 @@ async function deleteSchool(id) {
 }
 
 
+// Render subtle field-level data confidence status icon indicator
+function renderFieldConfidenceBadge(schoolId, fieldName, confidenceStats) {
+  const stat = (confidenceStats && confidenceStats[fieldName]) || {
+    score: 60,
+    level: 'Medium',
+    isAdminVerified: false,
+    label: '60% Confidence',
+    upvotes: 0,
+    downvotes: 0,
+    userVote: 0
+  };
+
+  const isAdmin = stat.isAdminVerified;
+  let iconHtml = '<i class="fa-solid fa-exclamation" style="color: #f59e0b; font-weight: 800;"></i>';
+  let iconClass = 'icon-medium';
+  let tooltipText = `${stat.score}% Confidence (${stat.upvotes} confirm, ${stat.downvotes} report)`;
+
+  if (isAdmin) {
+    iconHtml = '<i class="fa-solid fa-check-double" style="color: #10b981; font-weight: 800;"></i>';
+    iconClass = 'icon-admin';
+    tooltipText = 'Admin Verified (100% Data Accuracy)';
+  } else if (stat.level === 'High') {
+    iconHtml = '<i class="fa-solid fa-check" style="color: #22c55e; font-weight: 800;"></i>';
+    iconClass = 'icon-high';
+    tooltipText = `${stat.score}% High Confidence (${stat.upvotes} confirm, ${stat.downvotes} report)`;
+  } else if (stat.level === 'Low') {
+    iconHtml = '<i class="fa-solid fa-circle-exclamation" style="color: #f43f5e; font-weight: 800;"></i>';
+    iconClass = 'icon-low';
+    tooltipText = `${stat.score}% Low Confidence (${stat.upvotes} confirm, ${stat.downvotes} report)`;
+  }
+
+  return `<span class="confidence-icon-indicator ${iconClass}" title="${tooltipText}" data-school-id="${schoolId}" data-field-name="${fieldName}">${iconHtml}</span>`;
+}
+
+// Bind event listeners to confidence vote buttons
+function bindConfidenceVoteEvents() {
+  // Confidence icon indicators display confidence details on mouse hover
+}
+
 // Open School Detail View
 async function openSchoolDetail(id) {
   try {
     const res = await fetch(`/api/schools/${id}`);
+    if (!res.ok) {
+      showToast('Failed to load school details.', 'error');
+      return;
+    }
     const school = await res.json();
+
+    let confidenceStats = {};
+    try {
+      const confRes = await fetch(`/api/schools/${id}/confidence`, {
+        headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+      });
+      if (confRes.ok) {
+        const confData = await confRes.json();
+        confidenceStats = confData.confidence || {};
+      }
+    } catch (confErr) {
+      console.warn('Could not fetch confidence stats:', confErr);
+    }
 
     const detailContent = document.getElementById('detail-modal-content');
 
@@ -2313,10 +2557,12 @@ async function openSchoolDetail(id) {
       const isCustom = customVal !== null && customVal !== undefined && customVal !== '';
       const displayVal = isCustom ? customVal : (origValue !== null && origValue !== undefined && origValue !== '' ? origValue : 'N/A');
 
+      const confBadge = renderFieldConfidenceBadge(school.id, fieldName, confidenceStats);
+
       return `
         <div class="field-rating-row" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; width: 100%; margin-bottom: 0.35rem; font-size: 0.85rem; color: #475569;">
           <div style="flex: 1; word-break: break-word;">
-            <strong>${fieldLabel}:</strong> ${displayVal}
+            <strong>${fieldLabel}:</strong> ${displayVal} ${confBadge}
             ${isCustom ? `
               <span class="badge-custom-value" style="background:#fff7ed; color:#c2410c; border:1px solid #ffedd5; font-size:0.72rem; font-weight:700; padding:0.15rem 0.45rem; border-radius:999px; margin-left:0.35rem; display:inline-flex; align-items:center; gap:0.2rem;" title="Custom value updated in your personal record">
                 <i class="fa-solid fa-user-pen"></i> Custom Value Updated by You
@@ -2596,7 +2842,12 @@ async function openSchoolDetail(id) {
       });
     });
 
-    document.getElementById('detail-modal').style.display = 'flex';
+    bindConfidenceVoteEvents();
+    const detailModal = document.getElementById('detail-modal');
+    if (detailModal) {
+      detailModal.style.display = 'flex';
+      detailModal.style.zIndex = '15000';
+    }
 
   } catch (err) {
     console.error('Error loading school details:', err);
@@ -2710,6 +2961,359 @@ async function updateSchoolPill(id, fields) {
   }
 }
 
+// =============================================================
+// ADMIN BULK EDIT CONTROLLER & BATCH MODIFIER
+// =============================================================
+
+let bulkSelectedSchoolIds = new Set();
+let bulkFilteredSchools = [];
+
+async function renderBulkEditTable() {
+  const tableBody = document.getElementById('bulk-schools-table-body');
+  if (!tableBody) return;
+
+  const allSchoolsList = await getAllSchoolsList();
+
+  const searchKeyword = (document.getElementById('bulk-search-input')?.value || '').toLowerCase().trim();
+  const laFilter = document.getElementById('bulk-la-filter')?.value || '';
+  const typeFilter = document.getElementById('bulk-type-filter')?.value || '';
+  const ofstedFilter = document.getElementById('bulk-ofsted-filter')?.value || '';
+
+  // Populate bulk LA filter if not populated
+  const bulkLaSelect = document.getElementById('bulk-la-filter');
+  if (bulkLaSelect && bulkLaSelect.options.length <= 1) {
+    const las = Array.from(new Set(allSchoolsList.map(s => s.la).filter(Boolean))).sort();
+    las.forEach(la => {
+      const opt = document.createElement('option');
+      opt.value = la;
+      opt.textContent = la;
+      bulkLaSelect.appendChild(opt);
+    });
+  }
+
+  bulkFilteredSchools = allSchoolsList.filter(school => {
+    if (searchKeyword) {
+      const nameMatch = (school.name || '').toLowerCase().includes(searchKeyword);
+      const urnMatch = (school.urn || '').toString().includes(searchKeyword);
+      const laMatch = (school.la || '').toLowerCase().includes(searchKeyword);
+      if (!nameMatch && !urnMatch && !laMatch) return false;
+    }
+    if (laFilter && school.la !== laFilter) return false;
+    if (typeFilter && !(school.schoolType || '').includes(typeFilter)) return false;
+    if (ofstedFilter && !(school.ofstedRating || '').includes(ofstedFilter)) return false;
+    return true;
+  });
+
+  const filteredCountEl = document.getElementById('bulk-filtered-count');
+  if (filteredCountEl) filteredCountEl.textContent = bulkFilteredSchools.length;
+
+  tableBody.innerHTML = '';
+
+  if (bulkFilteredSchools.length === 0) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="10" style="text-align: center; padding: 2rem; color: #94a3b8;">
+          No matching schools found for bulk editing.
+        </td>
+      </tr>
+    `;
+    updateBulkSelectionUI();
+    return;
+  }
+
+  // Render top 250 rows for snappy performance
+  const displaySchools = bulkFilteredSchools.slice(0, 250);
+
+  displaySchools.forEach(school => {
+    const isSelected = bulkSelectedSchoolIds.has(school.id);
+    const tr = document.createElement('tr');
+    tr.className = isSelected ? 'bulk-row-selected' : '';
+    tr.setAttribute('data-school-id', school.id);
+
+    tr.innerHTML = `
+      <td style="text-align: center;" onclick="event.stopPropagation();">
+        <input type="checkbox" class="bulk-row-checkbox" data-id="${school.id}" ${isSelected ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px;">
+      </td>
+      <td>
+        <strong style="color: #1e293b; display: block;">${school.name}</strong>
+        <span style="font-size: 0.75rem; color: #64748b;">${school.address || school.postcode || ''}</span>
+      </td>
+      <td><code style="font-size: 0.78rem;">${school.urn || '—'}</code></td>
+      <td>${school.la || '—'}</td>
+      <td><span class="school-type-pill ${school.schoolType?.includes('Grammar') ? 'pill-grammar' : school.schoolType?.includes('Independent') ? 'pill-independent' : 'pill-comprehensive'}">${school.schoolType || '—'}</span></td>
+      <td>${school.gender || 'Mixed'}</td>
+      <td><span class="badge-ofsted"><i class="fa-solid fa-star"></i> ${formatOfsted(school.ofstedRating)}</span></td>
+      <td><span class="badge-exam">${formatExam(school.entranceExamType)}</span></td>
+      <td>
+        <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+          ${school.hot ? '<span class="badge-hot" style="font-size:0.7rem; padding: 0.1rem 0.35rem;"><i class="fa-solid fa-fire"></i> Hot</span>' : ''}
+          ${school.official ? '<span class="badge-official" style="font-size:0.7rem; padding: 0.1rem 0.35rem;"><i class="fa-solid fa-circle-check"></i> DfE</span>' : ''}
+        </div>
+      </td>
+      <td><strong>${school.gcseAttainment8 !== null && school.gcseAttainment8 !== undefined ? school.gcseAttainment8 : '—'}</strong></td>
+    `;
+
+    // Row click toggles selection
+    tr.addEventListener('click', (e) => {
+      if (e.target.tagName.toLowerCase() === 'input') return;
+      const checkbox = tr.querySelector('.bulk-row-checkbox');
+      if (checkbox) {
+        checkbox.checked = !checkbox.checked;
+        toggleBulkSchoolSelection(school.id, checkbox.checked);
+      }
+    });
+
+    const checkbox = tr.querySelector('.bulk-row-checkbox');
+    if (checkbox) {
+      checkbox.addEventListener('change', (e) => {
+        toggleBulkSchoolSelection(school.id, e.target.checked);
+      });
+    }
+
+    tableBody.appendChild(tr);
+  });
+
+  if (bulkFilteredSchools.length > 250) {
+    const footerTr = document.createElement('tr');
+    footerTr.innerHTML = `
+      <td colspan="10" style="text-align: center; background: #f8fafc; color: #64748b; font-size: 0.8rem; padding: 0.6rem;">
+        Showing top 250 of ${bulkFilteredSchools.length} matching schools. Use the search filters above to narrow your list.
+      </td>
+    `;
+    tableBody.appendChild(footerTr);
+  }
+
+  updateBulkSelectionUI();
+}
+
+function toggleBulkSchoolSelection(schoolId, isSelected) {
+  if (isSelected) {
+    bulkSelectedSchoolIds.add(schoolId);
+  } else {
+    bulkSelectedSchoolIds.delete(schoolId);
+  }
+  updateBulkSelectionUI();
+}
+
+function updateBulkSelectionUI() {
+  const count = bulkSelectedSchoolIds.size;
+  const countBadge = document.getElementById('bulk-selected-count');
+  if (countBadge) countBadge.textContent = count;
+
+  const btnCount = document.getElementById('bulk-apply-btn-count');
+  if (btnCount) btnCount.textContent = count;
+
+  const applyBtn = document.getElementById('btn-apply-bulk-edit');
+  const fieldSelect = document.getElementById('bulk-field-select');
+  if (applyBtn) {
+    applyBtn.disabled = count === 0 || !fieldSelect?.value;
+  }
+
+  // Update row highlights
+  document.querySelectorAll('#bulk-schools-table tbody tr[data-school-id]').forEach(tr => {
+    const sId = tr.getAttribute('data-school-id');
+    if (bulkSelectedSchoolIds.has(sId)) {
+      tr.classList.add('bulk-row-selected');
+    } else {
+      tr.classList.remove('bulk-row-selected');
+    }
+  });
+
+  // Master checkbox state
+  const masterCheck = document.getElementById('bulk-master-checkbox');
+  if (masterCheck && bulkFilteredSchools.length > 0) {
+    const visible = bulkFilteredSchools.slice(0, 250);
+    const allVisibleSelected = visible.length > 0 && visible.every(s => bulkSelectedSchoolIds.has(s.id));
+    masterCheck.checked = allVisibleSelected;
+  }
+}
+
+function updateBulkValueInput(fieldName) {
+  const container = document.getElementById('bulk-value-input-container');
+  if (!container) return;
+
+  const applyBtn = document.getElementById('btn-apply-bulk-edit');
+  if (applyBtn) {
+    applyBtn.disabled = bulkSelectedSchoolIds.size === 0 || !fieldName;
+  }
+
+  if (!fieldName) {
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-pen"></i> New Value
+      </label>
+      <input type="text" id="bulk-val-input" placeholder="Select a field first..." disabled style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem; background: #f1f5f9;">
+    `;
+    return;
+  }
+
+  if (fieldName === 'ofstedRating') {
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-star" style="color: #eab308;"></i> New Ofsted Rating
+      </label>
+      <select id="bulk-val-input" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem; background: white;">
+        <option value="Outstanding">Outstanding</option>
+        <option value="Good">Good</option>
+        <option value="Requires Improvement">Requires Improvement</option>
+        <option value="Independent (ISI Excellent)">Independent (ISI Excellent)</option>
+      </select>
+    `;
+  } else if (fieldName === 'schoolType') {
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-school" style="color: #2563eb;"></i> New School Type
+      </label>
+      <select id="bulk-val-input" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem; background: white;">
+        <option value="Grammar">Grammar</option>
+        <option value="Independent">Independent</option>
+        <option value="Comprehensive">Comprehensive</option>
+      </select>
+    `;
+  } else if (fieldName === 'gender') {
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-users" style="color: #7c3aed;"></i> New Gender Intake
+      </label>
+      <select id="bulk-val-input" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem; background: white;">
+        <option value="Girls">Girls Only</option>
+        <option value="Boys">Boys Only</option>
+        <option value="Mixed">Mixed Intake</option>
+      </select>
+    `;
+  } else if (fieldName === 'entranceExamType') {
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-pen-nib" style="color: #d97706;"></i> New Entrance Exam Type
+      </label>
+      <select id="bulk-val-input" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem; background: white;">
+        <option value="11+ GL Assessment">11+ GL Assessment</option>
+        <option value="Sutton SET">Sutton Selective Eligibility Test (SET)</option>
+        <option value="Two-Stage 11+">Two-Stage 11+</option>
+        <option value="ISEB Pre-test">ISEB Pre-test / Common Entrance</option>
+        <option value="Non-selective">Non-selective (Comprehensive)</option>
+        <option value="Banding Assessment">Banding Assessment</option>
+      </select>
+    `;
+  } else if (fieldName === 'hot') {
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-fire" style="color: #ef4444;"></i> Hot School Status
+      </label>
+      <select id="bulk-val-input" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem; background: white;">
+        <option value="true">🔥 Mark as Hot School</option>
+        <option value="false">Remove Hot Badge</option>
+      </select>
+    `;
+  } else if (fieldName === 'official') {
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-circle-check" style="color: #0284c7;"></i> Official DfE Status
+      </label>
+      <select id="bulk-val-input" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem; background: white;">
+        <option value="true">✓ Mark as Official DfE Data</option>
+        <option value="false">Remove Official Badge</option>
+      </select>
+    `;
+  } else if (fieldName === 'la') {
+    const list = window._allSchoolsList || [];
+    const las = Array.from(new Set(list.map(s => s.la).filter(Boolean))).sort();
+    const optionsHtml = las.map(l => `<option value="${l}">${l}</option>`).join('');
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-map-location-dot" style="color: #059669;"></i> New Borough / LA
+      </label>
+      <select id="bulk-val-input" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem; background: white;">
+        ${optionsHtml}
+      </select>
+    `;
+  } else if (fieldName === 'gcseAttainment8') {
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-chart-line" style="color: #059669;"></i> Attainment 8 Score
+      </label>
+      <input type="number" step="0.1" id="bulk-val-input" placeholder="e.g. 72.5" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem;">
+    `;
+  } else if (fieldName === 'gcseProgress8') {
+    container.innerHTML = `
+      <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
+        <i class="fa-solid fa-chart-line" style="color: #059669;"></i> Progress 8 Score
+      </label>
+      <input type="number" step="0.01" id="bulk-val-input" placeholder="e.g. 0.85" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem;">
+    `;
+  }
+}
+
+async function executeBulkUpdate() {
+  if (bulkSelectedSchoolIds.size === 0) {
+    showToast('Please select at least one school to update.', 'warn');
+    return;
+  }
+
+  const fieldSelect = document.getElementById('bulk-field-select');
+  const fieldName = fieldSelect ? fieldSelect.value : '';
+  if (!fieldName) {
+    showToast('Please choose a property to modify.', 'warn');
+    return;
+  }
+
+  const valInput = document.getElementById('bulk-val-input');
+  if (!valInput) {
+    showToast('Please enter a new value for the property.', 'warn');
+    return;
+  }
+
+  let updateVal = valInput.value;
+  if (fieldName === 'hot' || fieldName === 'official') {
+    updateVal = (updateVal === 'true');
+  } else if (fieldName === 'gcseAttainment8' || fieldName === 'gcseProgress8') {
+    updateVal = parseFloat(updateVal);
+    if (isNaN(updateVal)) {
+      showToast('Please enter a valid numeric score.', 'warn');
+      return;
+    }
+  }
+
+  const count = bulkSelectedSchoolIds.size;
+  if (!confirm(`Apply update [${fieldName} = ${updateVal}] to ${count} selected school record${count > 1 ? 's' : ''}?`)) {
+    return;
+  }
+
+  try {
+    const payload = {
+      schoolIds: Array.from(bulkSelectedSchoolIds),
+      updates: { [fieldName]: updateVal }
+    };
+
+    const res = await fetch('/api/admin/bulk-edit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(`Batch update applied successfully to ${data.updatedCount || count} schools!`, 'success');
+      
+      // Invalidate school cache and reload
+      window._allSchoolsList = null;
+      await loadSchools();
+      await renderBulkEditTable();
+      bulkSelectedSchoolIds.clear();
+      updateBulkSelectionUI();
+    } else {
+      const err = await res.json();
+      showToast(`Bulk update failed: ${err.error || 'Server error'}`, 'error');
+    }
+  } catch (err) {
+    console.error('Bulk update error:', err);
+    showToast('Failed to execute bulk update request', 'error');
+  }
+}
+
 // -------------------------------------------------------------
 // SMART RECOMMENDATIONS ENGINE FRONTEND LOGIC
 // -------------------------------------------------------------
@@ -2721,13 +3325,48 @@ async function loadRecWeights() {
     const data = await res.json();
     const w = data.weights || { location: 35, examType: 25, academicPerformance: 20, ofstedRating: 10, schoolType: 10 };
 
-    if (document.getElementById('weight-location')) document.getElementById('weight-location').value = w.location ?? 35;
-    if (document.getElementById('weight-exam')) document.getElementById('weight-exam').value = w.examType ?? 25;
-    if (document.getElementById('weight-academic')) document.getElementById('weight-academic').value = w.academicPerformance ?? 20;
-    if (document.getElementById('weight-ofsted')) document.getElementById('weight-ofsted').value = w.ofstedRating ?? 10;
-    if (document.getElementById('weight-type')) document.getElementById('weight-type').value = w.schoolType ?? 10;
+    const loc = w.location ?? 35;
+    const exam = w.examType ?? 25;
+    const acad = w.academicPerformance ?? 20;
+    const ofst = w.ofstedRating ?? 10;
+    const type = w.schoolType ?? 10;
+
+    if (document.getElementById('weight-location')) document.getElementById('weight-location').value = loc;
+    if (document.getElementById('weight-exam')) document.getElementById('weight-exam').value = exam;
+    if (document.getElementById('weight-academic')) document.getElementById('weight-academic').value = acad;
+    if (document.getElementById('weight-ofsted')) document.getElementById('weight-ofsted').value = ofst;
+    if (document.getElementById('weight-type')) document.getElementById('weight-type').value = type;
+
+    if (document.getElementById('weight-val-location')) document.getElementById('weight-val-location').textContent = `${loc}%`;
+    if (document.getElementById('weight-val-exam')) document.getElementById('weight-val-exam').textContent = `${exam}%`;
+    if (document.getElementById('weight-val-academic')) document.getElementById('weight-val-academic').textContent = `${acad}%`;
+    if (document.getElementById('weight-val-ofsted')) document.getElementById('weight-val-ofsted').textContent = `${ofst}%`;
+    if (document.getElementById('weight-val-type')) document.getElementById('weight-val-type').textContent = `${type}%`;
+
+    updateTotalWeightsPill();
   } catch (err) {
     console.error('Failed to load recommendation weights:', err);
+  }
+}
+
+function updateTotalWeightsPill() {
+  const loc = parseInt(document.getElementById('weight-location')?.value) || 0;
+  const exam = parseInt(document.getElementById('weight-exam')?.value) || 0;
+  const acad = parseInt(document.getElementById('weight-academic')?.value) || 0;
+  const ofst = parseInt(document.getElementById('weight-ofsted')?.value) || 0;
+  const type = parseInt(document.getElementById('weight-type')?.value) || 0;
+  const total = loc + exam + acad + ofst + type;
+
+  const pill = document.getElementById('weights-total-pill');
+  if (pill) {
+    pill.textContent = `Total: ${total}%`;
+    if (total === 100) {
+      pill.style.background = '#dcfce7';
+      pill.style.color = '#166534';
+    } else {
+      pill.style.background = '#fef3c7';
+      pill.style.color = '#92400e';
+    }
   }
 }
 
@@ -2909,7 +3548,9 @@ async function fetchRecommendations() {
     });
 
     const data = await res.json();
-    renderRecommendations(data.recommendations || []);
+    const items = data.recommendations || [];
+    renderRecommendations(items);
+    renderParent2RecommendationsList(items);
   } catch (err) {
     console.error('Failed to fetch recommendations:', err);
   }
@@ -3343,6 +3984,18 @@ async function loadAdminFieldReports() {
 
     const schoolsList = await res.json();
 
+    // Update corrections badge count on side tab
+    const badge = document.getElementById('corrections-badge-count');
+    if (badge) {
+      const totalReports = Array.isArray(schoolsList) ? schoolsList.reduce((acc, s) => acc + (s.totalErrorCount || 0), 0) : 0;
+      if (totalReports > 0) {
+        badge.textContent = totalReports;
+        badge.style.display = 'inline-block';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
     if (!Array.isArray(schoolsList) || schoolsList.length === 0) {
       container.innerHTML = `
         <div style="text-align: center; padding: 2.5rem 1rem; background: #f0fdf4; border-radius: 10px; border: 1px solid #bbf7d0;">
@@ -3466,6 +4119,922 @@ function debounce(func, delay) {
     clearTimeout(timeout);
     timeout = setTimeout(() => func.apply(this, args), delay);
   };
+}
+
+
+/* ============================================================= */
+/* PARENT PORTAL 2.0 CONTROLLER & DUAL-TRACK ADMISSIONS ENGINE   */
+/* ============================================================= */
+
+function setupParent2EventListeners() {
+  // 1. Sub-navigation buttons
+  document.querySelectorAll('.parent2-subnav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const view = btn.getAttribute('data-p2-view');
+      if (view) switchParent2SubView(view);
+    });
+  });
+
+  // 2. Wizard Action Buttons
+  const applyWizardBtn = document.getElementById('p2-btn-apply-wizard');
+  if (applyWizardBtn) {
+    applyWizardBtn.addEventListener('click', saveParent2WizardProfile);
+  }
+
+  const resetWizardBtn = document.getElementById('p2-btn-reset-wizard');
+  if (resetWizardBtn) {
+    resetWizardBtn.addEventListener('click', () => {
+      const postcodeInput = document.getElementById('p2-input-postcode');
+      if (postcodeInput) postcodeInput.value = '';
+      const genderSelect = document.getElementById('p2-select-gender');
+      if (genderSelect) genderSelect.value = 'NA';
+      const abilitySelect = document.getElementById('p2-select-ability');
+      if (abilitySelect) abilitySelect.value = 'NA';
+      document.querySelectorAll('.p2-type-chk').forEach(c => c.checked = (c.value === 'NA'));
+      saveParent2WizardProfile();
+    });
+  }
+
+  // 3. Refresh Recs Button
+  const refreshRecsBtn = document.getElementById('p2-btn-refresh-recs');
+  if (refreshRecsBtn) {
+    refreshRecsBtn.addEventListener('click', () => {
+      fetchRecommendations();
+      showToast('Refreshed school recommendations!', 'info');
+    });
+  }
+
+  // 4. Calendar Export (.ics)
+  const exportIcsBtn = document.getElementById('p2-btn-export-ics');
+  if (exportIcsBtn) {
+    exportIcsBtn.addEventListener('click', exportCalendarIcs);
+  }
+
+  // 5. Dual-Track Quick Search Typeaheads
+  setupParent2Typeaheads();
+}
+
+function switchParent2SubView(subViewName) {
+  parent2State.activeSubView = subViewName;
+  
+  document.querySelectorAll('.parent2-subnav-btn').forEach(btn => {
+    if (btn.getAttribute('data-p2-view') === subViewName) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+
+  document.querySelectorAll('.parent2-view-section').forEach(sec => {
+    if (sec.id === `p2-view-${subViewName}`) {
+      sec.style.display = 'block';
+      sec.classList.add('active');
+    } else {
+      sec.style.display = 'none';
+      sec.classList.remove('active');
+    }
+  });
+
+  renderParent2Views();
+}
+
+function renderParent2Views() {
+  renderParent2HeaderStats();
+  if (parent2State.activeSubView === 'matchmaker') {
+    fetchRecommendations();
+  } else if (parent2State.activeSubView === 'dualtrack') {
+    renderDualTrackHub();
+  } else if (parent2State.activeSubView === 'matrix') {
+    renderDecisionMatrix();
+  } else if (parent2State.activeSubView === 'calendar') {
+    renderParent2Timeline();
+  }
+}
+
+function renderParent2HeaderStats() {
+  const locEl = document.getElementById('p2-stat-location');
+  const cafEl = document.getElementById('p2-stat-caf');
+  const indepEl = document.getElementById('p2-stat-indep');
+
+  const locVal = document.getElementById('p2-input-postcode')?.value || 'Greater London';
+  if (locEl) locEl.textContent = `Target: ${locVal}`;
+
+  const cafCount = parent2State.cafList.length;
+  if (cafEl) {
+    cafEl.innerHTML = `State CAF: <strong>${cafCount} / 6</strong> Choices`;
+  }
+
+  const indepCount = parent2State.independentList.length;
+  if (indepEl) {
+    indepEl.innerHTML = `Independent: <strong>${indepCount}</strong> Tracked`;
+  }
+}
+
+async function saveParent2WizardProfile() {
+  const location = document.getElementById('p2-input-postcode')?.value.trim() || '';
+  const gender = document.getElementById('p2-select-gender')?.value || 'NA';
+  const childAbilityLevel = document.getElementById('p2-select-ability')?.value || 'NA';
+  
+  const selectedTypes = Array.from(document.querySelectorAll('.p2-type-chk:checked')).map(c => c.value);
+  const proximity = document.getElementById('p2-pref-commute')?.value || 'somewhat';
+  const academicExcellence = document.getElementById('p2-pref-attainment')?.value || 'very';
+  const pupilProgress = document.getElementById('p2-pref-progress')?.value || 'somewhat';
+  const ofstedFloor = document.getElementById('p2-pref-ofsted')?.value || 'NA';
+
+  const preferencesOverride = {
+    targetBorough: location,
+    targetPostcode: location,
+    childAbilityLevel,
+    binaryFilters: {
+      locations: location,
+      gender,
+      ofstedFloor,
+      schoolTypes: selectedTypes.length > 0 ? selectedTypes : ['NA'],
+      examFormats: ['NA']
+    },
+    qualitativeWeights: {
+      proximity,
+      academicExcellence,
+      pupilProgress
+    }
+  };
+
+  try {
+    const res = await fetch('/api/user-recommendations/preferences', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify(preferencesOverride)
+    });
+
+    if (res.ok) {
+      showToast('Matchmaker preferences updated!', 'success');
+      await saveUserPortfolio(true);
+      await fetchRecommendations();
+    }
+  } catch (err) {
+    console.error('Error saving wizard preferences:', err);
+  }
+}
+
+// Render Recommendations in Parent Portal 2.0 Feed with Plain-English Insights
+function renderParent2RecommendationsList(items) {
+  const container = document.getElementById('p2-recs-container');
+  if (!container) return;
+
+  renderParent2HeaderStats();
+
+  if (!items || items.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 2.5rem 1rem; color: #64748b; background: #f8fafc; border-radius: 12px; border: 1px dashed #cbd5e1;">
+        <i class="fa-solid fa-compass" style="font-size: 2rem; color: #94a3b8; margin-bottom: 0.75rem;"></i>
+        <h4 style="margin: 0; color: #334155; font-size: 1.05rem;">No matching recommendations found</h4>
+        <p style="margin: 0.35rem 0 0 0; font-size: 0.85rem;">Try adjusting your home postcode or school type preferences in the wizard above.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+
+  items.slice(0, 15).forEach((item, idx) => {
+    const s = item.school;
+    const score = item.matchScore;
+    const reasons = item.reasons || [];
+
+    let matchBg = '#ecfdf5';
+    let matchColor = '#059669';
+    let matchLabel = 'High Match';
+    if (score < 70) { matchBg = '#eff6ff'; matchColor = '#2563eb'; matchLabel = 'Good Match'; }
+    if (score < 50) { matchBg = '#fffbeb'; matchColor = '#d97706'; matchLabel = 'Moderate Fit'; }
+
+    const isIndependent = (s.schoolType === 'Independent');
+    const isInCaf = parent2State.cafList.some(x => x.id === s.id);
+    const cafRank = parent2State.cafList.findIndex(x => x.id === s.id) + 1;
+    const isInIndep = parent2State.independentList.some(x => x.id === s.id);
+
+    // Plain English Insights
+    const insights = [];
+    if (s.gcseProgress8 !== null && s.gcseProgress8 !== undefined) {
+      if (s.gcseProgress8 >= 0.5) {
+        insights.push(`<span class="parent-insight-tag insight-growth-top" title="Students achieve half a grade higher than expected"><i class="fa-solid fa-arrow-trend-up"></i> Top 5% Student Growth (+${s.gcseProgress8})</span>`);
+      } else if (s.gcseProgress8 > 0) {
+        insights.push(`<span class="parent-insight-tag insight-growth-top"><i class="fa-solid fa-arrow-trend-up"></i> Above Average Progress (+${s.gcseProgress8})</span>`);
+      }
+    }
+
+    if (s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined) {
+      if (s.gcseAttainment8 >= 65) {
+        insights.push(`<span class="parent-insight-tag insight-academic-top" title="Average GCSE Grade 7+ across all subjects"><i class="fa-solid fa-trophy"></i> Outstanding GCSEs (${s.gcseAttainment8})</span>`);
+      } else if (s.gcseAttainment8 >= 50) {
+        insights.push(`<span class="parent-insight-tag insight-academic-top"><i class="fa-solid fa-award"></i> Strong GCSEs (${s.gcseAttainment8})</span>`);
+      }
+    }
+
+    if (s.entranceExamType && s.entranceExamType !== 'Standard' && s.entranceExamType !== 'Non-selective') {
+      insights.push(`<span class="parent-insight-tag insight-exam-selective"><i class="fa-solid fa-pen-nib"></i> ${s.entranceExamType}</span>`);
+    }
+
+    if (s.ofstedRating) {
+      const ofstedText = formatOfsted(s.ofstedRating);
+      if (ofstedText === 'Outstanding') {
+        insights.push(`<span class="parent-insight-tag" style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;"><i class="fa-solid fa-star" style="color: #eab308;"></i> Ofsted Outstanding</span>`);
+      }
+    }
+
+    // Contextual Action Button
+    let actionBtnHtml = '';
+    if (isIndependent) {
+      if (isInIndep) {
+        actionBtnHtml = `<button class="btn btn-secondary" style="font-size: 0.76rem; padding: 0.35rem 0.75rem; background: #f3e8ff; color: #7c3aed; border: 1px solid #e9d5ff;" disabled><i class="fa-solid fa-check"></i> Tracking Private</button>`;
+      } else {
+        actionBtnHtml = `<button class="btn btn-primary btn-p2-add-indep" data-id="${s.id}" style="font-size: 0.76rem; padding: 0.35rem 0.8rem; background: #7c3aed; border-color: #6d28d9;"><i class="fa-solid fa-plus"></i> Track Private</button>`;
+      }
+    } else {
+      if (isInCaf) {
+        actionBtnHtml = `<button class="btn btn-secondary" style="font-size: 0.76rem; padding: 0.35rem 0.75rem; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;" disabled><i class="fa-solid fa-check"></i> In State CAF (#${cafRank})</button>`;
+      } else {
+        const quotaFull = parent2State.cafList.length >= 6;
+        actionBtnHtml = `<button class="btn btn-primary btn-p2-add-caf" data-id="${s.id}" style="font-size: 0.76rem; padding: 0.35rem 0.8rem; background: ${quotaFull ? '#ea580c' : '#2563eb'}; border-color: ${quotaFull ? '#c2410c' : '#1d4ed8'};"><i class="fa-solid ${quotaFull ? 'fa-arrows-rotate' : 'fa-plus'}"></i> ${quotaFull ? 'Swap to State CAF' : `Add to State CAF (${parent2State.cafList.length}/6)`}</button>`;
+      }
+    }
+
+    const card = document.createElement('div');
+    card.className = 'school-row-item';
+    card.style.background = 'white';
+    card.style.border = '1px solid #e2e8f0';
+    card.style.borderLeft = `5px solid ${matchColor}`;
+    card.style.borderRadius = '10px';
+    card.style.padding = '0.85rem 1.1rem';
+    card.style.display = 'flex';
+    card.style.flexDirection = 'column';
+    card.style.gap = '0.5rem';
+    card.style.boxShadow = '0 2px 4px rgba(0,0,0,0.02)';
+
+    card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+          <span style="font-weight: 800; font-size: 0.78rem; color: ${matchColor}; background: ${matchBg}; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid ${matchColor}44;">
+            <i class="fa-solid fa-sparkles"></i> ${score}% ${matchLabel}
+          </span>
+          <h4 style="font-size: 1rem; font-weight: 800; color: #1e293b; margin: 0;">
+            <a href="#" onclick="openSchoolDetail('${s.id}'); return false;" style="color: #1e293b; text-decoration: none;">${s.name}</a>
+          </h4>
+          <span style="font-size: 0.76rem; font-weight: 700; color: ${isIndependent ? '#7c3aed' : '#2563eb'}; background: ${isIndependent ? '#f3e8ff' : '#eff6ff'}; padding: 0.15rem 0.5rem; border-radius: 6px;">
+            ${s.schoolType}
+          </span>
+          <span style="font-size: 0.78rem; color: #64748b;"><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> <strong>${s.la}</strong> (${s.postcode || 'N/A'})</span>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <button class="btn btn-outline" onclick="openSchoolDetail('${s.id}')" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
+            <i class="fa-solid fa-eye"></i> Details
+          </button>
+          ${actionBtnHtml}
+          <button class="btn-text btn-remove-rec" data-id="${s.id}" style="color: #94a3b8; font-size: 0.75rem; cursor: pointer; padding: 0.2rem 0.35rem;" title="Not interested">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Plain English Insights & Match Reason -->
+      <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; border-top: 1px dashed #f1f5f9; padding-top: 0.45rem;">
+        ${insights.join(' ')}
+        <span style="font-size: 0.76rem; color: #475569; margin-left: auto; background: #f8fafc; padding: 0.15rem 0.55rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+          <strong>Why this matches:</strong> ${reasons[0] || 'Matches child profile and location targets'}
+        </span>
+      </div>
+    `;
+
+    container.appendChild(card);
+  });
+
+  // Attach Add to State CAF Listeners
+  container.querySelectorAll('.btn-p2-add-caf').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      const school = items.find(x => x.school.id === id)?.school;
+      if (school) await addSchoolToStateCaf(school);
+    });
+  });
+
+  // Attach Add to Independent Listeners
+  container.querySelectorAll('.btn-p2-add-indep').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      const school = items.find(x => x.school.id === id)?.school;
+      if (school) await addSchoolToIndependent(school);
+    });
+  });
+
+  // Attach Remove listener
+  container.querySelectorAll('.btn-remove-rec').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      removeRecommendation(id);
+    });
+  });
+}
+
+// Add School to State CAF Track (Max 6 Choices)
+async function addSchoolToStateCaf(school) {
+  if (!school || !school.id) return;
+
+  if (parent2State.cafList.some(s => s.id === school.id)) {
+    showToast(`${school.name} is already in your State CAF preferences list!`, 'info');
+    return;
+  }
+
+  if (parent2State.cafList.length >= 6) {
+    if (confirm(`You have reached the 6-school State CAF limit!\n\nWould you like to open the Dual-Track Admissions Hub to swap an existing choice for ${school.name}?`)) {
+      switchParent2SubView('dualtrack');
+    }
+    return;
+  }
+
+  parent2State.cafList.push(school);
+  await saveUserPortfolio(true);
+  showToast(`Added ${school.name} as State CAF Preference #${parent2State.cafList.length}!`, 'success');
+  renderParent2Views();
+}
+
+// Remove School from State CAF Track
+async function removeSchoolFromStateCaf(schoolId) {
+  parent2State.cafList = parent2State.cafList.filter(s => s.id !== schoolId);
+  await saveUserPortfolio(true);
+  showToast('Removed choice from State CAF list.', 'info');
+  renderParent2Views();
+}
+
+// Move CAF Choice Rank (Reordering 1st to 6th)
+async function moveCafRank(index, direction) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= parent2State.cafList.length) return;
+
+  const item = parent2State.cafList.splice(index, 1)[0];
+  parent2State.cafList.splice(newIndex, 0, item);
+
+  await saveUserPortfolio(true);
+  showToast(`Updated State CAF preference order.`, 'success');
+  renderDualTrackHub();
+}
+
+// Add School to Independent Direct Track (Unlimited)
+async function addSchoolToIndependent(school) {
+  if (!school || !school.id) return;
+
+  if (parent2State.independentList.some(s => s.id === school.id)) {
+    showToast(`${school.name} is already in your Independent tracked list!`, 'info');
+    return;
+  }
+
+  parent2State.independentList.push(school);
+  await saveUserPortfolio(true);
+  showToast(`Added ${school.name} to Independent Direct admissions list!`, 'success');
+  renderParent2Views();
+}
+
+// Remove School from Independent Direct Track
+async function removeSchoolFromIndependent(schoolId) {
+  parent2State.independentList = parent2State.independentList.filter(s => s.id !== schoolId);
+  await saveUserPortfolio(true);
+  showToast('Removed school from Independent tracked list.', 'info');
+  renderParent2Views();
+}
+
+// Calculate State CAF Strategy Health (Reach vs Target vs Catchment Safety)
+function calculateCafStrategy(cafList) {
+  let reachCount = 0;
+  let targetCount = 0;
+  let safetyCount = 0;
+
+  cafList.forEach(s => {
+    const isGrammar = (s.schoolType === 'Grammar');
+    const att8 = s.gcseAttainment8 || 0;
+    const prog8 = s.gcseProgress8 || 0;
+
+    if (isGrammar || att8 >= 70) {
+      reachCount++;
+    } else if (att8 >= 55 || prog8 >= 0.3) {
+      targetCount++;
+    } else {
+      safetyCount++;
+    }
+  });
+
+  let title = 'CAF Strategy Health Check';
+  let desc = 'Add Grammar and Comprehensive schools to build a balanced mix of Reach, Target, and Safety preferences.';
+  let tag = 'Building List';
+
+  if (cafList.length === 0) {
+    tag = 'Empty (0/6)';
+    desc = 'Select up to 6 State/Grammar schools to rank for your local council Common Application Form.';
+  } else if (reachCount === cafList.length && cafList.length >= 3) {
+    tag = '⚠️ High-Risk Reach Only';
+    desc = 'All your choices are highly selective Reach schools. We strongly recommend adding 1–2 Catchment Safety schools so your child is guaranteed a place on March 1!';
+  } else if (safetyCount > 0 && (reachCount > 0 || targetCount > 0)) {
+    tag = '✅ Well Balanced Portfolio';
+    desc = 'Excellent strategy! You have a healthy blend of ambitious academic targets backed by high-probability catchment safety options.';
+  } else if (cafList.length >= 4) {
+    tag = '⚖️ Moderate Balance';
+    desc = 'Good selection. Ensure your final 1–2 preferences are within your guaranteed local catchment radius.';
+  }
+
+  return { reachCount, targetCount, safetyCount, title, desc, tag };
+}
+
+// Render Dual-Track Admissions Hub
+function renderDualTrackHub() {
+  renderParent2HeaderStats();
+
+  const cafContainer = document.getElementById('p2-caf-slots-list');
+  const indepContainer = document.getElementById('p2-indep-list-container');
+  const quotaBadge = document.getElementById('p2-caf-quota-badge');
+  const usedCountEl = document.getElementById('p2-caf-used-count');
+  const indepCountEl = document.getElementById('p2-indep-count');
+
+  const cafCount = parent2State.cafList.length;
+  if (usedCountEl) usedCountEl.textContent = cafCount;
+  if (indepCountEl) indepCountEl.textContent = parent2State.independentList.length;
+
+  if (quotaBadge) {
+    quotaBadge.className = `track-badge-quota ${cafCount >= 6 ? 'quota-full' : 'quota-ok'}`;
+    quotaBadge.innerHTML = `<span>${cafCount}</span> / 6 Preferences`;
+  }
+
+  // Update Strategy Health Banner
+  const strat = calculateCafStrategy(parent2State.cafList);
+  const stratTitle = document.getElementById('p2-strategy-health-title');
+  const stratTag = document.getElementById('p2-strategy-status-tag');
+  const stratDesc = document.getElementById('p2-strategy-health-desc');
+  const reachEl = document.getElementById('p2-count-reach');
+  const targetEl = document.getElementById('p2-count-target');
+  const safetyEl = document.getElementById('p2-count-safety');
+
+  if (stratTitle) stratTitle.innerHTML = `<i class="fa-solid fa-shield-halved"></i> ${strat.title}`;
+  if (stratTag) stratTag.textContent = strat.tag;
+  if (stratDesc) stratDesc.textContent = strat.desc;
+  if (reachEl) reachEl.textContent = strat.reachCount;
+  if (targetEl) targetEl.textContent = strat.targetCount;
+  if (safetyEl) safetyEl.textContent = strat.safetyCount;
+
+  // Render 6 State CAF Slots
+  if (cafContainer) {
+    cafContainer.innerHTML = '';
+    for (let slot = 1; slot <= 6; slot++) {
+      const school = parent2State.cafList[slot - 1];
+      const slotCard = document.createElement('div');
+
+      if (school) {
+        slotCard.className = 'caf-slot-card';
+        const isGrammar = (school.schoolType === 'Grammar');
+        const stratBadge = isGrammar ? '<span class="caf-strategy-pill strategy-reach">🎯 Reach</span>' : (school.gcseAttainment8 >= 55 ? '<span class="caf-strategy-pill strategy-target">⚖️ Target</span>' : '<span class="caf-strategy-pill strategy-safety">🛡️ Safety</span>');
+
+        slotCard.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 0.75rem; flex: 1; min-width: 0;">
+            <div class="caf-rank-badge">${slot}</div>
+            <div style="min-width: 0;">
+              <h5 style="margin: 0; font-size: 0.92rem; font-weight: 700; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                <a href="#" onclick="openSchoolDetail('${school.id}'); return false;" style="color: #1e293b; text-decoration: none;">${school.name}</a>
+              </h5>
+              <div style="font-size: 0.76rem; color: #64748b; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.15rem;">
+                <span>${school.schoolType}</span>
+                <span>•</span>
+                <span>${school.la}</span>
+                <span>•</span>
+                <span>Ofsted: <strong>${formatOfsted(school.ofstedRating)}</strong></span>
+                ${stratBadge}
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0;">
+            <button class="btn-text btn-caf-up" data-idx="${slot - 1}" style="padding: 0.25rem 0.45rem; color: #475569; cursor: pointer;" ${slot === 1 ? 'disabled style="opacity:0.3;"' : ''} title="Move Up in Rank">
+              <i class="fa-solid fa-arrow-up"></i>
+            </button>
+            <button class="btn-text btn-caf-down" data-idx="${slot - 1}" style="padding: 0.25rem 0.45rem; color: #475569; cursor: pointer;" ${slot === cafCount ? 'disabled style="opacity:0.3;"' : ''} title="Move Down in Rank">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <button class="btn-text btn-caf-remove" data-id="${school.id}" style="padding: 0.25rem 0.45rem; color: #ef4444; cursor: pointer;" title="Remove from CAF list">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        `;
+      } else {
+        slotCard.className = 'caf-slot-card';
+        slotCard.style.border = '1px dashed #cbd5e1';
+        slotCard.style.background = '#f8fafc';
+        slotCard.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 0.75rem; color: #94a3b8;">
+            <div class="caf-rank-badge" style="background: #e2e8f0; color: #64748b;">${slot}</div>
+            <span style="font-size: 0.85rem; font-style: italic;">Preference Slot #${slot} (Available - search above to add)</span>
+          </div>
+        `;
+      }
+
+      cafContainer.appendChild(slotCard);
+    }
+
+    // Attach CAF slot actions
+    cafContainer.querySelectorAll('.btn-caf-up').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-idx'));
+        moveCafRank(idx, -1);
+      });
+    });
+
+    cafContainer.querySelectorAll('.btn-caf-down').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-idx'));
+        moveCafRank(idx, 1);
+      });
+    });
+
+    cafContainer.querySelectorAll('.btn-caf-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-id');
+        removeSchoolFromStateCaf(id);
+      });
+    });
+  }
+
+  // Render Independent Schools List
+  if (indepContainer) {
+    indepContainer.innerHTML = '';
+    if (parent2State.independentList.length === 0) {
+      indepContainer.innerHTML = `
+        <div style="text-align: center; padding: 2rem 1rem; color: #94a3b8; background: #f8fafc; border-radius: 10px; border: 1px dashed #cbd5e1; font-size: 0.85rem;">
+          <i class="fa-solid fa-graduation-cap" style="font-size: 1.8rem; color: #cbd5e1; margin-bottom: 0.5rem;"></i>
+          <div>No independent schools tracked yet.</div>
+          <div style="font-size: 0.78rem; color: #64748b; margin-top: 0.2rem;">Search above to track unlimited fee-paying / bursary schools.</div>
+        </div>
+      `;
+    } else {
+      parent2State.independentList.forEach(school => {
+        const indepCard = document.createElement('div');
+        indepCard.className = 'caf-slot-card';
+        indepCard.style.borderLeft = '4px solid #7c3aed';
+
+        const note = parent2State.parentNotes[school.id]?.note || '';
+
+        indepCard.innerHTML = `
+          <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              <h5 style="margin: 0; font-size: 0.92rem; font-weight: 700; color: #1e293b;">
+                <a href="#" onclick="openSchoolDetail('${school.id}'); return false;" style="color: #1e293b; text-decoration: none;">${school.name}</a>
+              </h5>
+              <span style="font-size: 0.72rem; background: #f3e8ff; color: #7c3aed; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: 700;">Direct Entry</span>
+            </div>
+            <div style="font-size: 0.76rem; color: #64748b; margin-top: 0.2rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <span>${school.la}</span>
+              <span>•</span>
+              <span>Exam: <strong>${school.entranceExamType || 'ISEB / Bespoke'}</strong></span>
+            </div>
+            ${note ? `<div style="margin-top: 0.35rem; font-size: 0.76rem; color: #334155; background: #faf5ff; padding: 0.25rem 0.5rem; border-radius: 6px; border: 1px solid #f3e8ff;"><i class="fa-solid fa-note-sticky" style="color: #7c3aed;"></i> ${note}</div>` : ''}
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0;">
+            <button class="btn btn-outline btn-indep-note" data-id="${school.id}" style="font-size: 0.72rem; padding: 0.25rem 0.55rem;" title="Add/Edit Note">
+              <i class="fa-solid fa-pen"></i> Note
+            </button>
+            <button class="btn-text btn-indep-remove" data-id="${school.id}" style="padding: 0.25rem 0.45rem; color: #ef4444; cursor: pointer;" title="Remove from tracking">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        `;
+        indepContainer.appendChild(indepCard);
+      });
+
+      indepContainer.querySelectorAll('.btn-indep-note').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-id');
+          promptParentNote(id);
+        });
+      });
+
+      indepContainer.querySelectorAll('.btn-indep-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-id');
+          removeSchoolFromIndependent(id);
+        });
+      });
+    }
+  }
+}
+
+// Side-by-Side Shortlist Decision Matrix
+function renderDecisionMatrix() {
+  const table = document.getElementById('p2-matrix-table');
+  if (!table) return;
+
+  const allSelected = [...parent2State.cafList, ...parent2State.independentList];
+  if (allSelected.length === 0) {
+    table.innerHTML = `
+      <tr>
+        <td style="text-align: center; padding: 3rem 1rem; color: #94a3b8;">
+          <i class="fa-solid fa-table-columns" style="font-size: 2rem; color: #cbd5e1; margin-bottom: 0.5rem;"></i>
+          <div>No schools in your shortlist to compare.</div>
+          <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.25rem;">Add schools to your State CAF or Independent list to generate a side-by-side decision matrix.</div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  // Calculate highest attainment and progress for green highlighting
+  let maxAttain = -1;
+  let maxProg = -999;
+  allSelected.forEach(s => {
+    if (s.gcseAttainment8 > maxAttain) maxAttain = s.gcseAttainment8;
+    if (s.gcseProgress8 > maxProg) maxProg = s.gcseProgress8;
+  });
+
+  let html = `
+    <thead>
+      <tr style="background: #f8fafc;">
+        <th style="width: 180px; padding: 0.75rem 1rem; font-size: 0.85rem; font-weight: 700; color: #475569;">Comparison Factor</th>
+        ${allSelected.map((s, idx) => `
+          <th style="padding: 0.75rem 1rem; font-size: 0.88rem; font-weight: 800; color: #1e293b; border-left: 1px solid #e2e8f0; min-width: 200px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>${s.name}</span>
+              <span style="font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 4px; ${s.schoolType === 'Independent' ? 'background:#f3e8ff; color:#7c3aed;' : 'background:#eff6ff; color:#2563eb;'}">
+                ${s.schoolType === 'Independent' ? 'Direct' : `CAF #${idx + 1}`}
+              </span>
+            </div>
+          </th>
+        `).join('')}
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="font-weight: 700; color: #334155; padding: 0.65rem 1rem;"><i class="fa-solid fa-building-columns" style="color:#6366f1;"></i> School Type</td>
+        ${allSelected.map(s => `<td style="padding: 0.65rem 1rem; border-left: 1px solid #f1f5f9;">${s.schoolType}</td>`).join('')}
+      </tr>
+      <tr>
+        <td style="font-weight: 700; color: #334155; padding: 0.65rem 1rem;"><i class="fa-solid fa-location-dot" style="color:#ef4444;"></i> Borough &amp; Postcode</td>
+        ${allSelected.map(s => `<td style="padding: 0.65rem 1rem; border-left: 1px solid #f1f5f9;">${s.la} (${s.postcode || 'N/A'})</td>`).join('')}
+      </tr>
+      <tr>
+        <td style="font-weight: 700; color: #334155; padding: 0.65rem 1rem;"><i class="fa-solid fa-star" style="color:#eab308;"></i> Ofsted Rating</td>
+        ${allSelected.map(s => {
+          const rating = formatOfsted(s.ofstedRating);
+          const isOut = rating === 'Outstanding';
+          return `<td style="padding: 0.65rem 1rem; border-left: 1px solid #f1f5f9;"><span class="${isOut ? 'matrix-winner' : ''}">${rating}</span></td>`;
+        }).join('')}
+      </tr>
+      <tr>
+        <td style="font-weight: 700; color: #334155; padding: 0.65rem 1rem;"><i class="fa-solid fa-trophy" style="color:#eab308;"></i> GCSE Attainment 8</td>
+        ${allSelected.map(s => {
+          const val = s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined ? s.gcseAttainment8 : 'N/A';
+          const isBest = val === maxAttain && maxAttain > 0;
+          return `<td style="padding: 0.65rem 1rem; border-left: 1px solid #f1f5f9;"><span class="${isBest ? 'matrix-winner' : ''}">${val}${isBest ? ' 🏆 Best' : ''}</span></td>`;
+        }).join('')}
+      </tr>
+      <tr>
+        <td style="font-weight: 700; color: #334155; padding: 0.65rem 1rem;"><i class="fa-solid fa-arrow-trend-up" style="color:#059669;"></i> Progress 8 (Growth)</td>
+        ${allSelected.map(s => {
+          const val = s.gcseProgress8 !== null && s.gcseProgress8 !== undefined ? `+${s.gcseProgress8}` : 'N/A';
+          const isBest = s.gcseProgress8 === maxProg && maxProg > -900;
+          return `<td style="padding: 0.65rem 1rem; border-left: 1px solid #f1f5f9;"><span class="${isBest ? 'matrix-winner' : ''}">${val}${isBest ? ' 🚀 Top Growth' : ''}</span></td>`;
+        }).join('')}
+      </tr>
+      <tr>
+        <td style="font-weight: 700; color: #334155; padding: 0.65rem 1rem;"><i class="fa-solid fa-pen-nib" style="color:#4338ca;"></i> Entrance Exam</td>
+        ${allSelected.map(s => `<td style="padding: 0.65rem 1rem; border-left: 1px solid #f1f5f9;"><strong>${s.entranceExamType || 'Standard'}</strong></td>`).join('')}
+      </tr>
+      <tr>
+        <td style="font-weight: 700; color: #334155; padding: 0.65rem 1rem;"><i class="fa-solid fa-users" style="color:#8b5cf6;"></i> Gender &amp; Capacity</td>
+        ${allSelected.map(s => `<td style="padding: 0.65rem 1rem; border-left: 1px solid #f1f5f9;">${s.gender} (${s.numberOfPupils || 'N/A'} pupils)</td>`).join('')}
+      </tr>
+      <tr>
+        <td style="font-weight: 700; color: #334155; padding: 0.65rem 1rem;"><i class="fa-solid fa-note-sticky" style="color:#f59e0b;"></i> Parent Notes</td>
+        ${allSelected.map(s => {
+          const note = parent2State.parentNotes[s.id]?.note || '';
+          return `<td style="padding: 0.65rem 1rem; border-left: 1px solid #f1f5f9; font-size: 0.8rem; color: #475569;">${note || '<em style="color:#94a3b8;">No notes saved</em>'}</td>`;
+        }).join('')}
+      </tr>
+    </tbody>
+  `;
+
+  table.innerHTML = html;
+}
+
+// Unified Admissions Timeline & Calendar
+function renderParent2Timeline() {
+  const container = document.getElementById('p2-calendar-timeline-container');
+  if (!container) return;
+
+  const allSelected = [...parent2State.cafList, ...parent2State.independentList];
+
+  const timelineEvents = [
+    {
+      month: 'May – June 2026',
+      title: '11+ & Entrance Exam Registrations Open',
+      desc: 'Sutton SET, CSSE Essex, Kent 11+, and Independent ISEB registrations open.',
+      track: 'state'
+    },
+    {
+      month: 'September 2026',
+      title: 'Grammar Stage 1 Sittings & Open Evenings',
+      desc: 'Stage 1 tests (e.g. Sutton SET, Kent Test) and school open day visits.',
+      track: 'state'
+    },
+    {
+      month: 'October 31, 2026',
+      title: '🏛️ National State Secondary CAF Deadline (Strict)',
+      desc: 'Submission deadline for your Local Authority Common Application Form (ranking up to 6 State/Grammar preferences).',
+      track: 'state',
+      critical: true
+    },
+    {
+      month: 'November – December 2026',
+      title: 'Independent Registration & Bursary Deadlines',
+      desc: 'Closing dates for direct fee-paying applications and means-tested bursary paperwork.',
+      track: 'independent'
+    },
+    {
+      month: 'January 2027',
+      title: 'Independent Bespoke Exams & Interviews',
+      desc: 'Direct entrance exams and interview callback windows for private schools.',
+      track: 'independent'
+    },
+    {
+      month: 'March 1, 2027',
+      title: '🎉 National Offer Day (State Secondary Schools)',
+      desc: 'Councils release official Year 7 state school offers via eAdmissions.',
+      track: 'state',
+      critical: true
+    }
+  ];
+
+  let html = `<div style="display: flex; flex-direction: column; gap: 1rem;">`;
+
+  timelineEvents.forEach(evt => {
+    const isState = (evt.track === 'state');
+    const borderColor = evt.critical ? '#ef4444' : (isState ? '#2563eb' : '#7c3aed');
+    const bgBadge = evt.critical ? '#fef2f2' : (isState ? '#eff6ff' : '#faf5ff');
+    const colorBadge = evt.critical ? '#b91c1c' : (isState ? '#1d4ed8' : '#7c3aed');
+
+    html += `
+      <div style="background: white; border: 1px solid #e2e8f0; border-left: 5px solid ${borderColor}; border-radius: 10px; padding: 1rem 1.25rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <span style="background: ${bgBadge}; color: ${colorBadge}; font-weight: 800; font-size: 0.76rem; padding: 0.2rem 0.55rem; border-radius: 6px;">
+              ${evt.month}
+            </span>
+            <h5 style="margin: 0; font-size: 0.98rem; font-weight: 700; color: #1e293b;">
+              ${evt.title}
+            </h5>
+          </div>
+          <p style="margin: 0.35rem 0 0 0; font-size: 0.83rem; color: #64748b;">${evt.desc}</p>
+        </div>
+
+        <button class="btn btn-outline" onclick="exportCalendarIcs()" style="font-size: 0.76rem; padding: 0.35rem 0.65rem;">
+          <i class="fa-solid fa-calendar-plus"></i> Add to Calendar
+        </button>
+      </div>
+    `;
+  });
+
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+// 1-Click iCalendar (.ics) Generator and Downloader
+function exportCalendarIcs() {
+  const events = [
+    { summary: 'Secondary CAF Council Submission Deadline', dtstart: '20261031T235900Z', dtend: '20261031T235959Z', desc: 'Deadline to submit your 6 State CAF preferences to your Local Authority portal (eAdmissions).' },
+    { summary: 'National Offer Day (Year 7 Admissions)', dtstart: '20270301T090000Z', dtend: '20270301T170000Z', desc: 'Official outcome emails released by council for secondary school offers.' },
+    { summary: 'Sutton 11+ Selective Eligibility Test (SET)', dtstart: '20260915T083000Z', dtend: '20260915T123000Z', desc: 'Stage 1 11+ Selective Entrance Exam sitting.' }
+  ];
+
+  let ics = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//EduLondon DB//Admissions Calendar//EN\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n`;
+
+  events.forEach(evt => {
+    ics += `BEGIN:VEVENT\r\nUID:${Date.now()}-${Math.random().toString(36).substr(2, 9)}@edulondon.sch.uk\r\nDTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z\r\nDTSTART:${evt.dtstart}\r\nDTEND:${evt.dtend}\r\nSUMMARY:${evt.summary}\r\nDESCRIPTION:${evt.desc}\r\nSTATUS:CONFIRMED\r\nEND:VEVENT\r\n`;
+  });
+
+  ics += `END:VCALENDAR\r\n`;
+
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.setAttribute('download', 'EduLondon_Admissions_Calendar.ics');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  showToast('Downloaded admissions calendar (.ics) file! Open to sync with Google Calendar or Apple iCal.', 'success');
+}
+
+// Prompt Parent for Personal School Note
+function promptParentNote(schoolId) {
+  const current = parent2State.parentNotes[schoolId]?.note || '';
+  const note = prompt('Enter your private notes for this school (e.g. Open Day impressions, commute feedback, staff contact):', current);
+  if (note !== null) {
+    if (!parent2State.parentNotes[schoolId]) parent2State.parentNotes[schoolId] = {};
+    parent2State.parentNotes[schoolId].note = note.trim();
+    saveUserPortfolio(true);
+    showToast('Saved your private school note!', 'success');
+    renderDualTrackHub();
+  }
+}
+
+// Setup Dual-Track Typeahead Searches
+function setupParent2Typeaheads() {
+  const cafInput = document.getElementById('p2-caf-add-search');
+  const cafBox = document.getElementById('p2-caf-add-suggestions');
+  const indepInput = document.getElementById('p2-indep-add-search');
+  const indepBox = document.getElementById('p2-indep-add-suggestions');
+
+  if (cafInput && cafBox) {
+    cafInput.addEventListener('input', async (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      if (q.length < 2) {
+        cafBox.style.display = 'none';
+        return;
+      }
+      try {
+        const res = await fetch(`/api/schools?search=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        const matches = (data.schools || []).filter(s => s.schoolType !== 'Independent');
+
+        if (matches.length === 0) {
+          cafBox.innerHTML = '<div style="padding: 0.6rem 0.9rem; color: #94a3b8; font-size: 0.85rem;">No state/grammar schools found</div>';
+        } else {
+          cafBox.innerHTML = matches.slice(0, 8).map(s => `
+            <div class="p2-sug-item" data-id="${s.id}" style="padding: 0.6rem 0.9rem; cursor: pointer; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem;">
+              <strong>${s.name}</strong> <span style="color:#64748b;">(${s.schoolType} - ${s.la})</span>
+            </div>
+          `).join('');
+
+          cafBox.querySelectorAll('.p2-sug-item').forEach(item => {
+            item.addEventListener('click', async () => {
+              const id = item.getAttribute('data-id');
+              const sch = matches.find(m => m.id === id);
+              if (sch) await addSchoolToStateCaf(sch);
+              cafInput.value = '';
+              cafBox.style.display = 'none';
+            });
+          });
+        }
+        cafBox.style.display = 'block';
+      } catch (err) {
+        cafBox.style.display = 'none';
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!cafInput.contains(e.target) && !cafBox.contains(e.target)) cafBox.style.display = 'none';
+    });
+  }
+
+  if (indepInput && indepBox) {
+    indepInput.addEventListener('input', async (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      if (q.length < 2) {
+        indepBox.style.display = 'none';
+        return;
+      }
+      try {
+        const res = await fetch(`/api/schools?search=${encodeURIComponent(q)}&schoolType=Independent`);
+        const data = await res.json();
+        const matches = data.schools || [];
+
+        if (matches.length === 0) {
+          indepBox.innerHTML = '<div style="padding: 0.6rem 0.9rem; color: #94a3b8; font-size: 0.85rem;">No independent schools found</div>';
+        } else {
+          indepBox.innerHTML = matches.slice(0, 8).map(s => `
+            <div class="p2-indep-sug-item" data-id="${s.id}" style="padding: 0.6rem 0.9rem; cursor: pointer; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem;">
+              <strong>${s.name}</strong> <span style="color:#7c3aed;">(Independent - ${s.la})</span>
+            </div>
+          `).join('');
+
+          indepBox.querySelectorAll('.p2-indep-sug-item').forEach(item => {
+            item.addEventListener('click', async () => {
+              const id = item.getAttribute('data-id');
+              const sch = matches.find(m => m.id === id);
+              if (sch) await addSchoolToIndependent(sch);
+              indepInput.value = '';
+              indepBox.style.display = 'none';
+            });
+          });
+        }
+        indepBox.style.display = 'block';
+      } catch (err) {
+        indepBox.style.display = 'none';
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!indepInput.contains(e.target) && !indepBox.contains(e.target)) indepBox.style.display = 'none';
+    });
+  }
 }
 
 
