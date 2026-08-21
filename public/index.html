@@ -421,319 +421,324 @@
 
 
 
-  <!-- PARENT / USER PORTAL TAB (CLASSIC RECOMMENDATION & SEARCH WIDGET) -->
+  <!-- PARENT / USER PORTAL TAB (CLASSIC RECOMMENDATION & SEARCH WIDGET WITH LEFT SIDE TABS) -->
   <div id="recommend-tab-content" style="display: none;">
-    <div style="max-width: 1400px; margin: 1.5rem auto; padding: 0 1.5rem;">
-
-      <!-- 1. TOP CARD: Build Your Target School Shortlist Portfolio -->
-      <div class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.25rem; margin-bottom: 1.25rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.6rem; margin-bottom: 0.8rem; flex-wrap: wrap; gap: 0.5rem;">
-          <div>
-            <h3 style="color: #1e293b; display: flex; align-items: center; gap: 0.5rem; font-size: 1.05rem; margin: 0;">
-              <i class="fa-solid fa-list-check" style="color: #059669;"></i> Build Your Target School Shortlist
-            </h3>
-            <p style="font-size: 0.82rem; color: #64748b; margin-top: 0.15rem;">Search and add specific target schools. Saved schools automatically influence and refine recommendations.</p>
-          </div>
-          <button id="btn-finish-selection" class="btn btn-primary" style="font-size: 0.85rem; padding: 0.55rem 1.1rem; background: linear-gradient(135deg, #059669 0%, #10b981 100%); border: none;">
-            <i class="fa-solid fa-chart-pie"></i> View My Target Shortlist (<span id="user-schools-count">0</span>)
-          </button>
-        </div>
-
-        <div>
-          <label style="font-size: 0.82rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
-            <i class="fa-solid fa-magnifying-glass"></i> Search &amp; Add Target School to Shortlist
-          </label>
-          <div style="position: relative; max-width: 600px;">
-            <input type="text" id="rec-school-search" placeholder="Type school name e.g. Tiffin, Latymer, St Pauls..." style="width: 100%; padding: 0.55rem 0.8rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem;">
-            <div id="rec-school-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 220px; overflow-y: auto; z-index: 100; display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);"></div>
-          </div>
-        </div>
-
-        <div style="margin-top: 0.8rem; border-top: 1px dashed #e2e8f0; padding-top: 0.6rem;">
-          <strong style="font-size: 0.82rem; color: #475569; display: block; margin-bottom: 0.4rem;">
-            Currently Shortlisted Schools:
-          </strong>
-          <div id="user-schools-chips" style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;">
-            <span style="color: #94a3b8; font-size: 0.82rem; font-style: italic;">No target schools added yet. Search above to add your first school!</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 2. MIDDLE COLLAPSIBLE CARD: Personalize Recommendation Profile -->
-      <details id="rec-profile-details" class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1rem 1.25rem; margin-bottom: 1.25rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-        <summary style="cursor: pointer; font-size: 1.05rem; font-weight: 700; color: #1e293b; display: flex; justify-content: space-between; align-items: center; outline: none; user-select: none;">
-          <span style="display: flex; align-items: center; gap: 0.5rem;">
-            <i class="fa-solid fa-sliders" style="color: #4f46e5;"></i> Personalize Your School Recommendation Profile &amp; Filters
-          </span>
-          <span style="font-size: 0.82rem; color: #4f46e5; font-weight: 600; background: #e0e7ff; padding: 0.25rem 0.65rem; border-radius: 6px;">
-            <i class="fa-solid fa-chevron-down"></i> Expand / Collapse Filters
-          </span>
-        </summary>
-
-        <div style="margin-top: 1rem; border-top: 1px solid #f1f5f9; padding-top: 1rem;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
-            <p style="font-size: 0.82rem; color: #64748b; margin: 0;">Set your child's ability, target exam formats, hard requirements, and priority preferences. All controls include <strong>N/A (No Preference)</strong> options.</p>
-            <button id="btn-save-rec-profile" class="btn btn-primary" style="background: #4f46e5; border-color: #4338ca; font-size: 0.85rem; padding: 0.45rem 0.9rem;">
-              <i class="fa-solid fa-floppy-disk"></i> Save Profile &amp; Update Recommendations
-            </button>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 1.25rem;">
-            
-            <!-- Card 1: Child Ability & Target Exam Formats -->
-            <div style="background: #f8fafc; padding: 1rem; border-radius: 10px; border: 1px solid #cbd5e1;">
-              <strong style="color: #4338ca; font-size: 0.9rem; display: block; margin-bottom: 0.6rem;">
-                <i class="fa-solid fa-graduation-cap"></i> 1. Child Ability &amp; Target Entrance Exams
-              </strong>
-              
-              <div style="margin-bottom: 0.8rem;">
-                <label style="font-size: 0.8rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
-                  Child's Current Performance Level in School
-                </label>
-                <select id="rec-child-ability" style="width: 100%; padding: 0.5rem 0.7rem; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.85rem;">
-                  <option value="NA">N/A (Not Specified / Ignore)</option>
-                  <option value="below_average">Below Average (Focus on Nurturing Growth)</option>
-                  <option value="average">Average (Strong Comprehensive Match)</option>
-                  <option value="above_average">Above Average (Grammar &amp; Selective Potential)</option>
-                  <option value="top_class">Top of the Class (High Selective &amp; Top Academic Match)</option>
-                </select>
-              </div>
-
-              <div>
-                <label style="font-size: 0.8rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
-                  Target Entrance Exam Formats (Multi-Select)
-                </label>
-                <div style="display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.8rem; color: #475569; background: white; padding: 0.6rem; border-radius: 6px; border: 1px solid #cbd5e1; max-height: 140px; overflow-y: auto;">
-                  <label style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
-                    <input type="checkbox" class="rec-exam-format-chk" value="NA" checked> <em>N/A (Any Exam Format)</em>
-                  </label>
-                  <label style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
-                    <input type="checkbox" class="rec-exam-format-chk" value="11+ GL Assessment"> 11+ GL Assessment
-                  </label>
-                  <label style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
-                    <input type="checkbox" class="rec-exam-format-chk" value="Sutton SET"> Sutton SET (Selective Eligibility Test)
-                  </label>
-                  <label style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
-                    <input type="checkbox" class="rec-exam-format-chk" value="ISEB"> ISEB Common Pre-Test
-                  </label>
-                  <label style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
-                    <input type="checkbox" class="rec-exam-format-chk" value="Independent Custom"> Independent School Custom Exam
-                  </label>
-                  <label style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
-                    <input type="checkbox" class="rec-exam-format-chk" value="Standard Assessment"> Non-Selective / Standard Admissions
-                  </label>
-                </div>
-              </div>
+    <section class="admin-portal-wrapper" style="max-width: 1440px; margin: 1.25rem auto; padding: 0 1.5rem;">
+      <div class="admin-side-layout">
+        
+        <!-- Left Side Navigation for Classic Portal -->
+        <aside class="admin-side-nav">
+          <div class="side-nav-heading">PARENT PORTAL</div>
+          
+          <button class="admin-side-tab classic-side-tab active" data-target-classic-tab="find" id="classic-side-tab-find">
+            <span class="side-tab-icon"><i class="fa-solid fa-magnifying-glass-location" style="color: #4f46e5;"></i></span>
+            <div class="side-tab-info">
+              <span class="side-tab-title">Find Schools</span>
+              <span class="side-tab-desc">Matchmaker &amp; catalog</span>
             </div>
+          </button>
 
-            <!-- Card 2: Hard Binary Elimination Filters -->
-            <div style="background: #f8fafc; padding: 1rem; border-radius: 10px; border: 1px solid #cbd5e1;">
-              <strong style="color: #059669; font-size: 0.9rem; display: block; margin-bottom: 0.6rem;">
-                <i class="fa-solid fa-filter"></i> 2. Hard Requirements &amp; Elimination Filters
-              </strong>
+          <button class="admin-side-tab classic-side-tab" data-target-classic-tab="shortlist" id="classic-side-tab-shortlist">
+            <span class="side-tab-icon"><i class="fa-solid fa-list-check" style="color: #059669;"></i></span>
+            <div class="side-tab-info">
+              <span class="side-tab-title">My Shortlist</span>
+              <span class="side-tab-desc">Saved target schools</span>
+            </div>
+            <span class="side-tab-counter" id="classic-shortlist-badge-count" style="background:#059669; color: white;">0</span>
+          </button>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem;">
-                <div style="grid-column: 1 / -1;">
-                  <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
-                    <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> Target Boroughs / Postcodes (Hard Filter - comma separated)
-                  </label>
-                  <input type="text" id="rec-target-locations" placeholder="e.g. Barnet, Kingston, SW19, Richmond, N12... (leave blank or 'N/A' for any)" style="width: 100%; padding: 0.45rem 0.7rem; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.82rem;">
-                </div>
+          <button class="admin-side-tab classic-side-tab" data-target-classic-tab="timeline" id="classic-side-tab-timeline">
+            <span class="side-tab-icon"><i class="fa-solid fa-calendar-days" style="color: #ea580c;"></i></span>
+            <div class="side-tab-info">
+              <span class="side-tab-title">Admission Timeline</span>
+              <span class="side-tab-desc">Exam dates &amp; deadlines</span>
+            </div>
+          </button>
+        </aside>
 
+        <!-- Main Content Area for Classic Portal Subpanes -->
+        <main class="admin-main-content">
+          
+          <!-- SUBPANE 1: FIND SCHOOLS -->
+          <div id="classic-subpane-find" class="classic-subpane" style="display: block;">
+            
+            <!-- UNIFIED DISCOVERY & MATCHMAKER FILTER CARD -->
+            <div class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+              
+              <!-- 2-Column Section: Left (School Search) + Right (4 Primary Filters) -->
+              <div style="display: grid; grid-template-columns: 1fr 1.35fr; gap: 1.5rem; align-items: start; border-bottom: 1px solid #f1f5f9; padding-bottom: 1rem;">
+                
+                <!-- Left Column: Search & Add Target School to Shortlist -->
                 <div>
-                  <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
-                    Child Gender Intake
-                  </label>
-                  <select id="rec-gender" style="width: 100%; padding: 0.45rem; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.82rem;">
-                    <option value="NA">N/A (Any Intake)</option>
-                    <option value="girls">Girls Only (Single Sex)</option>
-                    <option value="boys">Boys Only (Single Sex)</option>
-                    <option value="girls_coed">Girls + Co-Ed (Mixed)</option>
-                    <option value="boys_coed">Boys + Co-Ed (Mixed)</option>
-                    <option value="mixed">Co-Ed / Mixed Only</option>
-                  </select>
-                </div>
+                  <div style="margin-bottom: 0.75rem;">
+                    <h3 style="color: #1e293b; display: flex; align-items: center; gap: 0.5rem; font-size: 1.05rem; margin: 0;">
+                      <i class="fa-solid fa-list-check" style="color: #059669;"></i> Target School Shortlist
+                    </h3>
+                    <p style="font-size: 0.8rem; color: #64748b; margin: 0.15rem 0 0 0;">Search and add schools to influence your match recommendations.</p>
+                  </div>
 
-                <div>
-                  <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
-                    Ofsted Floor
-                  </label>
-                  <select id="rec-ofsted-floor" style="width: 100%; padding: 0.45rem; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.82rem;">
-                    <option value="NA">N/A (Any Rating)</option>
-                    <option value="good">Good &amp; Above</option>
-                    <option value="outstanding">Outstanding Only</option>
-                  </select>
-                </div>
+                  <div style="position: relative; margin-bottom: 0.6rem;">
+                    <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
+                      <i class="fa-solid fa-magnifying-glass"></i> Search School Name
+                    </label>
+                    <input type="text" id="rec-school-search" placeholder="Type school name e.g. Tiffin, Latymer, St Pauls..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem;">
+                    <div id="rec-school-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 100; display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);"></div>
+                  </div>
 
-                <div style="grid-column: 1 / -1;">
-                  <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
-                    School Types Allowed (Multi-Select)
-                  </label>
-                  <div style="display: flex; gap: 0.6rem; flex-wrap: wrap; font-size: 0.78rem; color: #475569; background: white; padding: 0.45rem; border-radius: 6px; border: 1px solid #cbd5e1;">
-                    <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="NA" checked> N/A (Any)</label>
-                    <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="Grammar"> Grammar</label>
-                    <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="Independent"> Independent</label>
-                    <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="Comprehensive"> Comprehensive</label>
+                  <div>
+                    <strong style="font-size: 0.78rem; color: #475569; display: block; margin-bottom: 0.3rem;">Currently Shortlisted:</strong>
+                    <div id="user-schools-chips" style="display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; max-height: 90px; overflow-y: auto;">
+                      <span style="color: #94a3b8; font-size: 0.8rem; font-style: italic;">No target schools added yet.</span>
+                    </div>
                   </div>
                 </div>
+
+                <!-- Right Column: 4 Core Filters Grid -->
+                <div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem;">
+                    <h3 style="color: #1e293b; display: flex; align-items: center; gap: 0.5rem; font-size: 1.05rem; margin: 0;">
+                      <i class="fa-solid fa-sliders" style="color: #4f46e5;"></i> Matchmaker Filters
+                    </h3>
+                    <button id="btn-save-rec-profile" class="btn btn-primary" style="font-size: 0.8rem; padding: 0.4rem 0.85rem; background: #4f46e5; border-color: #4338ca;">
+                      <i class="fa-solid fa-bolt"></i> Update Matches
+                    </button>
+                  </div>
+
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem;">
+                    
+                    <!-- 1. Postcode -->
+                    <div>
+                      <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
+                        <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> 1. Postcode / Borough
+                      </label>
+                      <input type="text" id="rec-target-locations" placeholder="e.g. SW19, Barnet, Kingston..." style="width: 100%; padding: 0.42rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem;">
+                    </div>
+
+                    <!-- 2. Gender -->
+                    <div>
+                      <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
+                        <i class="fa-solid fa-venus-mars" style="color: #6366f1;"></i> 2. Gender Intake
+                      </label>
+                      <select id="rec-gender" style="width: 100%; padding: 0.42rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem;">
+                        <option value="NA">Any (Boys, Girls, Co-ed)</option>
+                        <option value="girls">Girls Only</option>
+                        <option value="boys">Boys Only</option>
+                        <option value="girls_coed">Girls + Co-ed</option>
+                        <option value="boys_coed">Boys + Co-ed</option>
+                        <option value="mixed">Co-ed / Mixed Only</option>
+                      </select>
+                    </div>
+
+                    <!-- 3. Child's Learning Profile -->
+                    <div>
+                      <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
+                        <i class="fa-solid fa-graduation-cap" style="color: #059669;"></i> 3. Child's Learning Profile
+                      </label>
+                      <select id="rec-child-ability" style="width: 100%; padding: 0.42rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem;">
+                        <option value="NA">N/A (General Match)</option>
+                        <option value="top_class">High Academic (11+ Selective)</option>
+                        <option value="above_average">Above Average (Grammar &amp; Top Comp)</option>
+                        <option value="average">Balanced / All-Round Growth</option>
+                        <option value="below_average">Nurturing Growth &amp; High Progress</option>
+                      </select>
+                    </div>
+
+                    <!-- 4. Target School Types -->
+                    <div>
+                      <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
+                        <i class="fa-solid fa-school" style="color: #d97706;"></i> 4. Target School Types
+                      </label>
+                      <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; font-size: 0.76rem; color: #475569; background: #f8fafc; padding: 0.35rem 0.5rem; border-radius: 8px; border: 1px solid #cbd5e1;">
+                        <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="NA" checked> Any</label>
+                        <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="Grammar"> Grammar</label>
+                        <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="Independent"> Independent</label>
+                        <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="Comprehensive"> Comprehensive</label>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- Collapsed Single-Row Filter: Parent Priorities & Preferences -->
+              <details id="classic-priorities-details" style="margin-top: 0.75rem;">
+                <summary style="cursor: pointer; font-size: 0.84rem; font-weight: 700; color: #4338ca; display: flex; justify-content: space-between; align-items: center; outline: none; user-select: none; padding: 0.35rem 0;">
+                  <span style="display: flex; align-items: center; gap: 0.4rem;">
+                    <i class="fa-solid fa-sliders" style="color: #6366f1;"></i> Parent Priorities &amp; Advanced Preferences
+                  </span>
+                  <span style="font-size: 0.78rem; color: #4f46e5; font-weight: 600; background: #e0e7ff; padding: 0.2rem 0.55rem; border-radius: 6px;">
+                    <i class="fa-solid fa-chevron-down"></i> Expand / Collapse
+                  </span>
+                </summary>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) auto; gap: 0.75rem; align-items: end; margin-top: 0.6rem; padding: 0.65rem 0.85rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+                  <div>
+                    <label style="font-size: 0.75rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
+                      <i class="fa-solid fa-bus" style="color: #64748b;"></i> Commute Proximity
+                    </label>
+                    <select id="rec-qual-prox" style="width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.78rem;">
+                      <option value="not_important">Low</option>
+                      <option value="somewhat" selected>Medium</option>
+                      <option value="very">High</option>
+                      <option value="top_priority">Top Priority</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style="font-size: 0.75rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
+                      <i class="fa-solid fa-trophy" style="color: #eab308;"></i> GCSE Attainment 8
+                    </label>
+                    <select id="rec-qual-acad" style="width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.78rem;">
+                      <option value="not_important">Low</option>
+                      <option value="somewhat">Medium</option>
+                      <option value="very" selected>High</option>
+                      <option value="top_priority">Top Priority</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style="font-size: 0.75rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
+                      <i class="fa-solid fa-arrow-trend-up" style="color: #059669;"></i> Progress 8 (Growth)
+                    </label>
+                    <select id="rec-qual-prog" style="width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.78rem;">
+                      <option value="not_important">Low</option>
+                      <option value="somewhat" selected>Medium</option>
+                      <option value="very">High</option>
+                      <option value="top_priority">Top Priority</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style="font-size: 0.75rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
+                      <i class="fa-solid fa-star" style="color: #eab308;"></i> Ofsted Floor
+                    </label>
+                    <select id="rec-ofsted-floor" style="width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.78rem;">
+                      <option value="NA">Any Rating</option>
+                      <option value="good">Good &amp; Above</option>
+                      <option value="outstanding">Outstanding Only</option>
+                    </select>
+                  </div>
+
+                  <div style="display: flex; align-items: flex-end;">
+                    <button id="btn-reset-rec-wizard" class="btn btn-outline" style="font-size: 0.78rem; padding: 0.35rem 0.75rem; white-space: nowrap;">
+                      <i class="fa-solid fa-arrow-rotate-left"></i> Reset All
+                    </button>
+                  </div>
+                </div>
+              </details>
+
+            </div>
+
+            <!-- 3. BOTTOM CARD: Recommendations Single-Line List View -->
+            <div class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.25rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 0.8rem;">
+                <div>
+                  <h3 style="color: #1e293b; display: flex; align-items: center; gap: 0.5rem; font-size: 1.05rem; margin: 0;">
+                    <i class="fa-solid fa-sparkles" style="color: #eab308;"></i> Recommended Schools Matching Your Profile
+                  </h3>
+                  <p style="font-size: 0.82rem; color: #64748b; margin-top: 0.15rem;">Ordered by highest match score. Click "+ Add to Shortlist" on any school to save it.</p>
+                </div>
+                <button id="refresh-rec-btn" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                  <i class="fa-solid fa-rotate-right"></i> Refresh Recommendations
+                </button>
+              </div>
+
+              <!-- 2-Line Row Layout Container -->
+              <div id="rec-cards-container" style="display: flex; flex-direction: column; gap: 0.65rem; margin-top: 0.75rem;">
+                <div style="grid-column: 1 / -1; text-align: center; padding: 2.5rem; background: #f8fafc; border-radius: 8px;">
+                  <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 2.2rem; color: #818cf8; margin-bottom: 0.8rem;"></i>
+                  <h4>Add a school or location above to view smart recommendations</h4>
+                </div>
               </div>
             </div>
 
-            <!-- Card 3: Qualitative Priority Value Sliders -->
-            <div style="background: #f8fafc; padding: 1rem; border-radius: 10px; border: 1px solid #cbd5e1;">
-              <strong style="color: #d97706; font-size: 0.9rem; display: block; margin-bottom: 0.6rem;">
-                <i class="fa-solid fa-sliders"></i> 3. Priority Importance Preferences
-              </strong>
+          </div>
 
-              <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem;">
-                <div>
-                  <label style="font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
-                    Morning Commute / Proximity
-                  </label>
-                  <select id="rec-qual-prox" style="width: 100%; padding: 0.4rem; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.82rem;">
-                    <option value="NA">N/A (No Preference / Ignore)</option>
-                    <option value="not_important">Not Important</option>
-                    <option value="somewhat" selected>Somewhat Important</option>
-                    <option value="very">Very Important</option>
-                    <option value="top_priority">Top Priority</option>
-                  </select>
+          <!-- SUBPANE 2: MY SHORTLIST -->
+          <div id="classic-subpane-shortlist" class="classic-subpane" style="display: none;">
+            <!-- Top Action Bar -->
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; background: white; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.03);">
+              <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <div style="background: #e0e7ff; color: #4338ca; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">
+                  <i class="fa-solid fa-list-check"></i>
                 </div>
+                <div>
+                  <h2 style="font-size: 1.25rem; font-weight: 800; color: #1e293b; margin: 0;">My Shortlisted Target Schools</h2>
+                  <span style="font-size: 0.82rem; color: #64748b;"><strong id="dash-list-count">0</strong> schools in your target portfolio</span>
+                </div>
+              </div>
 
-                <div>
-                  <label style="font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
-                    Academic Performance (Attainment 8 &amp; EBacc)
-                  </label>
-                  <select id="rec-qual-acad" style="width: 100%; padding: 0.4rem; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.82rem;">
-                    <option value="NA">N/A (No Preference / Ignore)</option>
-                    <option value="not_important">Not Important</option>
-                    <option value="somewhat">Somewhat Important</option>
-                    <option value="very" selected>Very Important</option>
-                    <option value="top_priority">Top Priority</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style="font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
-                    Pupil Growth &amp; Value-Added (Progress 8)
-                  </label>
-                  <select id="rec-qual-prog" style="width: 100%; padding: 0.4rem; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 0.82rem;">
-                    <option value="NA">N/A (No Preference / Ignore)</option>
-                    <option value="not_important">Not Important</option>
-                    <option value="somewhat" selected>Somewhat Important</option>
-                    <option value="very">Very Important</option>
-                    <option value="top_priority">Top Priority</option>
-                  </select>
-                </div>
+              <div style="display: flex; gap: 0.75rem; align-items: center;">
+                <button id="btn-back-to-rec" class="btn btn-outline" style="font-size: 0.85rem; padding: 0.5rem 1rem;">
+                  <i class="fa-solid fa-plus" style="color: #4f46e5;"></i> Add More Recommendations
+                </button>
               </div>
             </div>
 
+            <!-- 1. CLEAN SHORTLISTED SCHOOLS TABLE LIST VIEW -->
+            <div class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.25rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+              <div style="overflow-x: auto;">
+                <table class="data-table" id="dashboard-schools-table">
+                  <thead>
+                    <tr>
+                      <th>School Name</th>
+                      <th>Borough</th>
+                      <th style="text-align: center;">Type</th>
+                      <th style="text-align: center;">Gender</th>
+                      <th>Ofsted</th>
+                      <th>Exam Type</th>
+                      <th>Attainment 8</th>
+                      <th style="text-align: center;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dashboard-schools-table-body">
+                    <!-- Rendered cleanly by JS -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-        </div>
-      </details>
 
-      <!-- 3. BOTTOM CARD: Recommendations Single-Line List View -->
-      <div class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.25rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 0.8rem;">
-          <div>
-            <h3 style="color: #1e293b; display: flex; align-items: center; gap: 0.5rem; font-size: 1.05rem; margin: 0;">
-              <i class="fa-solid fa-sparkles" style="color: #eab308;"></i> Recommended Schools Matching Your Profile
-            </h3>
-            <p style="font-size: 0.82rem; color: #64748b; margin-top: 0.15rem;">Ordered by highest match score. Click "+ Add to Shortlist" on any school to save it.</p>
+          <!-- SUBPANE 3: ADMISSION TIMELINE -->
+          <div id="classic-subpane-timeline" class="classic-subpane" style="display: none;">
+            <!-- HIGH-IMPACT COLOR-CODED ADMISSIONS & EXAM CALENDAR -->
+            <div class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); margin-bottom: 2rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; gap: 1rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1rem;">
+                <div>
+                  <h3 style="font-size: 1.25rem; font-weight: 800; color: #1e293b; display: flex; align-items: center; gap: 0.6rem; margin: 0;">
+                    <i class="fa-solid fa-calendar-days" style="color: #4f46e5; font-size: 1.35rem;"></i> Target Schools Admissions &amp; Exam Calendar
+                  </h3>
+                  <p style="font-size: 0.83rem; color: #64748b; margin-top: 0.2rem;">Track registration windows, 1st/2nd stage exam sittings, interviews, and offer release dates across all your shortlisted schools.</p>
+                </div>
+
+                <!-- Color-Coded Event Legend -->
+                <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; font-size: 0.78rem; font-weight: 600;">
+                  <span style="display: flex; align-items: center; gap: 0.35rem; background: #eff6ff; color: #1d4ed8; padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid #bfdbfe;">
+                    <span style="width: 8px; height: 8px; border-radius: 50%; background: #2563eb;"></span> Registration
+                  </span>
+                  <span style="display: flex; align-items: center; gap: 0.35rem; background: #fff7ed; color: #c2410c; padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid #ffedd5;">
+                    <span style="width: 8px; height: 8px; border-radius: 50%; background: #ea580c;"></span> Exam Sitting
+                  </span>
+                  <span style="display: flex; align-items: center; gap: 0.35rem; background: #fcf4ff; color: #7e22ce; padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid #f5d0fe;">
+                    <span style="width: 8px; height: 8px; border-radius: 50%; background: #a855f7;"></span> Interview
+                  </span>
+                  <span style="display: flex; align-items: center; gap: 0.35rem; background: #f0fdf4; color: #15803d; padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid #bbf7d0;">
+                    <span style="width: 8px; height: 8px; border-radius: 50%; background: #16a34a;"></span> Offers &amp; Results
+                  </span>
+                </div>
+              </div>
+
+              <!-- Month Grid Calendar Layout -->
+              <div id="calendar-view-container">
+                <!-- Rendered by JS -->
+              </div>
+            </div>
           </div>
-          <button id="refresh-rec-btn" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
-            <i class="fa-solid fa-rotate-right"></i> Refresh Recommendations
-          </button>
-        </div>
 
-        <!-- 2-Line Row Layout Container -->
-        <div id="rec-cards-container" style="display: flex; flex-direction: column; gap: 0.65rem; margin-top: 0.75rem;">
-          <div style="grid-column: 1 / -1; text-align: center; padding: 2.5rem; background: #f8fafc; border-radius: 8px;">
-            <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 2.2rem; color: #818cf8; margin-bottom: 0.8rem;"></i>
-            <h4>Add a school or location above to view smart recommendations</h4>
-          </div>
-        </div>
+        </main>
       </div>
-    </div>
-  </div>
-
-
-  <!-- PARENT / USER SELECTED SCHOOLS DASHBOARD VIEW -->
-  <div id="user-dashboard-content" style="display: none; max-width: 1400px; margin: 1.25rem auto; padding: 0 1.5rem;">
-
-    <!-- Top Action Bar -->
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; background: white; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.03);">
-      <div style="display: flex; align-items: center; gap: 0.75rem;">
-        <div style="background: #e0e7ff; color: #4338ca; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">
-          <i class="fa-solid fa-list-check"></i>
-        </div>
-        <div>
-          <h2 style="font-size: 1.25rem; font-weight: 800; color: #1e293b; margin: 0;">My Shortlisted Target Schools</h2>
-          <span style="font-size: 0.82rem; color: #64748b;"><strong id="dash-list-count">0</strong> schools in your target portfolio</span>
-        </div>
-      </div>
-
-      <div style="display: flex; gap: 0.75rem; align-items: center;">
-        <button id="btn-back-to-rec" class="btn btn-outline" style="font-size: 0.85rem; padding: 0.5rem 1rem;">
-          <i class="fa-solid fa-plus" style="color: #4f46e5;"></i> Add More Recommendations
-        </button>
-      </div>
-    </div>
-
-    <!-- 1. CLEAN SHORTLISTED SCHOOLS TABLE LIST VIEW -->
-    <div class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.25rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-      <div style="overflow-x: auto;">
-        <table class="data-table" id="dashboard-schools-table">
-          <thead>
-            <tr>
-              <th>School Name</th>
-              <th>Borough</th>
-              <th style="text-align: center;">Type</th>
-              <th style="text-align: center;">Gender</th>
-              <th>Ofsted</th>
-              <th>Exam Type</th>
-              <th>Attainment 8</th>
-              <th style="text-align: center;">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="dashboard-schools-table-body">
-            <!-- Rendered cleanly by JS -->
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- 2. HIGH-IMPACT COLOR-CODED ADMISSIONS & EXAM CALENDAR (THE STAR OF THE PAGE) -->
-    <div class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); margin-bottom: 2rem;">
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; gap: 1rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1rem;">
-        <div>
-          <h3 style="font-size: 1.25rem; font-weight: 800; color: #1e293b; display: flex; align-items: center; gap: 0.6rem; margin: 0;">
-            <i class="fa-solid fa-calendar-days" style="color: #4f46e5; font-size: 1.35rem;"></i> Target Schools Admissions & Exam Calendar
-          </h3>
-          <p style="font-size: 0.83rem; color: #64748b; margin-top: 0.2rem;">Track registration windows, 1st/2nd stage exam sittings, interviews, and offer release dates across all your shortlisted schools.</p>
-        </div>
-
-        <!-- Color-Coded Event Legend -->
-        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; font-size: 0.78rem; font-weight: 600;">
-          <span style="display: flex; align-items: center; gap: 0.35rem; background: #eff6ff; color: #1d4ed8; padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid #bfdbfe;">
-            <span style="width: 8px; height: 8px; border-radius: 50%; background: #2563eb;"></span> Registration
-          </span>
-          <span style="display: flex; align-items: center; gap: 0.35rem; background: #fff7ed; color: #c2410c; padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid #ffedd5;">
-            <span style="width: 8px; height: 8px; border-radius: 50%; background: #ea580c;"></span> Exam Sitting
-          </span>
-          <span style="display: flex; align-items: center; gap: 0.35rem; background: #fcf4ff; color: #7e22ce; padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid #f5d0fe;">
-            <span style="width: 8px; height: 8px; border-radius: 50%; background: #a855f7;"></span> Interview
-          </span>
-          <span style="display: flex; align-items: center; gap: 0.35rem; background: #f0fdf4; color: #15803d; padding: 0.25rem 0.6rem; border-radius: 6px; border: 1px solid #bbf7d0;">
-            <span style="width: 8px; height: 8px; border-radius: 50%; background: #16a34a;"></span> Offers & Results
-          </span>
-        </div>
-      </div>
-
-      <!-- Month Grid Calendar Layout -->
-      <div id="calendar-view-container">
-        <!-- Rendered by JS -->
-      </div>
-    </div>
+    </section>
   </div>
 
 

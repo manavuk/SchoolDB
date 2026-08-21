@@ -447,11 +447,12 @@ function switchTab(tabName) {
   } else if (tabName === 'recommend') {
     if (recommendTabBtn) recommendTabBtn.classList.add('active');
     if (recommendContent) recommendContent.style.display = 'block';
-    fetchRecommendations();
+    const targetSubTab = localStorage.getItem('classic_active_subtab') || 'find';
+    switchClassicSubTab(targetSubTab);
   } else if (tabName === 'dashboard') {
     if (recommendTabBtn) recommendTabBtn.classList.add('active');
-    if (dashboardContent) dashboardContent.style.display = 'block';
-    renderUserDashboard();
+    if (recommendContent) recommendContent.style.display = 'block';
+    switchClassicSubTab('shortlist');
   } else if ((tabName === 'admin' || tabName === 'directory') && canViewAdmin) {
     if (adminTabBtn) adminTabBtn.classList.add('active');
     if (adminContent) adminContent.style.display = 'block';
@@ -467,9 +468,39 @@ function switchTab(tabName) {
   }
 }
 
+// Switch sub-tab within Classic Parent Portal
+function switchClassicSubTab(subTabName) {
+  const tabs = document.querySelectorAll('.classic-side-tab');
+  const panes = document.querySelectorAll('.classic-subpane');
+
+  tabs.forEach(tab => {
+    if (tab.getAttribute('data-target-classic-tab') === subTabName) {
+      tab.classList.add('active');
+    } else {
+      tab.classList.remove('active');
+    }
+  });
+
+  panes.forEach(pane => {
+    if (pane.id === `classic-subpane-${subTabName}`) {
+      pane.style.display = 'block';
+    } else {
+      pane.style.display = 'none';
+    }
+  });
+
+  localStorage.setItem('classic_active_subtab', subTabName);
+
+  if (subTabName === 'find') {
+    fetchRecommendations();
+  } else if (subTabName === 'shortlist' || subTabName === 'timeline') {
+    renderUserDashboard();
+  }
+}
+
 // Switch sub-tab within Admin Portal
 function switchAdminSubTab(subTabName) {
-  const tabs = document.querySelectorAll('.admin-side-tab');
+  const tabs = document.querySelectorAll('.admin-side-tab[data-target-tab]');
   const panes = document.querySelectorAll('.admin-subpane');
 
   tabs.forEach(tab => {
@@ -873,10 +904,33 @@ function setupEventListeners() {
     savePortBtn.addEventListener('click', saveUserPortfolio);
   }
 
-  // Save Recommendation Profile button
+  // Save Recommendation Profile button (Classic Matchmaker Wizard)
   const saveRecProfileBtn = document.getElementById('btn-save-rec-profile');
   if (saveRecProfileBtn) {
     saveRecProfileBtn.addEventListener('click', saveUserRecProfile);
+  }
+
+  // Reset Recommendation Wizard button (Classic Matchmaker Wizard)
+  const resetRecWizardBtn = document.getElementById('btn-reset-rec-wizard');
+  if (resetRecWizardBtn) {
+    resetRecWizardBtn.addEventListener('click', () => {
+      const locInput = document.getElementById('rec-target-locations');
+      if (locInput) locInput.value = '';
+      const genderSelect = document.getElementById('rec-gender');
+      if (genderSelect) genderSelect.value = 'NA';
+      const abilitySelect = document.getElementById('rec-child-ability');
+      if (abilitySelect) abilitySelect.value = 'NA';
+      const ofstedSelect = document.getElementById('rec-ofsted-floor');
+      if (ofstedSelect) ofstedSelect.value = 'NA';
+      const proxSelect = document.getElementById('rec-qual-prox');
+      if (proxSelect) proxSelect.value = 'somewhat';
+      const acadSelect = document.getElementById('rec-qual-acad');
+      if (acadSelect) acadSelect.value = 'very';
+      const progSelect = document.getElementById('rec-qual-prog');
+      if (progSelect) progSelect.value = 'somewhat';
+      document.querySelectorAll('.rec-school-type-chk').forEach(c => c.checked = (c.value === 'NA'));
+      saveUserRecProfile();
+    });
   }
 
   // Refresh Admin Field Error Audit button
@@ -1191,10 +1245,18 @@ function setupEventListeners() {
   setupParent2EventListeners();
 
   // Admin Side Tabs Navigation Buttons
-  document.querySelectorAll('.admin-side-tab').forEach(tabBtn => {
+  document.querySelectorAll('.admin-side-tab[data-target-tab]').forEach(tabBtn => {
     tabBtn.addEventListener('click', () => {
       const target = tabBtn.getAttribute('data-target-tab');
       if (target) switchAdminSubTab(target);
+    });
+  });
+
+  // Classic Portal Side Tabs Navigation Buttons
+  document.querySelectorAll('.classic-side-tab[data-target-classic-tab]').forEach(tabBtn => {
+    tabBtn.addEventListener('click', () => {
+      const target = tabBtn.getAttribute('data-target-classic-tab');
+      if (target) switchClassicSubTab(target);
     });
   });
 
@@ -1304,13 +1366,13 @@ function setupEventListeners() {
   if (refreshRecBtn) refreshRecBtn.addEventListener('click', fetchRecommendations);
 
   const finishSelBtn = document.getElementById('btn-finish-selection');
-  if (finishSelBtn) finishSelBtn.addEventListener('click', () => switchTab('dashboard'));
+  if (finishSelBtn) finishSelBtn.addEventListener('click', () => switchClassicSubTab('shortlist'));
 
   const viewDashTopBtn = document.getElementById('btn-view-dashboard-top');
-  if (viewDashTopBtn) viewDashTopBtn.addEventListener('click', () => switchTab('dashboard'));
+  if (viewDashTopBtn) viewDashTopBtn.addEventListener('click', () => switchClassicSubTab('shortlist'));
 
   const backRecBtn = document.getElementById('btn-back-to-rec');
-  if (backRecBtn) backRecBtn.addEventListener('click', () => switchTab('recommend'));
+  if (backRecBtn) backRecBtn.addEventListener('click', () => switchClassicSubTab('find'));
 
   const weightsForm = document.getElementById('rec-weights-form');
   if (weightsForm) weightsForm.addEventListener('submit', saveRecWeights);
@@ -3409,36 +3471,66 @@ async function loadUserRecProfile() {
     if (!res.ok) return;
     const prefs = await res.json();
 
-    const childAbilityEl = document.getElementById('rec-child-ability');
-    if (childAbilityEl) childAbilityEl.value = prefs.childAbilityLevel || 'NA';
-
+    const childAbility = prefs.childAbilityLevel || 'NA';
     const binary = prefs.binaryFilters || {};
+    const gender = binary.gender || 'NA';
+    const ofstedFloor = binary.ofstedFloor || 'NA';
+    const locations = binary.locations || prefs.targetPostcode || prefs.targetBorough || '';
+    const qual = prefs.qualitativeWeights || {};
+    const proximity = qual.proximity || 'somewhat';
+    const academicExcellence = qual.academicExcellence || 'very';
+    const pupilProgress = qual.pupilProgress || 'somewhat';
+    const reqTypes = Array.isArray(binary.schoolTypes) ? binary.schoolTypes : ['NA'];
+
+    // Populate Classic Portal Matchmaker Elements
+    const childAbilityEl = document.getElementById('rec-child-ability');
+    if (childAbilityEl) childAbilityEl.value = childAbility;
+
     const genderEl = document.getElementById('rec-gender');
-    if (genderEl) genderEl.value = binary.gender || 'NA';
+    if (genderEl) genderEl.value = gender;
 
     const ofstedFloorEl = document.getElementById('rec-ofsted-floor');
-    if (ofstedFloorEl) ofstedFloorEl.value = binary.ofstedFloor || 'NA';
+    if (ofstedFloorEl) ofstedFloorEl.value = ofstedFloor;
 
     const locInput = document.getElementById('rec-target-locations');
-    if (locInput) locInput.value = binary.locations || prefs.targetPostcode || prefs.targetBorough || '';
+    if (locInput) locInput.value = locations;
 
-    const qual = prefs.qualitativeWeights || {};
     const proxEl = document.getElementById('rec-qual-prox');
-    if (proxEl) proxEl.value = qual.proximity || 'somewhat';
+    if (proxEl) proxEl.value = proximity;
 
     const acadEl = document.getElementById('rec-qual-acad');
-    if (acadEl) acadEl.value = qual.academicExcellence || 'very';
+    if (acadEl) acadEl.value = academicExcellence;
 
     const progEl = document.getElementById('rec-qual-prog');
-    if (progEl) progEl.value = qual.pupilProgress || 'somewhat';
+    if (progEl) progEl.value = pupilProgress;
 
-    const reqFormats = Array.isArray(binary.examFormats) ? binary.examFormats : ['NA'];
-    document.querySelectorAll('.rec-exam-format-chk').forEach(chk => {
-      chk.checked = reqFormats.includes(chk.value);
+    document.querySelectorAll('.rec-school-type-chk').forEach(chk => {
+      chk.checked = reqTypes.includes(chk.value);
     });
 
-    const reqTypes = Array.isArray(binary.schoolTypes) ? binary.schoolTypes : ['NA'];
-    document.querySelectorAll('.rec-school-type-chk').forEach(chk => {
+    // Populate Parent Portal 2.0 Matchmaker Elements
+    const p2PostcodeInput = document.getElementById('p2-input-postcode');
+    if (p2PostcodeInput) p2PostcodeInput.value = locations;
+
+    const p2GenderSelect = document.getElementById('p2-select-gender');
+    if (p2GenderSelect) p2GenderSelect.value = gender;
+
+    const p2AbilitySelect = document.getElementById('p2-select-ability');
+    if (p2AbilitySelect) p2AbilitySelect.value = childAbility;
+
+    const p2CommuteSelect = document.getElementById('p2-pref-commute');
+    if (p2CommuteSelect) p2CommuteSelect.value = proximity;
+
+    const p2AttainSelect = document.getElementById('p2-pref-attainment');
+    if (p2AttainSelect) p2AttainSelect.value = academicExcellence;
+
+    const p2ProgSelect = document.getElementById('p2-pref-progress');
+    if (p2ProgSelect) p2ProgSelect.value = pupilProgress;
+
+    const p2OfstedSelect = document.getElementById('p2-pref-ofsted');
+    if (p2OfstedSelect) p2OfstedSelect.value = ofstedFloor;
+
+    document.querySelectorAll('.p2-type-chk').forEach(chk => {
       chk.checked = reqTypes.includes(chk.value);
     });
   } catch (err) {
@@ -3446,19 +3538,37 @@ async function loadUserRecProfile() {
   }
 }
 
-// Save Parent Recommendation Profile & Preferences
+// Save Parent Recommendation Profile & Preferences (Classic Matchmaker Wizard)
 async function saveUserRecProfile() {
-  const childAbilityLevel = document.getElementById('rec-child-ability') ? document.getElementById('rec-child-ability').value : 'NA';
-  const gender = document.getElementById('rec-gender') ? document.getElementById('rec-gender').value : 'NA';
-  const ofstedFloor = document.getElementById('rec-ofsted-floor') ? document.getElementById('rec-ofsted-floor').value : 'NA';
-  const locations = document.getElementById('rec-target-locations') ? document.getElementById('rec-target-locations').value.trim() : '';
+  const childAbilityLevel = document.getElementById('rec-child-ability') ? document.getElementById('rec-child-ability').value : (document.getElementById('p2-select-ability')?.value || 'NA');
+  const gender = document.getElementById('rec-gender') ? document.getElementById('rec-gender').value : (document.getElementById('p2-select-gender')?.value || 'NA');
+  const ofstedFloor = document.getElementById('rec-ofsted-floor') ? document.getElementById('rec-ofsted-floor').value : (document.getElementById('p2-pref-ofsted')?.value || 'NA');
+  const locations = document.getElementById('rec-target-locations') ? document.getElementById('rec-target-locations').value.trim() : (document.getElementById('p2-input-postcode')?.value.trim() || '');
 
-  const selectedFormats = Array.from(document.querySelectorAll('.rec-exam-format-chk:checked')).map(c => c.value);
-  const selectedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
+  let selectedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
+  if (selectedTypes.length === 0) {
+    selectedTypes = Array.from(document.querySelectorAll('.p2-type-chk:checked')).map(c => c.value);
+  }
 
-  const proximity = document.getElementById('rec-qual-prox') ? document.getElementById('rec-qual-prox').value : 'somewhat';
-  const academicExcellence = document.getElementById('rec-qual-acad') ? document.getElementById('rec-qual-acad').value : 'very';
-  const pupilProgress = document.getElementById('rec-qual-prog') ? document.getElementById('rec-qual-prog').value : 'somewhat';
+  const proximity = document.getElementById('rec-qual-prox') ? document.getElementById('rec-qual-prox').value : (document.getElementById('p2-pref-commute')?.value || 'somewhat');
+  const academicExcellence = document.getElementById('rec-qual-acad') ? document.getElementById('rec-qual-acad').value : (document.getElementById('p2-pref-attainment')?.value || 'very');
+  const pupilProgress = document.getElementById('rec-qual-prog') ? document.getElementById('rec-qual-prog').value : (document.getElementById('p2-pref-progress')?.value || 'somewhat');
+
+  // Synchronize Parent 2.0 inputs
+  const p2PostcodeInput = document.getElementById('p2-input-postcode');
+  if (p2PostcodeInput) p2PostcodeInput.value = locations;
+  const p2GenderSelect = document.getElementById('p2-select-gender');
+  if (p2GenderSelect) p2GenderSelect.value = gender;
+  const p2AbilitySelect = document.getElementById('p2-select-ability');
+  if (p2AbilitySelect) p2AbilitySelect.value = childAbilityLevel;
+  const p2CommuteSelect = document.getElementById('p2-pref-commute');
+  if (p2CommuteSelect) p2CommuteSelect.value = proximity;
+  const p2AttainSelect = document.getElementById('p2-pref-attainment');
+  if (p2AttainSelect) p2AttainSelect.value = academicExcellence;
+  const p2ProgSelect = document.getElementById('p2-pref-progress');
+  if (p2ProgSelect) p2ProgSelect.value = pupilProgress;
+  const p2OfstedSelect = document.getElementById('p2-pref-ofsted');
+  if (p2OfstedSelect) p2OfstedSelect.value = ofstedFloor;
 
   const payload = {
     targetBorough: locations,
@@ -3468,7 +3578,7 @@ async function saveUserRecProfile() {
       locations,
       gender,
       ofstedFloor,
-      examFormats: selectedFormats.length > 0 ? selectedFormats : ['NA'],
+      examFormats: ['NA'],
       schoolTypes: selectedTypes.length > 0 ? selectedTypes : ['NA']
     },
     qualitativeWeights: {
@@ -3490,6 +3600,7 @@ async function saveUserRecProfile() {
 
     if (res.ok) {
       showToast('Saved your personalized recommendation profile!', 'success');
+      await saveUserPortfolio(true);
       await fetchRecommendations();
     }
   } catch (err) {
@@ -3500,19 +3611,22 @@ async function saveUserRecProfile() {
 // Fetch recommendations based on userSelectedSchools, target locations, and qualitative profile
 async function fetchRecommendations() {
   const container = document.getElementById('rec-cards-container');
-  if (!container) return;
+  const p2Container = document.getElementById('p2-recs-container');
+  if (!container && !p2Container) return;
 
-  const locations = document.getElementById('rec-target-locations') ? document.getElementById('rec-target-locations').value.trim() : '';
-  const childAbilityLevel = document.getElementById('rec-child-ability') ? document.getElementById('rec-child-ability').value : 'NA';
-  const gender = document.getElementById('rec-gender') ? document.getElementById('rec-gender').value : 'NA';
-  const ofstedFloor = document.getElementById('rec-ofsted-floor') ? document.getElementById('rec-ofsted-floor').value : 'NA';
+  const locations = document.getElementById('rec-target-locations')?.value.trim() || document.getElementById('p2-input-postcode')?.value.trim() || '';
+  const childAbilityLevel = document.getElementById('rec-child-ability')?.value || document.getElementById('p2-select-ability')?.value || 'NA';
+  const gender = document.getElementById('rec-gender')?.value || document.getElementById('p2-select-gender')?.value || 'NA';
+  const ofstedFloor = document.getElementById('rec-ofsted-floor')?.value || document.getElementById('p2-pref-ofsted')?.value || 'NA';
 
-  const selectedFormats = Array.from(document.querySelectorAll('.rec-exam-format-chk:checked')).map(c => c.value);
-  const selectedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
+  let selectedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
+  if (selectedTypes.length === 0) {
+    selectedTypes = Array.from(document.querySelectorAll('.p2-type-chk:checked')).map(c => c.value);
+  }
 
-  const proximity = document.getElementById('rec-qual-prox') ? document.getElementById('rec-qual-prox').value : 'somewhat';
-  const academicExcellence = document.getElementById('rec-qual-acad') ? document.getElementById('rec-qual-acad').value : 'very';
-  const pupilProgress = document.getElementById('rec-qual-prog') ? document.getElementById('rec-qual-prog').value : 'somewhat';
+  const proximity = document.getElementById('rec-qual-prox')?.value || document.getElementById('p2-pref-commute')?.value || 'somewhat';
+  const academicExcellence = document.getElementById('rec-qual-acad')?.value || document.getElementById('p2-pref-attainment')?.value || 'very';
+  const pupilProgress = document.getElementById('rec-qual-prog')?.value || document.getElementById('p2-pref-progress')?.value || 'somewhat';
 
   const preferencesOverride = {
     targetBorough: locations,
@@ -3522,7 +3636,7 @@ async function fetchRecommendations() {
       locations,
       gender,
       ofstedFloor,
-      examFormats: selectedFormats.length > 0 ? selectedFormats : ['NA'],
+      examFormats: ['NA'],
       schoolTypes: selectedTypes.length > 0 ? selectedTypes : ['NA']
     },
     qualitativeWeights: {
@@ -3707,9 +3821,11 @@ function updateUserSchoolsUI() {
   const container = document.getElementById('user-schools-chips');
   const countEl = document.getElementById('user-schools-count');
   const countTopEl = document.getElementById('user-schools-count-top');
+  const classicBadgeEl = document.getElementById('classic-shortlist-badge-count');
 
   if (countEl) countEl.textContent = userSelectedSchools.length;
   if (countTopEl) countTopEl.textContent = userSelectedSchools.length;
+  if (classicBadgeEl) classicBadgeEl.textContent = userSelectedSchools.length;
 
   renderUserDashboard();
 
