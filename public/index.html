@@ -424,13 +424,18 @@
   <!-- PARENT / USER PORTAL TAB (CLASSIC RECOMMENDATION & SEARCH WIDGET WITH LEFT SIDE TABS) -->
   <div id="recommend-tab-content" style="display: none;">
     <section class="admin-portal-wrapper" style="max-width: 1440px; margin: 1.25rem auto; padding: 0 1.5rem;">
-      <div class="admin-side-layout">
+      <div class="admin-side-layout" id="classic-side-layout">
         
         <!-- Left Side Navigation for Classic Portal -->
-        <aside class="admin-side-nav">
-          <div class="side-nav-heading">PARENT PORTAL</div>
+        <aside class="admin-side-nav" id="classic-side-nav">
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.15rem 0.25rem 0.4rem; margin-bottom: 0.25rem; border-bottom: 1px solid #f1f5f9;">
+            <div class="side-nav-heading" id="classic-side-nav-title" style="margin: 0; padding: 0;">PARENT PORTAL</div>
+            <button type="button" id="btn-toggle-classic-sidebar" class="btn-sidebar-collapse" title="Collapse sidebar" style="background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #64748b; font-size: 0.72rem; transition: all 0.2s ease;">
+              <i class="fa-solid fa-angles-left" id="icon-toggle-classic-sidebar"></i>
+            </button>
+          </div>
           
-          <button class="admin-side-tab classic-side-tab active" data-target-classic-tab="find" id="classic-side-tab-find">
+          <button class="admin-side-tab classic-side-tab active" data-target-classic-tab="find" id="classic-side-tab-find" title="Find Schools">
             <span class="side-tab-icon"><i class="fa-solid fa-magnifying-glass-location" style="color: #4f46e5;"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">Find Schools</span>
@@ -438,7 +443,7 @@
             </div>
           </button>
 
-          <button class="admin-side-tab classic-side-tab" data-target-classic-tab="shortlist" id="classic-side-tab-shortlist">
+          <button class="admin-side-tab classic-side-tab" data-target-classic-tab="shortlist" id="classic-side-tab-shortlist" title="My Shortlist">
             <span class="side-tab-icon"><i class="fa-solid fa-list-check" style="color: #059669;"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">My Shortlist</span>
@@ -447,7 +452,7 @@
             <span class="side-tab-counter" id="classic-shortlist-badge-count" style="background:#059669; color: white;">0</span>
           </button>
 
-          <button class="admin-side-tab classic-side-tab" data-target-classic-tab="timeline" id="classic-side-tab-timeline">
+          <button class="admin-side-tab classic-side-tab" data-target-classic-tab="timeline" id="classic-side-tab-timeline" title="Admission Timeline">
             <span class="side-tab-icon"><i class="fa-solid fa-calendar-days" style="color: #ea580c;"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">Admission Timeline</span>
@@ -462,97 +467,148 @@
           <!-- SUBPANE 1: FIND SCHOOLS -->
           <div id="classic-subpane-find" class="classic-subpane" style="display: block;">
             
-            <!-- UNIFIED DISCOVERY & MATCHMAKER FILTER CARD -->
-            <div class="admin-card" style="background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+            <!-- UNIFIED OMNI-DISCOVERY & MATCHMAKER BAR -->
+            <div class="admin-card" style="background: white; border-radius: 14px; border: 1px solid #e2e8f0; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; box-shadow: 0 4px 12px -2px rgba(0,0,0,0.05);">
               
-              <!-- 2-Column Section: Left (School Search) + Right (4 Primary Filters) -->
-              <div style="display: grid; grid-template-columns: 1fr 1.35fr; gap: 1.5rem; align-items: start; border-bottom: 1px solid #f1f5f9; padding-bottom: 1rem;">
+              <!-- TIER 1: HORIZONTAL OMNI-SEARCH & FILTER BAR -->
+              <div style="display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(130px, 0.9fr) minmax(170px, 1.1fr) minmax(170px, 1.1fr) minmax(170px, 1.1fr); gap: 0.75rem; align-items: end; margin-bottom: 0.9rem;">
                 
-                <!-- Left Column: Search & Add Target School to Shortlist -->
+                <!-- 1. Postcode / Borough -->
                 <div>
-                  <div style="margin-bottom: 0.75rem;">
-                    <h3 style="color: #1e293b; display: flex; align-items: center; gap: 0.5rem; font-size: 1.05rem; margin: 0;">
-                      <i class="fa-solid fa-list-check" style="color: #059669;"></i> Target School Shortlist
-                    </h3>
-                    <p style="font-size: 0.8rem; color: #64748b; margin: 0.15rem 0 0 0;">Search and add schools to influence your match recommendations.</p>
+                  <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
+                    <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> Home Postcode / Borough
+                  </label>
+                  <div style="position: relative;">
+                    <input type="text" id="rec-target-locations" placeholder="e.g. SW19, Barnet, Kingston, HA8..." style="width: 100%; padding: 0.52rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem; background: #f8fafc;">
                   </div>
+                </div>
 
-                  <div style="position: relative; margin-bottom: 0.6rem;">
-                    <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
-                      <i class="fa-solid fa-magnifying-glass"></i> Search School Name
-                    </label>
-                    <input type="text" id="rec-school-search" placeholder="Type school name e.g. Tiffin, Latymer, St Pauls..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem;">
-                    <div id="rec-school-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 100; display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);"></div>
-                  </div>
-
-                  <div>
-                    <strong style="font-size: 0.78rem; color: #475569; display: block; margin-bottom: 0.3rem;">Currently Shortlisted:</strong>
-                    <div id="user-schools-chips" style="display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; max-height: 90px; overflow-y: auto;">
-                      <span style="color: #94a3b8; font-size: 0.8rem; font-style: italic;">No target schools added yet.</span>
+                <!-- 2. Gender Multi-Select Dropdown -->
+                <div style="position: relative;" id="rec-gender-multiselect-wrap">
+                  <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
+                    <i class="fa-solid fa-venus-mars" style="color: #6366f1;"></i> Gender
+                  </label>
+                  <button type="button" id="rec-gender-btn" style="width: 100%; padding: 0.52rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem; background: #f8fafc; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; color: #334155; height: 38px;">
+                    <span id="rec-gender-btn-label" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">All Genders</span>
+                    <i class="fa-solid fa-chevron-down" style="font-size: 0.72rem; color: #64748b; margin-left: 0.4rem;"></i>
+                  </button>
+                  <div id="rec-gender-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 20px rgba(0,0,0,0.12); padding: 0.5rem; margin-top: 0.25rem; z-index: 120; min-width: 160px;">
+                    <div style="display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.8rem; color: #334155;">
+                      <label style="cursor: pointer; display: flex; align-items: center; gap: 0.45rem; padding: 0.25rem 0.35rem; border-radius: 4px;">
+                        <input type="checkbox" class="rec-gender-chk" value="NA" checked> <span>All Genders</span>
+                      </label>
+                      <label style="cursor: pointer; display: flex; align-items: center; gap: 0.45rem; padding: 0.25rem 0.35rem; border-radius: 4px;">
+                        <input type="checkbox" class="rec-gender-chk" value="boys"> <span>Boys</span>
+                      </label>
+                      <label style="cursor: pointer; display: flex; align-items: center; gap: 0.45rem; padding: 0.25rem 0.35rem; border-radius: 4px;">
+                        <input type="checkbox" class="rec-gender-chk" value="girls"> <span>Girls</span>
+                      </label>
+                      <label style="cursor: pointer; display: flex; align-items: center; gap: 0.45rem; padding: 0.25rem 0.35rem; border-radius: 4px;">
+                        <input type="checkbox" class="rec-gender-chk" value="mixed"> <span>Mixed</span>
+                      </label>
                     </div>
                   </div>
                 </div>
 
-                <!-- Right Column: 4 Core Filters Grid -->
-                <div>
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem;">
-                    <h3 style="color: #1e293b; display: flex; align-items: center; gap: 0.5rem; font-size: 1.05rem; margin: 0;">
-                      <i class="fa-solid fa-sliders" style="color: #4f46e5;"></i> Matchmaker Filters
-                    </h3>
-                    <button id="btn-save-rec-profile" class="btn btn-primary" style="font-size: 0.8rem; padding: 0.4rem 0.85rem; background: #4f46e5; border-color: #4338ca;">
-                      <i class="fa-solid fa-bolt"></i> Update Matches
-                    </button>
+                <!-- 3. Target School Types Multi-Select Dropdown -->
+                <div style="position: relative;" id="rec-school-type-multiselect-wrap">
+                  <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
+                    <i class="fa-solid fa-school" style="color: #d97706;"></i> Target School Types
+                  </label>
+                  <button type="button" id="rec-school-type-btn" style="width: 100%; padding: 0.52rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem; background: #f8fafc; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; color: #334155; height: 38px;">
+                    <span id="rec-school-type-btn-label" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Any Types</span>
+                    <i class="fa-solid fa-chevron-down" style="font-size: 0.72rem; color: #64748b; margin-left: 0.4rem;"></i>
+                  </button>
+                  <div id="rec-school-type-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 20px rgba(0,0,0,0.12); padding: 0.5rem; margin-top: 0.25rem; z-index: 120; min-width: 190px;">
+                    <div style="display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.8rem; color: #334155;">
+                      <label style="cursor: pointer; display: flex; align-items: center; gap: 0.45rem; padding: 0.25rem 0.35rem; border-radius: 4px;">
+                        <input type="checkbox" class="rec-school-type-chk" value="NA" checked> <span>Any / All Types</span>
+                      </label>
+                      <label style="cursor: pointer; display: flex; align-items: center; gap: 0.45rem; padding: 0.25rem 0.35rem; border-radius: 4px;">
+                        <input type="checkbox" class="rec-school-type-chk" value="Grammar"> <span>Grammar (11+)</span>
+                      </label>
+                      <label style="cursor: pointer; display: flex; align-items: center; gap: 0.45rem; padding: 0.25rem 0.35rem; border-radius: 4px;">
+                        <input type="checkbox" class="rec-school-type-chk" value="Independent"> <span>Independent / Private</span>
+                      </label>
+                      <label style="cursor: pointer; display: flex; align-items: center; gap: 0.45rem; padding: 0.25rem 0.35rem; border-radius: 4px;">
+                        <input type="checkbox" class="rec-school-type-chk" value="Comprehensive"> <span>State Comprehensive</span>
+                      </label>
+                    </div>
                   </div>
+                </div>
 
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem;">
+                <!-- 4. Child's Learning Profile -->
+                <div>
+                  <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
+                    <i class="fa-solid fa-graduation-cap" style="color: #059669;"></i> Learning Profile
+                  </label>
+                  <select id="rec-child-ability" style="width: 100%; padding: 0.52rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem; background: #f8fafc;">
+                    <option value="NA">N/A (General Match)</option>
+                    <option value="top_class">High Academic (11+ Selective)</option>
+                    <option value="above_average">Above Average (Grammar &amp; Top Comp)</option>
+                    <option value="average">Balanced / All-Round Growth</option>
+                    <option value="below_average">Nurturing Growth &amp; High Progress</option>
+                  </select>
+                </div>
+
+                <!-- 5. Priority Weights Dropdown with Sliders -->
+                <div style="position: relative;" id="rec-priorities-multiselect-wrap">
+                  <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
+                    <i class="fa-solid fa-sliders" style="color: #4f46e5;"></i> Priority Weights
+                  </label>
+                  <button type="button" id="rec-priorities-btn" style="width: 100%; padding: 0.52rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem; background: #f8fafc; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; color: #334155; height: 38px;">
+                    <span id="rec-priorities-btn-label" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;">Prox: Low | GCSE: Mid | Prog: Mid</span>
+                    <i class="fa-solid fa-chevron-down" style="font-size: 0.72rem; color: #64748b; margin-left: 0.4rem;"></i>
+                  </button>
+                  <div id="rec-priorities-dropdown" style="display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 14px 28px rgba(0,0,0,0.14); padding: 0.9rem; margin-top: 0.35rem; z-index: 130; width: 300px;">
                     
-                    <!-- 1. Postcode -->
-                    <div>
-                      <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
-                        <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> 1. Postcode / Borough
-                      </label>
-                      <input type="text" id="rec-target-locations" placeholder="e.g. SW19, Barnet, Kingston..." style="width: 100%; padding: 0.42rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.4rem;">
+                      <span style="font-size: 0.8rem; font-weight: 700; color: #1e293b;"><i class="fa-solid fa-sliders" style="color: #4f46e5;"></i> Priority Sliders</span>
+                      <button type="button" id="btn-reset-rec-wizard" class="btn btn-outline" style="font-size: 0.72rem; padding: 0.15rem 0.45rem; border-radius: 4px;">
+                        <i class="fa-solid fa-arrow-rotate-left"></i> Reset
+                      </button>
                     </div>
 
-                    <!-- 2. Gender -->
-                    <div>
-                      <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
-                        <i class="fa-solid fa-venus-mars" style="color: #6366f1;"></i> 2. Gender Intake
-                      </label>
-                      <select id="rec-gender" style="width: 100%; padding: 0.42rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem;">
-                        <option value="NA">Any (Boys, Girls, Co-ed)</option>
-                        <option value="girls">Girls Only</option>
-                        <option value="boys">Boys Only</option>
-                        <option value="girls_coed">Girls + Co-ed</option>
-                        <option value="boys_coed">Boys + Co-ed</option>
-                        <option value="mixed">Co-ed / Mixed Only</option>
-                      </select>
+                    <!-- Quick Presets -->
+                    <div style="display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+                      <button type="button" id="btn-preset-academic" class="btn btn-outline" style="font-size: 0.68rem; padding: 0.15rem 0.35rem; border-radius: 4px;">🚀 Academic</button>
+                      <button type="button" id="btn-preset-balanced" class="btn btn-outline" style="font-size: 0.68rem; padding: 0.15rem 0.35rem; border-radius: 4px;">⚖️ Balanced</button>
+                      <button type="button" id="btn-preset-growth" class="btn btn-outline" style="font-size: 0.68rem; padding: 0.15rem 0.35rem; border-radius: 4px;">🌱 Growth</button>
                     </div>
 
-                    <!-- 3. Child's Learning Profile -->
-                    <div>
-                      <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
-                        <i class="fa-solid fa-graduation-cap" style="color: #059669;"></i> 3. Child's Learning Profile
-                      </label>
-                      <select id="rec-child-ability" style="width: 100%; padding: 0.42rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem;">
-                        <option value="NA">N/A (General Match)</option>
-                        <option value="top_class">High Academic (11+ Selective)</option>
-                        <option value="above_average">Above Average (Grammar &amp; Top Comp)</option>
-                        <option value="average">Balanced / All-Round Growth</option>
-                        <option value="below_average">Nurturing Growth &amp; High Progress</option>
-                      </select>
+                    <!-- 1. Commute Proximity Slider -->
+                    <div style="margin-bottom: 0.75rem;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
+                        <label style="font-size: 0.75rem; font-weight: 700; color: #334155;"><i class="fa-solid fa-bus" style="color: #64748b;"></i> Commute Proximity</label>
+                        <span id="rec-val-prox" style="font-size: 0.72rem; font-weight: 700; color: #4f46e5; background: #e0e7ff; padding: 0.1rem 0.4rem; border-radius: 4px;">Low</span>
+                      </div>
+                      <input type="range" id="rec-qual-prox-slider" min="0" max="4" step="1" value="1" style="width: 100%; accent-color: #4f46e5; cursor: pointer;">
+                      <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: #94a3b8; margin-top: -0.1rem;">
+                        <span>NA/Off</span><span>Low</span><span>Med</span><span>High</span><span>Top</span>
+                      </div>
                     </div>
 
-                    <!-- 4. Target School Types -->
+                    <!-- 2. GCSE Attainment 8 Slider -->
+                    <div style="margin-bottom: 0.75rem;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
+                        <label style="font-size: 0.75rem; font-weight: 700; color: #334155;"><i class="fa-solid fa-trophy" style="color: #eab308;"></i> GCSE Attainment 8</label>
+                        <span id="rec-val-acad" style="font-size: 0.72rem; font-weight: 700; color: #4f46e5; background: #e0e7ff; padding: 0.1rem 0.4rem; border-radius: 4px;">Mid</span>
+                      </div>
+                      <input type="range" id="rec-qual-acad-slider" min="0" max="4" step="1" value="2" style="width: 100%; accent-color: #4f46e5; cursor: pointer;">
+                      <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: #94a3b8; margin-top: -0.1rem;">
+                        <span>NA/Off</span><span>Low</span><span>Med</span><span>High</span><span>Top</span>
+                      </div>
+                    </div>
+
+                    <!-- 3. Progress 8 (Growth) Slider -->
                     <div>
-                      <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.25rem;">
-                        <i class="fa-solid fa-school" style="color: #d97706;"></i> 4. Target School Types
-                      </label>
-                      <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; font-size: 0.76rem; color: #475569; background: #f8fafc; padding: 0.35rem 0.5rem; border-radius: 8px; border: 1px solid #cbd5e1;">
-                        <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="NA" checked> Any</label>
-                        <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="Grammar"> Grammar</label>
-                        <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="Independent"> Independent</label>
-                        <label style="cursor: pointer;"><input type="checkbox" class="rec-school-type-chk" value="Comprehensive"> Comprehensive</label>
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
+                        <label style="font-size: 0.75rem; font-weight: 700; color: #334155;"><i class="fa-solid fa-arrow-trend-up" style="color: #059669;"></i> Progress 8 (Growth)</label>
+                        <span id="rec-val-prog" style="font-size: 0.72rem; font-weight: 700; color: #4f46e5; background: #e0e7ff; padding: 0.1rem 0.4rem; border-radius: 4px;">Mid</span>
+                      </div>
+                      <input type="range" id="rec-qual-prog-slider" min="0" max="4" step="1" value="2" style="width: 100%; accent-color: #4f46e5; cursor: pointer;">
+                      <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: #94a3b8; margin-top: -0.1rem;">
+                        <span>NA/Off</span><span>Low</span><span>Med</span><span>High</span><span>Top</span>
                       </div>
                     </div>
 
@@ -561,72 +617,29 @@
 
               </div>
 
-              <!-- Collapsed Single-Row Filter: Parent Priorities & Preferences -->
-              <details id="classic-priorities-details" style="margin-top: 0.75rem;">
-                <summary style="cursor: pointer; font-size: 0.84rem; font-weight: 700; color: #4338ca; display: flex; justify-content: space-between; align-items: center; outline: none; user-select: none; padding: 0.35rem 0;">
-                  <span style="display: flex; align-items: center; gap: 0.4rem;">
-                    <i class="fa-solid fa-sliders" style="color: #6366f1;"></i> Parent Priorities &amp; Advanced Preferences
+              <!-- TIER 2: INLINE TARGET SCHOOL PINNER & SHORTLISTED TRAY -->
+              <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0.65rem 0.85rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+                
+                <!-- Quick Search Input -->
+                <div style="position: relative; flex: 1; min-width: 250px; max-width: 360px;">
+                  <div style="position: relative; display: flex; align-items: center;">
+                    <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 0.7rem; color: #94a3b8; font-size: 0.8rem;"></i>
+                    <input type="text" id="rec-school-search" placeholder="+ Search specific school to pin to shortlist..." style="width: 100%; padding: 0.4rem 0.75rem 0.4rem 2rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.82rem; background: white;">
+                  </div>
+                  <div id="rec-school-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 100; display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);"></div>
+                </div>
+
+                <!-- Live Target Shortlist Badges Tray -->
+                <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; flex: 2;">
+                  <span style="font-size: 0.78rem; font-weight: 700; color: #475569; display: flex; align-items: center; gap: 0.35rem; white-space: nowrap;">
+                    <i class="fa-solid fa-thumbtack" style="color: #059669;"></i> Pinned Targets:
                   </span>
-                  <span style="font-size: 0.78rem; color: #4f46e5; font-weight: 600; background: #e0e7ff; padding: 0.2rem 0.55rem; border-radius: 6px;">
-                    <i class="fa-solid fa-chevron-down"></i> Expand / Collapse
-                  </span>
-                </summary>
-
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) auto; gap: 0.75rem; align-items: end; margin-top: 0.6rem; padding: 0.65rem 0.85rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
-                  <div>
-                    <label style="font-size: 0.75rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
-                      <i class="fa-solid fa-bus" style="color: #64748b;"></i> Commute Proximity
-                    </label>
-                    <select id="rec-qual-prox" style="width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.78rem;">
-                      <option value="not_important">Low</option>
-                      <option value="somewhat" selected>Medium</option>
-                      <option value="very">High</option>
-                      <option value="top_priority">Top Priority</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style="font-size: 0.75rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
-                      <i class="fa-solid fa-trophy" style="color: #eab308;"></i> GCSE Attainment 8
-                    </label>
-                    <select id="rec-qual-acad" style="width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.78rem;">
-                      <option value="not_important">Low</option>
-                      <option value="somewhat">Medium</option>
-                      <option value="very" selected>High</option>
-                      <option value="top_priority">Top Priority</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style="font-size: 0.75rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
-                      <i class="fa-solid fa-arrow-trend-up" style="color: #059669;"></i> Progress 8 (Growth)
-                    </label>
-                    <select id="rec-qual-prog" style="width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.78rem;">
-                      <option value="not_important">Low</option>
-                      <option value="somewhat" selected>Medium</option>
-                      <option value="very">High</option>
-                      <option value="top_priority">Top Priority</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style="font-size: 0.75rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.2rem;">
-                      <i class="fa-solid fa-star" style="color: #eab308;"></i> Ofsted Floor
-                    </label>
-                    <select id="rec-ofsted-floor" style="width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.78rem;">
-                      <option value="NA">Any Rating</option>
-                      <option value="good">Good &amp; Above</option>
-                      <option value="outstanding">Outstanding Only</option>
-                    </select>
-                  </div>
-
-                  <div style="display: flex; align-items: flex-end;">
-                    <button id="btn-reset-rec-wizard" class="btn btn-outline" style="font-size: 0.78rem; padding: 0.35rem 0.75rem; white-space: nowrap;">
-                      <i class="fa-solid fa-arrow-rotate-left"></i> Reset All
-                    </button>
+                  <div id="user-schools-chips" style="display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center;">
+                    <span style="color: #94a3b8; font-size: 0.78rem; font-style: italic;">No schools pinned yet. Pinned schools influence recommendations!</span>
                   </div>
                 </div>
-              </details>
+
+              </div>
 
             </div>
 

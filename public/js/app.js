@@ -197,6 +197,8 @@ async function setAuthenticatedSession(sessionData, toastMessage) {
   if (toastMessage) showToast(toastMessage, 'success');
 
   await loadUserPortfolio(currentUserAccount);
+  await loadUserRecProfile();
+  await fetchRecommendations();
   applyPermissionsUI();
 }
 
@@ -326,7 +328,7 @@ async function loadUserPortfolio(userId) {
 // Save Current User Portfolio to Backend (Silent Auto-Save)
 async function saveUserPortfolio(silent = false) {
   if (!currentUserAccount) return;
-  const targetLocation = document.getElementById('p2-input-postcode')?.value || document.getElementById('rec-location-input')?.value || '';
+  const targetLocation = document.getElementById('rec-target-locations')?.value || document.getElementById('p2-input-postcode')?.value || document.getElementById('rec-location-input')?.value || '';
   
   // Ensure userSelectedSchools contains all shortlisted schools from both tracks
   userSelectedSchools = [...parent2State.cafList, ...parent2State.independentList];
@@ -397,7 +399,6 @@ async function removeRecommendation(schoolId) {
   showToast('School removed from recommendations list.', 'info');
 }
 
-
 // Apply Permissions UI controls & tab visibility based on session capabilities
 function applyPermissionsUI() {
   const directoryTabBtn = document.getElementById('tab-directory-btn');
@@ -413,6 +414,12 @@ function applyPermissionsUI() {
 
   updateAuthUserBadge();
 
+  if (!currentUserAccount) {
+    if (parent2TabBtn) parent2TabBtn.style.display = 'none';
+  } else {
+    if (parent2TabBtn) parent2TabBtn.style.display = 'inline-flex';
+  }
+
   // Landing page hierarchy: Land on Admin Portal if admin, otherwise land on Parent Portal 2.0 (New Default)
   if (canViewAdmin) {
     switchTab('admin');
@@ -421,21 +428,27 @@ function applyPermissionsUI() {
   }
 }
 
-// Switch main navigation tab with capability check
+// Switch between Primary Views: Parent Portal 2.0 vs Classic Recommendations vs Directory vs Admin
 function switchTab(tabName) {
   const parent2TabBtn = document.getElementById('tab-parent2-btn');
   const recommendTabBtn = document.getElementById('tab-recommend-btn');
-  const directoryTabBtn = document.getElementById('tab-directory-btn');
   const adminTabBtn = document.getElementById('tab-admin-btn');
+  const directoryTabBtn = document.getElementById('tab-directory-btn');
 
-  const parent2Content = document.getElementById('parent2-tab-content');
-  const recommendContent = document.getElementById('recommend-tab-content');
-  const dashboardContent = document.getElementById('user-dashboard-content');
-  const adminContent = document.getElementById('admin-tab-content');
+  const parent2Content = document.getElementById('parent2-tab-content') || document.getElementById('parent2-content');
+  const recommendContent = document.getElementById('recommend-tab-content') || document.getElementById('recommend-content');
+  const adminContent = document.getElementById('admin-tab-content') || document.getElementById('admin-content');
+  const directoryContent = document.getElementById('directory-tab-content') || document.getElementById('directory-content');
 
-  // Deactivate all tab buttons and hide contents
-  [parent2TabBtn, recommendTabBtn, directoryTabBtn, adminTabBtn].forEach(btn => btn && btn.classList.remove('active'));
-  [parent2Content, recommendContent, dashboardContent, adminContent].forEach(c => c && (c.style.display = 'none'));
+  // Reset tab button states
+  [parent2TabBtn, recommendTabBtn, adminTabBtn, directoryTabBtn].forEach(btn => {
+    if (btn) btn.classList.remove('active');
+  });
+
+  // Hide all view containers
+  [parent2Content, recommendContent, adminContent, directoryContent].forEach(c => {
+    if (c) c.style.display = 'none';
+  });
 
   const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
 
@@ -495,6 +508,50 @@ function switchClassicSubTab(subTabName) {
     fetchRecommendations();
   } else if (subTabName === 'shortlist' || subTabName === 'timeline') {
     renderUserDashboard();
+  }
+}
+
+// Setup Collapsible Sidebar for Classic Parent Portal
+function setupClassicSidebarToggle() {
+  const toggleBtn = document.getElementById('btn-toggle-classic-sidebar');
+  const sideLayout = document.getElementById('classic-side-layout');
+  const sideNav = document.getElementById('classic-side-nav');
+  const toggleIcon = document.getElementById('icon-toggle-classic-sidebar');
+
+  if (!toggleBtn || !sideLayout || !sideNav) return;
+
+  function setSidebarCollapsed(collapsed, save = true) {
+    if (collapsed) {
+      sideLayout.classList.add('collapsed');
+      sideNav.classList.add('collapsed');
+      if (toggleIcon) {
+        toggleIcon.className = 'fa-solid fa-angles-right';
+      }
+      toggleBtn.title = 'Expand sidebar';
+    } else {
+      sideLayout.classList.remove('collapsed');
+      sideNav.classList.remove('collapsed');
+      if (toggleIcon) {
+        toggleIcon.className = 'fa-solid fa-angles-left';
+      }
+      toggleBtn.title = 'Collapse sidebar';
+    }
+    if (save) {
+      localStorage.setItem('classic_sidebar_collapsed', collapsed ? 'true' : 'false');
+    }
+  }
+
+  toggleBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const isCurrentlyCollapsed = sideLayout.classList.contains('collapsed');
+    setSidebarCollapsed(!isCurrentlyCollapsed, true);
+  });
+
+  // Restore previous user preference
+  const savedState = localStorage.getItem('classic_sidebar_collapsed');
+  if (savedState === 'true') {
+    setSidebarCollapsed(true, false);
   }
 }
 
@@ -886,6 +943,7 @@ function renderSchools() {
 
 // Setup Event Listeners
 function setupEventListeners() {
+  setupClassicSidebarToggle();
 
   // User account switcher listener
   const userAccSelect = document.getElementById('user-account-select');
@@ -918,18 +976,188 @@ function setupEventListeners() {
       if (locInput) locInput.value = '';
       const genderSelect = document.getElementById('rec-gender');
       if (genderSelect) genderSelect.value = 'NA';
+      document.querySelectorAll('.rec-gender-chk').forEach(c => c.checked = (c.value === 'NA'));
       const abilitySelect = document.getElementById('rec-child-ability');
       if (abilitySelect) abilitySelect.value = 'NA';
-      const ofstedSelect = document.getElementById('rec-ofsted-floor');
-      if (ofstedSelect) ofstedSelect.value = 'NA';
-      const proxSelect = document.getElementById('rec-qual-prox');
-      if (proxSelect) proxSelect.value = 'somewhat';
-      const acadSelect = document.getElementById('rec-qual-acad');
-      if (acadSelect) acadSelect.value = 'very';
-      const progSelect = document.getElementById('rec-qual-prog');
-      if (progSelect) progSelect.value = 'somewhat';
       document.querySelectorAll('.rec-school-type-chk').forEach(c => c.checked = (c.value === 'NA'));
-      saveUserRecProfile();
+      
+      const proxSlider = document.getElementById('rec-qual-prox-slider');
+      if (proxSlider) proxSlider.value = 1;
+      const acadSlider = document.getElementById('rec-qual-acad-slider');
+      if (acadSlider) acadSlider.value = 2;
+      const progSlider = document.getElementById('rec-qual-prog-slider');
+      if (progSlider) progSlider.value = 2;
+
+      updatePrioritySlidersUI();
+      updateSchoolTypeDropdownLabel();
+      updateGenderDropdownLabel();
+      triggerAutoRecommend(0);
+    });
+  }
+
+  // Priority Presets in Omni-Discovery Bar
+  const presetAcadBtn = document.getElementById('btn-preset-academic');
+  if (presetAcadBtn) {
+    presetAcadBtn.addEventListener('click', () => {
+      const p = document.getElementById('rec-qual-prox-slider'); if (p) p.value = 2;
+      const a = document.getElementById('rec-qual-acad-slider'); if (a) a.value = 4;
+      const pr = document.getElementById('rec-qual-prog-slider'); if (pr) pr.value = 2;
+      const ab = document.getElementById('rec-child-ability'); if (ab) ab.value = 'top_class';
+      updatePrioritySlidersUI();
+      triggerAutoRecommend(0);
+    });
+  }
+
+  const presetBalBtn = document.getElementById('btn-preset-balanced');
+  if (presetBalBtn) {
+    presetBalBtn.addEventListener('click', () => {
+      const p = document.getElementById('rec-qual-prox-slider'); if (p) p.value = 3;
+      const a = document.getElementById('rec-qual-acad-slider'); if (a) a.value = 2;
+      const pr = document.getElementById('rec-qual-prog-slider'); if (pr) pr.value = 2;
+      const ab = document.getElementById('rec-child-ability'); if (ab) ab.value = 'average';
+      updatePrioritySlidersUI();
+      triggerAutoRecommend(0);
+    });
+  }
+
+  const presetGroBtn = document.getElementById('btn-preset-growth');
+  if (presetGroBtn) {
+    presetGroBtn.addEventListener('click', () => {
+      const p = document.getElementById('rec-qual-prox-slider'); if (p) p.value = 2;
+      const a = document.getElementById('rec-qual-acad-slider'); if (a) a.value = 2;
+      const pr = document.getElementById('rec-qual-prog-slider'); if (pr) pr.value = 4;
+      const ab = document.getElementById('rec-child-ability'); if (ab) ab.value = 'below_average';
+      updatePrioritySlidersUI();
+      triggerAutoRecommend(0);
+    });
+  }
+
+  // Auto-recommend on text input change
+  const locInputEl = document.getElementById('rec-target-locations');
+  if (locInputEl) {
+    locInputEl.addEventListener('input', () => triggerAutoRecommend(300));
+    locInputEl.addEventListener('change', () => triggerAutoRecommend(0));
+  }
+
+  // Auto-recommend on ability profile change
+  const abilitySelectEl = document.getElementById('rec-child-ability');
+  if (abilitySelectEl) {
+    abilitySelectEl.addEventListener('change', () => triggerAutoRecommend(0));
+  }
+
+  // Priority Sliders input & change listeners
+  ['rec-qual-prox-slider', 'rec-qual-acad-slider', 'rec-qual-prog-slider'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', () => {
+        updatePrioritySlidersUI();
+        triggerAutoRecommend(100);
+      });
+      el.addEventListener('change', () => {
+        updatePrioritySlidersUI();
+        triggerAutoRecommend(0);
+      });
+    }
+  });
+
+  // Priority Weights Dropdown toggle & interaction
+  const prioDropdownBtn = document.getElementById('rec-priorities-btn');
+  const prioDropdown = document.getElementById('rec-priorities-dropdown');
+  const prioWrap = document.getElementById('rec-priorities-multiselect-wrap');
+
+  if (prioDropdownBtn && prioDropdown) {
+    prioDropdownBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = prioDropdown.style.display === 'none';
+      prioDropdown.style.display = isHidden ? 'block' : 'none';
+    });
+
+    document.addEventListener('click', (e) => {
+      if (prioWrap && !prioWrap.contains(e.target)) {
+        prioDropdown.style.display = 'none';
+      }
+    });
+  }
+
+  // Target School Types Multi-Select Dropdown toggle & interaction
+  const typeDropdownBtn = document.getElementById('rec-school-type-btn');
+  const typeDropdown = document.getElementById('rec-school-type-dropdown');
+  const typeWrap = document.getElementById('rec-school-type-multiselect-wrap');
+
+  if (typeDropdownBtn && typeDropdown) {
+    typeDropdownBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = typeDropdown.style.display === 'none';
+      typeDropdown.style.display = isHidden ? 'block' : 'none';
+    });
+
+    document.addEventListener('click', (e) => {
+      if (typeWrap && !typeWrap.contains(e.target)) {
+        typeDropdown.style.display = 'none';
+      }
+    });
+
+    document.querySelectorAll('.rec-school-type-chk').forEach(chk => {
+      chk.addEventListener('change', (e) => {
+        if (e.target.value === 'NA' && e.target.checked) {
+          document.querySelectorAll('.rec-school-type-chk').forEach(c => {
+            if (c.value !== 'NA') c.checked = false;
+          });
+        } else if (e.target.value !== 'NA' && e.target.checked) {
+          const naChk = document.querySelector('.rec-school-type-chk[value="NA"]');
+          if (naChk) naChk.checked = false;
+        }
+
+        const checkedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked'));
+        if (checkedTypes.length === 0) {
+          const naChk = document.querySelector('.rec-school-type-chk[value="NA"]');
+          if (naChk) naChk.checked = true;
+        }
+
+        updateSchoolTypeDropdownLabel();
+        triggerAutoRecommend(50);
+      });
+    });
+  }
+
+  // Gender Multi-Select Dropdown toggle & interaction
+  const genderDropdownBtn = document.getElementById('rec-gender-btn');
+  const genderDropdown = document.getElementById('rec-gender-dropdown');
+  const genderWrap = document.getElementById('rec-gender-multiselect-wrap');
+
+  if (genderDropdownBtn && genderDropdown) {
+    genderDropdownBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = genderDropdown.style.display === 'none';
+      genderDropdown.style.display = isHidden ? 'block' : 'none';
+    });
+
+    document.addEventListener('click', (e) => {
+      if (genderWrap && !genderWrap.contains(e.target)) {
+        genderDropdown.style.display = 'none';
+      }
+    });
+
+    document.querySelectorAll('.rec-gender-chk').forEach(chk => {
+      chk.addEventListener('change', (e) => {
+        if (e.target.value === 'NA' && e.target.checked) {
+          document.querySelectorAll('.rec-gender-chk').forEach(c => {
+            if (c.value !== 'NA') c.checked = false;
+          });
+        } else if (e.target.value !== 'NA' && e.target.checked) {
+          const naChk = document.querySelector('.rec-gender-chk[value="NA"]');
+          if (naChk) naChk.checked = false;
+        }
+
+        const checkedGenders = Array.from(document.querySelectorAll('.rec-gender-chk:checked'));
+        if (checkedGenders.length === 0) {
+          const naChk = document.querySelector('.rec-gender-chk[value="NA"]');
+          if (naChk) naChk.checked = true;
+        }
+
+        updateGenderDropdownLabel();
+        triggerAutoRecommend(50);
+      });
     });
   }
 
@@ -3477,72 +3705,152 @@ async function loadUserRecProfile() {
     const ofstedFloor = binary.ofstedFloor || 'NA';
     const locations = binary.locations || prefs.targetPostcode || prefs.targetBorough || '';
     const qual = prefs.qualitativeWeights || {};
-    const proximity = qual.proximity || 'somewhat';
-    const academicExcellence = qual.academicExcellence || 'very';
-    const pupilProgress = qual.pupilProgress || 'somewhat';
+    const proximity = qual.proximity || 'NA';
+    const academicExcellence = qual.academicExcellence || 'NA';
+    const pupilProgress = qual.pupilProgress || 'NA';
     const reqTypes = Array.isArray(binary.schoolTypes) ? binary.schoolTypes : ['NA'];
 
     // Populate Classic Portal Matchmaker Elements
     const childAbilityEl = document.getElementById('rec-child-ability');
     if (childAbilityEl) childAbilityEl.value = childAbility;
 
-    const genderEl = document.getElementById('rec-gender');
-    if (genderEl) genderEl.value = gender;
-
-    const ofstedFloorEl = document.getElementById('rec-ofsted-floor');
-    if (ofstedFloorEl) ofstedFloorEl.value = ofstedFloor;
-
     const locInput = document.getElementById('rec-target-locations');
     if (locInput) locInput.value = locations;
 
-    const proxEl = document.getElementById('rec-qual-prox');
-    if (proxEl) proxEl.value = proximity;
+    const proxSlider = document.getElementById('rec-qual-prox-slider');
+    if (proxSlider) proxSlider.value = getSliderStepFromValue(proximity) ?? 1;
+    const acadSlider = document.getElementById('rec-qual-acad-slider');
+    if (acadSlider) acadSlider.value = getSliderStepFromValue(academicExcellence) ?? 2;
+    const progSlider = document.getElementById('rec-qual-prog-slider');
+    if (progSlider) progSlider.value = getSliderStepFromValue(pupilProgress) ?? 2;
 
-    const acadEl = document.getElementById('rec-qual-acad');
-    if (acadEl) acadEl.value = academicExcellence;
-
-    const progEl = document.getElementById('rec-qual-prog');
-    if (progEl) progEl.value = pupilProgress;
+    const reqGenders = Array.isArray(gender) ? gender : [gender];
+    document.querySelectorAll('.rec-gender-chk').forEach(chk => {
+      chk.checked = reqGenders.includes(chk.value);
+    });
 
     document.querySelectorAll('.rec-school-type-chk').forEach(chk => {
       chk.checked = reqTypes.includes(chk.value);
     });
 
-    // Populate Parent Portal 2.0 Matchmaker Elements
-    const p2PostcodeInput = document.getElementById('p2-input-postcode');
-    if (p2PostcodeInput) p2PostcodeInput.value = locations;
-
-    const p2GenderSelect = document.getElementById('p2-select-gender');
-    if (p2GenderSelect) p2GenderSelect.value = gender;
-
-    const p2AbilitySelect = document.getElementById('p2-select-ability');
-    if (p2AbilitySelect) p2AbilitySelect.value = childAbility;
-
-    const p2CommuteSelect = document.getElementById('p2-pref-commute');
-    if (p2CommuteSelect) p2CommuteSelect.value = proximity;
-
-    const p2AttainSelect = document.getElementById('p2-pref-attainment');
-    if (p2AttainSelect) p2AttainSelect.value = academicExcellence;
-
-    const p2ProgSelect = document.getElementById('p2-pref-progress');
-    if (p2ProgSelect) p2ProgSelect.value = pupilProgress;
-
-    const p2OfstedSelect = document.getElementById('p2-pref-ofsted');
-    if (p2OfstedSelect) p2OfstedSelect.value = ofstedFloor;
-
-    document.querySelectorAll('.p2-type-chk').forEach(chk => {
-      chk.checked = reqTypes.includes(chk.value);
-    });
+    updatePrioritySlidersUI();
+    updateSchoolTypeDropdownLabel();
+    updateGenderDropdownLabel();
   } catch (err) {
     console.error('Error loading parent recommendation profile:', err);
   }
 }
 
+const SLIDER_STEPS = ['NA', 'not_important', 'somewhat', 'very', 'top_priority'];
+const SLIDER_LABELS = ['Off', 'Low', 'Mid', 'High', 'Top Priority'];
+
+function getSliderStepFromValue(val) {
+  if (val === 'NA' || val === 'off') return 0;
+  if (val === 'not_important' || val === 'low') return 1;
+  if (val === 'somewhat' || val === 'mid' || val === 'medium') return 2;
+  if (val === 'very' || val === 'high') return 3;
+  if (val === 'top_priority' || val === 'top') return 4;
+  return null;
+}
+
+// Update the dynamic fine-tune priority slider badges and button label
+function updatePrioritySlidersUI() {
+  const proxStep = parseInt(document.getElementById('rec-qual-prox-slider')?.value || '1', 10);
+  const acadStep = parseInt(document.getElementById('rec-qual-acad-slider')?.value || '2', 10);
+  const progStep = parseInt(document.getElementById('rec-qual-prog-slider')?.value || '2', 10);
+
+  const proxValEl = document.getElementById('rec-val-prox');
+  if (proxValEl) {
+    proxValEl.textContent = SLIDER_LABELS[proxStep] || 'Off';
+    proxValEl.style.color = proxStep === 0 ? '#64748b' : '#4f46e5';
+    proxValEl.style.background = proxStep === 0 ? '#f1f5f9' : '#e0e7ff';
+  }
+
+  const acadValEl = document.getElementById('rec-val-acad');
+  if (acadValEl) {
+    acadValEl.textContent = SLIDER_LABELS[acadStep] || 'Off';
+    acadValEl.style.color = acadStep === 0 ? '#64748b' : '#4f46e5';
+    acadValEl.style.background = acadStep === 0 ? '#f1f5f9' : '#e0e7ff';
+  }
+
+  const progValEl = document.getElementById('rec-val-prog');
+  if (progValEl) {
+    progValEl.textContent = SLIDER_LABELS[progStep] || 'Off';
+    progValEl.style.color = progStep === 0 ? '#64748b' : '#4f46e5';
+    progValEl.style.background = progStep === 0 ? '#f1f5f9' : '#e0e7ff';
+  }
+
+  const labelEl = document.getElementById('rec-priorities-btn-label');
+  if (labelEl) {
+    const proxLabel = SLIDER_LABELS[proxStep] || 'Off';
+    const acadLabel = SLIDER_LABELS[acadStep] || 'Off';
+    const progLabel = SLIDER_LABELS[progStep] || 'Off';
+    labelEl.textContent = `Prox: ${proxLabel} | GCSE: ${acadLabel} | Prog: ${progLabel}`;
+  }
+}
+
+// Auto-recommend debounce timer
+let autoRecDebounceTimer = null;
+function triggerAutoRecommend(delay = 150) {
+  clearTimeout(autoRecDebounceTimer);
+  if (delay === 0) {
+    fetchRecommendations();
+    saveUserRecProfile();
+  } else {
+    autoRecDebounceTimer = setTimeout(() => {
+      fetchRecommendations();
+      saveUserRecProfile();
+    }, delay);
+  }
+}
+
+// Update Target School Types multi-select dropdown button label
+function updateSchoolTypeDropdownLabel() {
+  const labelEl = document.getElementById('rec-school-type-btn-label');
+  if (!labelEl) return;
+
+  const checked = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
+  if (checked.length === 0 || checked.includes('NA') || checked.length === 3) {
+    labelEl.textContent = 'Any Types';
+  } else {
+    const formatted = checked.map(v => {
+      if (v === 'Independent') return 'Private';
+      if (v === 'Comprehensive') return 'State Comp';
+      return v;
+    });
+    labelEl.textContent = formatted.join(', ');
+  }
+}
+
+// Update Gender multi-select dropdown button label
+function updateGenderDropdownLabel() {
+  const labelEl = document.getElementById('rec-gender-btn-label');
+  if (!labelEl) return;
+
+  const checked = Array.from(document.querySelectorAll('.rec-gender-chk:checked')).map(c => c.value);
+  if (checked.length === 0 || checked.includes('NA') || checked.length === 3) {
+    labelEl.textContent = 'All Genders';
+  } else {
+    const formatted = checked.map(v => {
+      if (v === 'boys') return 'Boys';
+      if (v === 'girls') return 'Girls';
+      if (v === 'mixed') return 'Mixed';
+      return v;
+    });
+    labelEl.textContent = formatted.join(', ');
+  }
+}
+
 // Save Parent Recommendation Profile & Preferences (Classic Matchmaker Wizard)
 async function saveUserRecProfile() {
+  updatePrioritySlidersUI();
+  updateSchoolTypeDropdownLabel();
+  updateGenderDropdownLabel();
   const childAbilityLevel = document.getElementById('rec-child-ability') ? document.getElementById('rec-child-ability').value : (document.getElementById('p2-select-ability')?.value || 'NA');
-  const gender = document.getElementById('rec-gender') ? document.getElementById('rec-gender').value : (document.getElementById('p2-select-gender')?.value || 'NA');
-  const ofstedFloor = document.getElementById('rec-ofsted-floor') ? document.getElementById('rec-ofsted-floor').value : (document.getElementById('p2-pref-ofsted')?.value || 'NA');
+  
+  let selectedGenders = Array.from(document.querySelectorAll('.rec-gender-chk:checked')).map(c => c.value);
+  const gender = selectedGenders.length > 0 ? (selectedGenders.includes('NA') ? 'NA' : selectedGenders) : (document.getElementById('p2-select-gender')?.value || 'NA');
+  
   const locations = document.getElementById('rec-target-locations') ? document.getElementById('rec-target-locations').value.trim() : (document.getElementById('p2-input-postcode')?.value.trim() || '');
 
   let selectedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
@@ -3550,9 +3858,14 @@ async function saveUserRecProfile() {
     selectedTypes = Array.from(document.querySelectorAll('.p2-type-chk:checked')).map(c => c.value);
   }
 
-  const proximity = document.getElementById('rec-qual-prox') ? document.getElementById('rec-qual-prox').value : (document.getElementById('p2-pref-commute')?.value || 'somewhat');
-  const academicExcellence = document.getElementById('rec-qual-acad') ? document.getElementById('rec-qual-acad').value : (document.getElementById('p2-pref-attainment')?.value || 'very');
-  const pupilProgress = document.getElementById('rec-qual-prog') ? document.getElementById('rec-qual-prog').value : (document.getElementById('p2-pref-progress')?.value || 'somewhat');
+  const proxStep = parseInt(document.getElementById('rec-qual-prox-slider')?.value || '0', 10);
+  const acadStep = parseInt(document.getElementById('rec-qual-acad-slider')?.value || '0', 10);
+  const progStep = parseInt(document.getElementById('rec-qual-prog-slider')?.value || '0', 10);
+
+  const proximity = SLIDER_STEPS[proxStep] || 'NA';
+  const academicExcellence = SLIDER_STEPS[acadStep] || 'NA';
+  const pupilProgress = SLIDER_STEPS[progStep] || 'NA';
+  const ofstedFloor = document.getElementById('rec-ofsted-floor')?.value || document.getElementById('p2-pref-ofsted')?.value || 'NA';
 
   // Synchronize Parent 2.0 inputs
   const p2PostcodeInput = document.getElementById('p2-input-postcode');
@@ -3599,13 +3912,12 @@ async function saveUserRecProfile() {
     });
 
     if (res.ok) {
-      showToast('Saved your personalized recommendation profile!', 'success');
       await saveUserPortfolio(true);
-      await fetchRecommendations();
     }
   } catch (err) {
-    showToast('Failed to save recommendation profile', 'error');
+    console.error('Failed to save recommendation profile:', err);
   }
+  await fetchRecommendations();
 }
 
 // Fetch recommendations based on userSelectedSchools, target locations, and qualitative profile
@@ -3616,7 +3928,10 @@ async function fetchRecommendations() {
 
   const locations = document.getElementById('rec-target-locations')?.value.trim() || document.getElementById('p2-input-postcode')?.value.trim() || '';
   const childAbilityLevel = document.getElementById('rec-child-ability')?.value || document.getElementById('p2-select-ability')?.value || 'NA';
-  const gender = document.getElementById('rec-gender')?.value || document.getElementById('p2-select-gender')?.value || 'NA';
+  
+  let selectedGenders = Array.from(document.querySelectorAll('.rec-gender-chk:checked')).map(c => c.value);
+  const gender = selectedGenders.length > 0 ? (selectedGenders.includes('NA') ? 'NA' : selectedGenders) : (document.getElementById('p2-select-gender')?.value || 'NA');
+  
   const ofstedFloor = document.getElementById('rec-ofsted-floor')?.value || document.getElementById('p2-pref-ofsted')?.value || 'NA';
 
   let selectedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
@@ -3624,9 +3939,13 @@ async function fetchRecommendations() {
     selectedTypes = Array.from(document.querySelectorAll('.p2-type-chk:checked')).map(c => c.value);
   }
 
-  const proximity = document.getElementById('rec-qual-prox')?.value || document.getElementById('p2-pref-commute')?.value || 'somewhat';
-  const academicExcellence = document.getElementById('rec-qual-acad')?.value || document.getElementById('p2-pref-attainment')?.value || 'very';
-  const pupilProgress = document.getElementById('rec-qual-prog')?.value || document.getElementById('p2-pref-progress')?.value || 'somewhat';
+  const proxStep = parseInt(document.getElementById('rec-qual-prox-slider')?.value || '0', 10);
+  const acadStep = parseInt(document.getElementById('rec-qual-acad-slider')?.value || '0', 10);
+  const progStep = parseInt(document.getElementById('rec-qual-prog-slider')?.value || '0', 10);
+
+  const proximity = SLIDER_STEPS[proxStep] || 'NA';
+  const academicExcellence = SLIDER_STEPS[acadStep] || 'NA';
+  const pupilProgress = SLIDER_STEPS[progStep] || 'NA';
 
   const preferencesOverride = {
     targetBorough: locations,
@@ -3703,10 +4022,10 @@ function renderRecommendations(items) {
 
   if (items.length === 0) {
     container.innerHTML = `
-      <div style="text-align: center; padding: 2.5rem; background: #f8fafc; border-radius: 8px; border: 1px dashed #cbd5e1;">
-        <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 2.2rem; color: #94a3b8; margin-bottom: 0.8rem;"></i>
-        <h4>No matching recommendations found</h4>
-        <p style="color: #64748b; font-size: 0.85rem;">Try adjusting your hard requirements or location filters to view more school suggestions.</p>
+      <div style="text-align: center; padding: 2.5rem 1rem; color: #64748b; background: #f8fafc; border-radius: 12px; border: 1px dashed #cbd5e1;">
+        <i class="fa-solid fa-compass" style="font-size: 2rem; color: #94a3b8; margin-bottom: 0.75rem;"></i>
+        <h4 style="margin: 0; color: #334155; font-size: 1.05rem;">No matching recommendations found</h4>
+        <p style="margin: 0.35rem 0 0 0; font-size: 0.85rem;">Try adjusting your hard requirements or location filters to view more school suggestions.</p>
       </div>
     `;
     return;
@@ -3715,12 +4034,17 @@ function renderRecommendations(items) {
   items.forEach(item => {
     const s = item.school;
     const score = item.matchScore;
-    const reasons = item.reasons;
+    const reasons = item.reasons || [];
 
     let matchBg = '#ecfdf5';
     let matchColor = '#059669';
-    if (score < 60) { matchBg = '#fffbeb'; matchColor = '#d97706'; }
-    if (score < 35) { matchBg = '#f1f5f9'; matchColor = '#64748b'; }
+    let matchLabel = 'High Match';
+    if (score < 70) { matchBg = '#eff6ff'; matchColor = '#2563eb'; matchLabel = 'Good Match'; }
+    if (score < 50) { matchBg = '#fffbeb'; matchColor = '#d97706'; matchLabel = 'Moderate Fit'; }
+
+    const isIndependent = (s.schoolType === 'Independent');
+    const isAlreadyAdded = userSelectedSchools.some(x => x.id === s.id);
+    const dates = s.entranceExamDates || {};
 
     let genderTag = `<span style="font-size:0.75rem; color:#475569;"><i class="fa-solid fa-users" style="color:#8b5cf6;"></i> ${s.gender}</span>`;
     if ((s.gender || '').toLowerCase().includes('girl')) {
@@ -3729,64 +4053,87 @@ function renderRecommendations(items) {
       genderTag = `<span style="font-size:0.75rem; color:#2563eb; font-weight:600;"><i class="fa-solid fa-mars"></i> Boys</span>`;
     }
 
-    const isAlreadyAdded = userSelectedSchools.some(x => x.id === s.id);
-    const dates = s.entranceExamDates || {};
+    // Plain English Insights (Shortened for 2-Row Compact Layout)
+    const insights = [];
+    if (s.gcseProgress8 !== null && s.gcseProgress8 !== undefined) {
+      if (s.gcseProgress8 >= 0.5) {
+        insights.push(`<span class="parent-insight-tag insight-growth-top" title="Top 5% student growth (+${s.gcseProgress8})"><i class="fa-solid fa-arrow-trend-up"></i> Top 5% Growth (+${s.gcseProgress8})</span>`);
+      } else if (s.gcseProgress8 > 0) {
+        insights.push(`<span class="parent-insight-tag insight-growth-top" title="Above average pupil progress (+${s.gcseProgress8})"><i class="fa-solid fa-arrow-trend-up"></i> Progress +${s.gcseProgress8}</span>`);
+      }
+    }
 
-    const row = document.createElement('div');
-    row.className = 'school-row-item';
-    row.style.background = 'white';
-    row.style.border = '1px solid #cbd5e1';
-    row.style.borderLeft = `5px solid ${matchColor}`;
-    row.style.borderRadius = '8px';
-    row.style.padding = '0.65rem 1rem';
-    row.style.display = 'flex';
-    row.style.flexDirection = 'column';
-    row.style.gap = '0.35rem';
+    if (s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined) {
+      if (s.gcseAttainment8 >= 65) {
+        insights.push(`<span class="parent-insight-tag insight-academic-top" title="Outstanding GCSE Attainment 8: ${s.gcseAttainment8}"><i class="fa-solid fa-trophy"></i> GCSE ${s.gcseAttainment8}</span>`);
+      } else if (s.gcseAttainment8 >= 50) {
+        insights.push(`<span class="parent-insight-tag insight-academic-top" title="Strong GCSE Attainment 8: ${s.gcseAttainment8}"><i class="fa-solid fa-award"></i> GCSE ${s.gcseAttainment8}</span>`);
+      }
+    }
 
-    row.innerHTML = `
-      <!-- Line 1: Match Score, School Name link, Badges, Borough/Postcode & Actions -->
-      <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
-        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
-          <span style="font-weight: 800; font-size: 0.78rem; color: ${matchColor}; background: ${matchBg}; padding: 0.15rem 0.55rem; border-radius: 999px; border: 1px solid ${matchColor}44;">
+    if (s.entranceExamType && s.entranceExamType !== 'Standard' && s.entranceExamType !== 'Non-selective') {
+      insights.push(`<span class="parent-insight-tag insight-exam-selective"><i class="fa-solid fa-pen-nib"></i> ${s.entranceExamType}</span>`);
+    }
+
+    if (dates.examDate) {
+      insights.push(`<span class="parent-insight-tag" style="background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5;"><i class="fa-solid fa-calendar"></i> Exam: ${dates.examDate}</span>`);
+    }
+
+    const card = document.createElement('div');
+    card.className = 'school-row-item';
+    card.style.background = 'white';
+    card.style.border = '1px solid #e2e8f0';
+    card.style.borderLeft = `5px solid ${matchColor}`;
+    card.style.borderRadius = '10px';
+    card.style.padding = '0.65rem 1rem';
+    card.style.display = 'flex';
+    card.style.flexDirection = 'column';
+    card.style.gap = '0.35rem';
+    card.style.boxShadow = '0 2px 4px rgba(0,0,0,0.02)';
+
+    card.innerHTML = `
+      <!-- Row 1: Match Score, School Name, Type Badge, Gender, Location & Right-Aligned Actions -->
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; width: 100%;">
+        <div style="display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1; flex-wrap: nowrap; overflow: hidden;">
+          <span style="font-weight: 800; font-size: 0.76rem; color: ${matchColor}; background: ${matchBg}; padding: 0.15rem 0.55rem; border-radius: 999px; border: 1px solid ${matchColor}44; white-space: nowrap; flex-shrink: 0;">
             <i class="fa-solid fa-sparkles"></i> ${score}% Match
           </span>
-          <h4 style="font-size: 0.98rem; font-weight: 700; color: #1e293b; margin: 0;">
-            <a href="#" onclick="openSchoolDetail('${s.id}'); return false;" style="color: #1e293b; text-decoration: none;">${s.name}</a>
+          <h4 style="font-size: 0.96rem; font-weight: 800; color: #1e293b; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;">
+            <a href="#" onclick="openSchoolDetail('${s.id}'); return false;" style="color: #1e293b; text-decoration: none;" title="${s.name}">${s.name}</a>
           </h4>
-          ${s.hot ? '<span class="badge-hot" style="font-size:0.68rem; padding:0.1rem 0.35rem;">🔥 Hot</span>' : ''}
-          ${s.official ? '<span class="badge-official" style="font-size:0.68rem; padding:0.1rem 0.35rem;">✓ DfE Official</span>' : ''}
-          ${genderTag}
-          <span style="font-size: 0.78rem; color: #64748b;"><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> <strong>${s.la}</strong> (${s.postcode || 'N/A'})</span>
+          <span style="font-size: 0.72rem; font-weight: 700; color: ${isIndependent ? '#7c3aed' : '#2563eb'}; background: ${isIndependent ? '#f3e8ff' : '#eff6ff'}; padding: 0.12rem 0.45rem; border-radius: 6px; white-space: nowrap; flex-shrink: 0;">
+            ${s.schoolType}
+          </span>
+          ${s.hot ? '<span class="badge-hot" style="font-size:0.65rem; padding:0.08rem 0.3rem; flex-shrink: 0;">🔥 Hot</span>' : ''}
+          <span style="flex-shrink: 0;">${genderTag}</span>
+          <span style="font-size: 0.75rem; color: #64748b; white-space: nowrap; flex-shrink: 0;"><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> <strong>${s.la}</strong> (${s.postcode || 'N/A'})</span>
         </div>
 
-        <div style="display: flex; align-items: center; gap: 0.5rem;">
-          <button class="btn btn-outline" onclick="openSchoolDetail('${s.id}')" style="font-size: 0.75rem; padding: 0.3rem 0.65rem;">
+        <div style="display: flex; align-items: center; gap: 0.4rem; margin-left: auto; flex-shrink: 0;">
+          <button class="btn btn-outline" onclick="openSchoolDetail('${s.id}')" style="font-size: 0.74rem; padding: 0.28rem 0.6rem; white-space: nowrap;">
             <i class="fa-solid fa-eye"></i> Details
           </button>
-          <button class="btn ${isAlreadyAdded ? 'btn-secondary' : 'btn-primary'} btn-add-rec" data-id="${s.id}" style="font-size: 0.75rem; padding: 0.3rem 0.75rem; ${isAlreadyAdded ? 'background:#e2e8f0; color:#475569; border:none;' : ''}">
+          <button class="btn ${isAlreadyAdded ? 'btn-secondary' : 'btn-primary'} btn-add-rec" data-id="${s.id}" style="font-size: 0.74rem; padding: 0.28rem 0.75rem; white-space: nowrap; ${isAlreadyAdded ? 'background:#e2e8f0; color:#475569; border:none;' : ''}">
             <i class="fa-solid ${isAlreadyAdded ? 'fa-check' : 'fa-plus'}"></i> ${isAlreadyAdded ? 'Shortlisted' : 'Add to Shortlist'}
           </button>
-          <button class="btn-text btn-remove-rec" data-id="${s.id}" style="color: #94a3b8; font-size: 0.75rem; cursor: pointer; padding: 0.15rem 0.35rem;" title="Remove from suggestions">
+          <button class="btn-text btn-remove-rec" data-id="${s.id}" style="color: #94a3b8; font-size: 0.75rem; cursor: pointer; padding: 0.2rem 0.35rem;" title="Remove from suggestions">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
       </div>
 
-      <!-- Line 2: Type, Specs, Exam Dates & Match Reason -->
-      <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; font-size: 0.76rem; color: #475569; border-top: 1px dashed #f1f5f9; padding-top: 0.3rem;">
-        <span><i class="fa-solid fa-building-columns"></i> ${s.schoolType}</span>
-        <span><i class="fa-solid fa-star" style="color: #eab308;"></i> Ofsted: <strong>${formatOfsted(s.ofstedRating)}</strong></span>
-        ${s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined ? `<span>Attainment 8: <strong>${s.gcseAttainment8}</strong></span>` : ''}
-        ${s.gcseProgress8 !== null && s.gcseProgress8 !== undefined ? `<span>Progress 8: <strong>+${s.gcseProgress8}</strong></span>` : ''}
-        <span style="color: #4338ca;"><i class="fa-solid fa-pen-nib"></i> Exam: <strong>${s.entranceExamType || 'Standard'}</strong></span>
-        ${dates.examDate ? `<span style="color: #c2410c;"><i class="fa-solid fa-calendar"></i> Sitting: <strong>${dates.examDate}</strong></span>` : ''}
-        <span style="background: #f8fafc; color: #334155; padding: 0.1rem 0.45rem; border-radius: 4px; border: 1px solid #cbd5e1; margin-left: auto;">
-          <strong>Match Reason:</strong> ${reasons[0] || 'Fits parent profile'}
+      <!-- Row 2: Plain-English Insights & Right-Aligned Match Reason -->
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; border-top: 1px dashed #f1f5f9; padding-top: 0.35rem; width: 100%;">
+        <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: nowrap; overflow: hidden; min-width: 0;">
+          ${insights.join(' ')}
+        </div>
+        <span style="font-size: 0.74rem; color: #475569; margin-left: auto; background: #f8fafc; padding: 0.12rem 0.5rem; border-radius: 6px; border: 1px solid #e2e8f0; white-space: nowrap; flex-shrink: 0; text-overflow: ellipsis; overflow: hidden; max-width: 380px;" title="${reasons[0] || 'Fits parent profile'}">
+          <strong>Match:</strong> ${reasons[0] || 'Fits parent profile'}
         </span>
       </div>
     `;
 
-    container.appendChild(row);
+    container.appendChild(card);
   });
 
   // Attach event listeners for Add to Shortlist & Remove from suggestions
@@ -4432,20 +4779,21 @@ function renderParent2RecommendationsList(items) {
     const isInIndep = parent2State.independentList.some(x => x.id === s.id);
 
     // Plain English Insights
+    // Plain English Insights (Shortened for 2-Row Compact Layout)
     const insights = [];
     if (s.gcseProgress8 !== null && s.gcseProgress8 !== undefined) {
       if (s.gcseProgress8 >= 0.5) {
-        insights.push(`<span class="parent-insight-tag insight-growth-top" title="Students achieve half a grade higher than expected"><i class="fa-solid fa-arrow-trend-up"></i> Top 5% Student Growth (+${s.gcseProgress8})</span>`);
+        insights.push(`<span class="parent-insight-tag insight-growth-top" title="Top 5% student growth (+${s.gcseProgress8})"><i class="fa-solid fa-arrow-trend-up"></i> Top 5% Growth (+${s.gcseProgress8})</span>`);
       } else if (s.gcseProgress8 > 0) {
-        insights.push(`<span class="parent-insight-tag insight-growth-top"><i class="fa-solid fa-arrow-trend-up"></i> Above Average Progress (+${s.gcseProgress8})</span>`);
+        insights.push(`<span class="parent-insight-tag insight-growth-top" title="Above average pupil progress (+${s.gcseProgress8})"><i class="fa-solid fa-arrow-trend-up"></i> Progress +${s.gcseProgress8}</span>`);
       }
     }
 
     if (s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined) {
       if (s.gcseAttainment8 >= 65) {
-        insights.push(`<span class="parent-insight-tag insight-academic-top" title="Average GCSE Grade 7+ across all subjects"><i class="fa-solid fa-trophy"></i> Outstanding GCSEs (${s.gcseAttainment8})</span>`);
+        insights.push(`<span class="parent-insight-tag insight-academic-top" title="Outstanding GCSE Attainment 8: ${s.gcseAttainment8}"><i class="fa-solid fa-trophy"></i> GCSE ${s.gcseAttainment8}</span>`);
       } else if (s.gcseAttainment8 >= 50) {
-        insights.push(`<span class="parent-insight-tag insight-academic-top"><i class="fa-solid fa-award"></i> Strong GCSEs (${s.gcseAttainment8})</span>`);
+        insights.push(`<span class="parent-insight-tag insight-academic-top" title="Strong GCSE Attainment 8: ${s.gcseAttainment8}"><i class="fa-solid fa-award"></i> GCSE ${s.gcseAttainment8}</span>`);
       }
     }
 
@@ -4453,27 +4801,24 @@ function renderParent2RecommendationsList(items) {
       insights.push(`<span class="parent-insight-tag insight-exam-selective"><i class="fa-solid fa-pen-nib"></i> ${s.entranceExamType}</span>`);
     }
 
-    if (s.ofstedRating) {
-      const ofstedText = formatOfsted(s.ofstedRating);
-      if (ofstedText === 'Outstanding') {
-        insights.push(`<span class="parent-insight-tag" style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;"><i class="fa-solid fa-star" style="color: #eab308;"></i> Ofsted Outstanding</span>`);
-      }
+    if (dates.examDate) {
+      insights.push(`<span class="parent-insight-tag" style="background: #fff7ed; color: #c2410c; border: 1px solid #ffedd5;"><i class="fa-solid fa-calendar"></i> Exam: ${dates.examDate}</span>`);
     }
 
     // Contextual Action Button
     let actionBtnHtml = '';
     if (isIndependent) {
       if (isInIndep) {
-        actionBtnHtml = `<button class="btn btn-secondary" style="font-size: 0.76rem; padding: 0.35rem 0.75rem; background: #f3e8ff; color: #7c3aed; border: 1px solid #e9d5ff;" disabled><i class="fa-solid fa-check"></i> Tracking Private</button>`;
+        actionBtnHtml = `<button class="btn btn-secondary" style="font-size: 0.74rem; padding: 0.28rem 0.75rem; background: #f3e8ff; color: #7c3aed; border: 1px solid #e9d5ff; white-space: nowrap;" disabled><i class="fa-solid fa-check"></i> Private</button>`;
       } else {
-        actionBtnHtml = `<button class="btn btn-primary btn-p2-add-indep" data-id="${s.id}" style="font-size: 0.76rem; padding: 0.35rem 0.8rem; background: #7c3aed; border-color: #6d28d9;"><i class="fa-solid fa-plus"></i> Track Private</button>`;
+        actionBtnHtml = `<button class="btn btn-primary btn-p2-add-indep" data-id="${s.id}" style="font-size: 0.74rem; padding: 0.28rem 0.75rem; background: #7c3aed; border-color: #6d28d9; white-space: nowrap;"><i class="fa-solid fa-plus"></i> Track Private</button>`;
       }
     } else {
       if (isInCaf) {
-        actionBtnHtml = `<button class="btn btn-secondary" style="font-size: 0.76rem; padding: 0.35rem 0.75rem; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;" disabled><i class="fa-solid fa-check"></i> In State CAF (#${cafRank})</button>`;
+        actionBtnHtml = `<button class="btn btn-secondary" style="font-size: 0.74rem; padding: 0.28rem 0.75rem; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; white-space: nowrap;" disabled><i class="fa-solid fa-check"></i> CAF (#${cafRank})</button>`;
       } else {
         const quotaFull = parent2State.cafList.length >= 6;
-        actionBtnHtml = `<button class="btn btn-primary btn-p2-add-caf" data-id="${s.id}" style="font-size: 0.76rem; padding: 0.35rem 0.8rem; background: ${quotaFull ? '#ea580c' : '#2563eb'}; border-color: ${quotaFull ? '#c2410c' : '#1d4ed8'};"><i class="fa-solid ${quotaFull ? 'fa-arrows-rotate' : 'fa-plus'}"></i> ${quotaFull ? 'Swap to State CAF' : `Add to State CAF (${parent2State.cafList.length}/6)`}</button>`;
+        actionBtnHtml = `<button class="btn btn-primary btn-p2-add-caf" data-id="${s.id}" style="font-size: 0.74rem; padding: 0.28rem 0.75rem; background: ${quotaFull ? '#ea580c' : '#2563eb'}; border-color: ${quotaFull ? '#c2410c' : '#1d4ed8'}; white-space: nowrap;"><i class="fa-solid ${quotaFull ? 'fa-arrows-rotate' : 'fa-plus'}"></i> ${quotaFull ? 'Swap CAF' : `Add CAF (${parent2State.cafList.length}/6)`}</button>`;
       }
     }
 
@@ -4483,29 +4828,30 @@ function renderParent2RecommendationsList(items) {
     card.style.border = '1px solid #e2e8f0';
     card.style.borderLeft = `5px solid ${matchColor}`;
     card.style.borderRadius = '10px';
-    card.style.padding = '0.85rem 1.1rem';
+    card.style.padding = '0.65rem 1rem';
     card.style.display = 'flex';
     card.style.flexDirection = 'column';
-    card.style.gap = '0.5rem';
+    card.style.gap = '0.35rem';
     card.style.boxShadow = '0 2px 4px rgba(0,0,0,0.02)';
 
     card.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
-        <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
-          <span style="font-weight: 800; font-size: 0.78rem; color: ${matchColor}; background: ${matchBg}; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid ${matchColor}44;">
+      <!-- Row 1: Match Score, School Name, Type Badge, Location & Right-Aligned Actions -->
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; width: 100%;">
+        <div style="display: flex; align-items: center; gap: 0.5rem; min-width: 0; flex: 1; flex-wrap: nowrap; overflow: hidden;">
+          <span style="font-weight: 800; font-size: 0.76rem; color: ${matchColor}; background: ${matchBg}; padding: 0.15rem 0.55rem; border-radius: 999px; border: 1px solid ${matchColor}44; white-space: nowrap; flex-shrink: 0;">
             <i class="fa-solid fa-sparkles"></i> ${score}% ${matchLabel}
           </span>
-          <h4 style="font-size: 1rem; font-weight: 800; color: #1e293b; margin: 0;">
-            <a href="#" onclick="openSchoolDetail('${s.id}'); return false;" style="color: #1e293b; text-decoration: none;">${s.name}</a>
+          <h4 style="font-size: 0.96rem; font-weight: 800; color: #1e293b; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;">
+            <a href="#" onclick="openSchoolDetail('${s.id}'); return false;" style="color: #1e293b; text-decoration: none;" title="${s.name}">${s.name}</a>
           </h4>
-          <span style="font-size: 0.76rem; font-weight: 700; color: ${isIndependent ? '#7c3aed' : '#2563eb'}; background: ${isIndependent ? '#f3e8ff' : '#eff6ff'}; padding: 0.15rem 0.5rem; border-radius: 6px;">
+          <span style="font-size: 0.72rem; font-weight: 700; color: ${isIndependent ? '#7c3aed' : '#2563eb'}; background: ${isIndependent ? '#f3e8ff' : '#eff6ff'}; padding: 0.12rem 0.45rem; border-radius: 6px; white-space: nowrap; flex-shrink: 0;">
             ${s.schoolType}
           </span>
-          <span style="font-size: 0.78rem; color: #64748b;"><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> <strong>${s.la}</strong> (${s.postcode || 'N/A'})</span>
+          <span style="font-size: 0.75rem; color: #64748b; white-space: nowrap; flex-shrink: 0;"><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> <strong>${s.la}</strong> (${s.postcode || 'N/A'})</span>
         </div>
 
-        <div style="display: flex; align-items: center; gap: 0.5rem;">
-          <button class="btn btn-outline" onclick="openSchoolDetail('${s.id}')" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
+        <div style="display: flex; align-items: center; gap: 0.4rem; margin-left: auto; flex-shrink: 0;">
+          <button class="btn btn-outline" onclick="openSchoolDetail('${s.id}')" style="font-size: 0.74rem; padding: 0.28rem 0.6rem; white-space: nowrap;">
             <i class="fa-solid fa-eye"></i> Details
           </button>
           ${actionBtnHtml}
@@ -4515,10 +4861,12 @@ function renderParent2RecommendationsList(items) {
         </div>
       </div>
 
-      <!-- Plain English Insights & Match Reason -->
-      <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; border-top: 1px dashed #f1f5f9; padding-top: 0.45rem;">
-        ${insights.join(' ')}
-        <span style="font-size: 0.76rem; color: #475569; margin-left: auto; background: #f8fafc; padding: 0.15rem 0.55rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+      <!-- Row 2: Plain-English Insights & Right-Aligned Match Reason -->
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; border-top: 1px dashed #f1f5f9; padding-top: 0.35rem; width: 100%;">
+        <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: nowrap; overflow: hidden; min-width: 0;">
+          ${insights.join(' ')}
+        </div>
+        <span style="font-size: 0.74rem; color: #475569; margin-left: auto; background: #f8fafc; padding: 0.12rem 0.5rem; border-radius: 6px; border: 1px solid #e2e8f0; white-space: nowrap; flex-shrink: 0; text-overflow: ellipsis; overflow: hidden; max-width: 380px;" title="${reasons[0] || 'Matches child profile and location targets'}">
           <strong>Why this matches:</strong> ${reasons[0] || 'Matches child profile and location targets'}
         </span>
       </div>
@@ -4574,6 +4922,9 @@ async function addSchoolToStateCaf(school) {
   }
 
   parent2State.cafList.push(school);
+  userSelectedSchools = [...parent2State.cafList, ...parent2State.independentList];
+  updateUserSchoolsUI();
+  fetchRecommendations();
   await saveUserPortfolio(true);
   showToast(`Added ${school.name} as State CAF Preference #${parent2State.cafList.length}!`, 'success');
   renderParent2Views();
@@ -4582,6 +4933,9 @@ async function addSchoolToStateCaf(school) {
 // Remove School from State CAF Track
 async function removeSchoolFromStateCaf(schoolId) {
   parent2State.cafList = parent2State.cafList.filter(s => s.id !== schoolId);
+  userSelectedSchools = [...parent2State.cafList, ...parent2State.independentList];
+  updateUserSchoolsUI();
+  fetchRecommendations();
   await saveUserPortfolio(true);
   showToast('Removed choice from State CAF list.', 'info');
   renderParent2Views();
@@ -4610,6 +4964,9 @@ async function addSchoolToIndependent(school) {
   }
 
   parent2State.independentList.push(school);
+  userSelectedSchools = [...parent2State.cafList, ...parent2State.independentList];
+  updateUserSchoolsUI();
+  fetchRecommendations();
   await saveUserPortfolio(true);
   showToast(`Added ${school.name} to Independent Direct admissions list!`, 'success');
   renderParent2Views();
@@ -4618,6 +4975,9 @@ async function addSchoolToIndependent(school) {
 // Remove School from Independent Direct Track
 async function removeSchoolFromIndependent(schoolId) {
   parent2State.independentList = parent2State.independentList.filter(s => s.id !== schoolId);
+  userSelectedSchools = [...parent2State.cafList, ...parent2State.independentList];
+  updateUserSchoolsUI();
+  fetchRecommendations();
   await saveUserPortfolio(true);
   showToast('Removed school from Independent tracked list.', 'info');
   renderParent2Views();

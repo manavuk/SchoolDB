@@ -1018,8 +1018,8 @@ function getUserRecPreferences(userId) {
         maxDistance: 'NA'
       },
       qualitativeWeights: {
-        proximity: 'somewhat',
-        academicExcellence: 'very',
+        proximity: 'not_important',
+        academicExcellence: 'somewhat',
         pupilProgress: 'somewhat',
         subjectBreadth: 'NA',
         schoolSize: 'NA'

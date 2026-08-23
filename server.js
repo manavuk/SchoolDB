@@ -1402,21 +1402,27 @@ app.post('/api/recommendations', (req, res) => {
     }
   }
 
-  // 1. Gender Filter
-  const effGender = binaryFilters.gender && binaryFilters.gender !== 'NA' ? binaryFilters.gender : genderChoice;
-  if (effGender && effGender !== 'all' && effGender !== 'NA') {
+  // 1. Gender Multi-Select Filter (boys, girls, mixed)
+  const rawGender = binaryFilters.gender && binaryFilters.gender !== 'NA' ? binaryFilters.gender : genderChoice;
+  const genderList = Array.isArray(rawGender) 
+    ? rawGender.filter(g => g && g !== 'NA') 
+    : (typeof rawGender === 'string' && rawGender !== 'all' && rawGender !== 'NA' ? rawGender.split(',').map(s => s.trim().toLowerCase()) : []);
+
+  if (genderList.length > 0) {
     candidates = candidates.filter(s => {
       const g = (s.gender || '').toLowerCase();
       const isBoys = g.includes('boy') && !g.includes('girl');
       const isGirls = g.includes('girl') && !g.includes('boy');
-      const isCoed = g.includes('mixed') || g.includes('co-ed');
+      const isCoed = g.includes('mixed') || g.includes('co-ed') || g.includes('coeducational');
 
-      if (effGender === 'boys') return isBoys;
-      if (effGender === 'girls') return isGirls;
-      if (effGender === 'boys_coed') return isBoys || isCoed;
-      if (effGender === 'girls_coed') return isGirls || isCoed;
-      if (effGender === 'mixed') return isCoed;
-      return true;
+      return genderList.some(effGender => {
+        if (effGender === 'boys') return isBoys;
+        if (effGender === 'girls') return isGirls;
+        if (effGender === 'boys_coed') return isBoys || isCoed;
+        if (effGender === 'girls_coed') return isGirls || isCoed;
+        if (effGender === 'mixed' || effGender === 'co-ed') return isCoed;
+        return true;
+      });
     });
   }
 
