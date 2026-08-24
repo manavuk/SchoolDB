@@ -35,10 +35,16 @@ try {
   const testPreview = db.generateEnrichmentPreview();
   const changeItem = testPreview.proposedChanges.find(c => c.schoolId === testSchoolId);
   assert(changeItem, 'Dry-run preview must detect change for un-enriched school');
-  console.log('Sample Proposed Change:', {
+  assert(Array.isArray(changeItem.sources), 'changeItem must have a sources array');
+  assert(changeItem.sources.length >= 2, 'changeItem must have at least 2 source references');
+  assert(changeItem.sources.some(s => s.url.includes('get-information-schools')), 'Must include DfE GIAS link');
+  assert(changeItem.sources.some(s => s.url.includes('eadmissions') || s.url.includes('gov.uk')), 'Must include statutory policy link');
+  console.log('Sample Proposed Change with Sources:', {
     name: changeItem.schoolName,
     changedFields: changeItem.changedFields,
-    proposedExamType: changeItem.proposed.entranceExamType
+    proposedExamType: changeItem.proposed.entranceExamType,
+    sourcesCount: changeItem.sources.length,
+    sampleSource: changeItem.sources[0]
   });
 
   // 3. Test db.commitEnrichmentChanges

@@ -1931,6 +1931,144 @@ function generateEnrichmentPreview() {
     }
 
     if (diffFields.length > 0) {
+      const sources = [];
+
+      // 1. DfE Government Record Link (if URN exists)
+      if (s.urn) {
+        sources.push({
+          title: `DfE Get Information About Schools (URN ${s.urn})`,
+          url: `https://get-information-schools.service.gov.uk/Establishments/Establishment/Detail/${s.urn}`,
+          type: 'dfe'
+        });
+        sources.push({
+          title: 'DfE School Performance & Admissions Table',
+          url: `https://www.compare-school-performance.service.gov.uk/school/${s.urn}`,
+          type: 'dfe'
+        });
+      }
+
+      // 2. Consortium / Statutory Policy Authority Source Link
+      if (isSwHerts) {
+        sources.push({
+          title: 'SW Herts Schools Consortium Official Admissions',
+          url: 'https://www.swhertsschools.org.uk',
+          type: 'consortium'
+        });
+      } else if (isIndependent) {
+        if (proposedExamType.includes('London 11+ Consortium')) {
+          sources.push({
+            title: 'The London 11+ Girls\' Consortium Official Schedule',
+            url: 'https://www.london11plusconsortium.co.uk',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('ISEB')) {
+          sources.push({
+            title: 'Independent Schools Examinations Board (ISEB CPT)',
+            url: 'https://www.iseb.co.uk/assessments/common-pre-test/',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('GDST')) {
+          sources.push({
+            title: 'Girls\' Day School Trust (GDST) Admissions',
+            url: 'https://www.gdst.net',
+            type: 'consortium'
+          });
+        } else {
+          sources.push({
+            title: 'Independent Schools Council (ISC) Admissions Standards',
+            url: 'https://www.isc.co.uk',
+            type: 'statutory'
+          });
+        }
+      } else if (proposedType === 'Grammar') {
+        if (proposedExamType.includes('Kent Test')) {
+          sources.push({
+            title: 'Kent County Council 11+ Secondary Transfer (PESE)',
+            url: 'https://www.kent.gov.uk/education-and-children/schools/school-places/kent-test',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('Sutton SET')) {
+          sources.push({
+            title: 'Sutton Selective Eligibility Test (SET) Authority',
+            url: 'https://www.sutton.gov.uk/w/transfer-to-secondary-school',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('CSSE')) {
+          sources.push({
+            title: 'Consortium of Selective Schools in Essex (CSSE)',
+            url: 'https://csse.org.uk',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('Bexley')) {
+          sources.push({
+            title: 'Bexley 11+ Selection Test Portal',
+            url: 'https://www.bexley.gov.uk/services/schools-and-education/secondary-schools/bexley-selection-test',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('Tiffin')) {
+          sources.push({
+            title: 'Kingston Selective Admissions (Tiffin Stage 1 & 2)',
+            url: 'https://www.tiffingirls.org/admissions/',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('Buckinghamshire')) {
+          sources.push({
+            title: 'The Buckinghamshire Grammar Schools (TBGS)',
+            url: 'https://www.thebucksgrammarschools.org',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('Birmingham')) {
+          sources.push({
+            title: 'King Edward VI Foundation Grammar Admissions',
+            url: 'https://www.schoolsofkingedwardvi.co.uk/admissions/',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('Trafford')) {
+          sources.push({
+            title: 'Trafford Grammar Schools Consortium Testing',
+            url: 'https://www.trafford.gov.uk/residents/schools/school-admissions/secondary-school-admissions.aspx',
+            type: 'consortium'
+          });
+        } else if (proposedExamType.includes('Redbridge')) {
+          sources.push({
+            title: 'London Borough of Redbridge 11+ Admissions',
+            url: 'https://www.redbridge.gov.uk/schools/redbridge-11-plus/',
+            type: 'consortium'
+          });
+        } else {
+          sources.push({
+            title: 'National Grammar Schools Association & Statutory Code',
+            url: 'https://www.gov.uk/government/publications/school-admissions-code--2',
+            type: 'statutory'
+          });
+        }
+      } else {
+        // State Comprehensive
+        sources.push({
+          title: 'Pan-London eAdmissions & Statutory LA CAF Timetable',
+          url: 'https://www.eadmissions.org.uk',
+          type: 'statutory'
+        });
+        sources.push({
+          title: 'Department for Education - School Admissions Code',
+          url: 'https://www.gov.uk/government/publications/school-admissions-code--2',
+          type: 'statutory'
+        });
+      }
+
+      // 3. School's Own Website Link (if present)
+      if (s.website && s.website.trim() && s.website !== 'N/A') {
+        let webUrl = s.website.trim();
+        if (!webUrl.startsWith('http://') && !webUrl.startsWith('https://')) {
+          webUrl = 'https://' + webUrl;
+        }
+        sources.push({
+          title: `${s.name} Official Website`,
+          url: webUrl,
+          type: 'school'
+        });
+      }
+
       proposedChanges.push({
         schoolId: s.id,
         schoolUrn: s.urn,
@@ -1950,7 +2088,8 @@ function generateEnrichmentPreview() {
           entranceExamDates: proposedDatesStr
         },
         changedFields: diffFields,
-        summary: `Update: ${diffFields.join(', ')}`
+        summary: `Update: ${diffFields.join(', ')}`,
+        sources
       });
     }
   }

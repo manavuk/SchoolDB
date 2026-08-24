@@ -6103,7 +6103,18 @@ async function openEnrichmentPreviewModal() {
     });
 
     if (!res.ok) {
-      container.innerHTML = `<div style="color: #ef4444; padding: 2rem; text-align: center;">Failed to generate enrichment preview (${res.status}).</div>`;
+      container.innerHTML = `
+        <div style="text-align: center; padding: 2.5rem 1.5rem; background: white; border-radius: 12px; border: 1px solid #fee2e2;">
+          <i class="fa-solid fa-triangle-exclamation" style="font-size: 2.5rem; color: #ef4444; margin-bottom: 0.75rem; display: block;"></i>
+          <h4 style="color: #991b1b; font-size: 1.1rem; margin-bottom: 0.35rem;">Failed to Generate Enrichment Preview (HTTP ${res.status})</h4>
+          <p style="color: #64748b; font-size: 0.85rem; max-width: 560px; margin: 0 auto 1.25rem auto; line-height: 1.5;">
+            ${res.status === 404 ? 'Your Node server process is running an in-memory instance from before the new preview route was added. Please <strong>restart your Node server</strong> (stop the process in your terminal and run <code>npm start</code> or <code>node server.js</code>) and click Retry below.' : 'An error occurred while generating the enrichment preview.'}
+          </p>
+          <button type="button" class="btn btn-primary" onclick="openEnrichmentPreviewModal()" style="font-size: 0.85rem; padding: 0.45rem 1rem;">
+            <i class="fa-solid fa-rotate"></i> Retry
+          </button>
+        </div>
+      `;
       return;
     }
 
@@ -6265,6 +6276,37 @@ function renderEnrichmentPreviewCards() {
             ` : ''}
           </tbody>
         </table>
+
+        <!-- Source Evidence & Policy Provenance Links -->
+        ${item.sources && item.sources.length > 0 ? `
+          <div style="margin-top: 0.85rem; padding: 0.6rem 0.85rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.78rem;">
+            <div style="font-weight: 700; color: #475569; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.4rem;">
+              <i class="fa-solid fa-link" style="color: #4f46e5;"></i> Source Evidence &amp; Policy Provenance:
+            </div>
+            <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;">
+              ${item.sources.map(src => {
+                let icon = 'fa-arrow-up-right-from-square';
+                let badgeStyle = 'background: white; border: 1px solid #cbd5e1; color: #3730a3;';
+                if (src.type === 'dfe') {
+                  icon = 'fa-building-columns';
+                  badgeStyle = 'background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;';
+                } else if (src.type === 'consortium') {
+                  icon = 'fa-certificate';
+                  badgeStyle = 'background: #faf5ff; border: 1px solid #e9d5ff; color: #7e22ce;';
+                } else if (src.type === 'school') {
+                  icon = 'fa-globe';
+                  badgeStyle = 'background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d;';
+                }
+                return `
+                  <a href="${src.url}" target="_blank" rel="noopener noreferrer" style="${badgeStyle} text-decoration: none; padding: 0.25rem 0.55rem; border-radius: 6px; display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; font-weight: 500; transition: transform 0.1s ease, box-shadow 0.1s ease;" onmouseover="this.style.boxShadow='0 2px 4px rgba(0,0,0,0.08)';" onmouseout="this.style.boxShadow='none';">
+                    <i class="fa-solid ${icon}" style="font-size: 0.7rem;"></i> ${src.title}
+                  </a>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        ` : ''}
+
       </div>
     `;
   }
