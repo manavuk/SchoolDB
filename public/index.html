@@ -43,13 +43,13 @@
         </div>
       </div>
 
-      <!-- Navigation Tabs (Parent Portal 2.0 is default for parents) -->
+      <!-- Navigation Tabs (Parent Portal 2.0 is controlled by admin setting) -->
       <nav class="nav-tabs">
-        <button id="tab-parent2-btn" class="nav-tab-btn active">
+        <button id="tab-parent2-btn" class="nav-tab-btn" style="display: none;">
           <i class="fa-solid fa-sparkles" style="color: #facc15;"></i> Parent Portal 2.0 <span class="badge-new-pill">NEW</span>
         </button>
         <button id="tab-recommend-btn" class="nav-tab-btn">
-          <i class="fa-solid fa-house-user"></i> Classic Portal
+          <i class="fa-solid fa-house-user"></i> <span id="recommend-tab-label">Parent Portal</span>
         </button>
         <button id="tab-admin-btn" class="nav-tab-btn" style="display: none;">
           <i class="fa-solid fa-user-shield"></i> Admin Portal
@@ -93,14 +93,11 @@
         <button id="p2-subtab-btn-matchmaker" class="parent2-subnav-btn active" data-p2-view="matchmaker">
           <i class="fa-solid fa-wand-magic-sparkles"></i> 1. Matchmaker &amp; Discovery
         </button>
-        <button id="p2-subtab-btn-dualtrack" class="parent2-subnav-btn" data-p2-view="dualtrack">
-          <i class="fa-solid fa-layer-group"></i> 2. Dual-Track Admissions Hub
-        </button>
         <button id="p2-subtab-btn-matrix" class="parent2-subnav-btn" data-p2-view="matrix">
-          <i class="fa-solid fa-table-columns"></i> 3. Decision Matrix
+          <i class="fa-solid fa-table-columns"></i> 2. Decision Matrix
         </button>
         <button id="p2-subtab-btn-calendar" class="parent2-subnav-btn" data-p2-view="calendar">
-          <i class="fa-solid fa-calendar-check"></i> 4. Admissions Timeline &amp; Sync
+          <i class="fa-solid fa-calendar-check"></i> 3. Admissions Timeline &amp; Sync
         </button>
       </nav>
 
@@ -272,89 +269,7 @@
       </div>
 
 
-      <!-- ================= P2 SUBPANE 2: DUAL-TRACK ADMISSIONS HUB ================= -->
-      <div id="p2-view-dualtrack" class="parent2-view-section">
-        
-        <div class="dual-track-grid">
-          
-          <!-- Track 1: State & Grammar Application Hub (Max 6 Choices) -->
-          <div class="track-card">
-            <div class="track-header">
-              <div>
-                <div class="track-title">
-                  <i class="fa-solid fa-building-columns" style="color: #2563eb;"></i> Track 1: State CAF Application (Max 6)
-                </div>
-                <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.15rem;">
-                  Grammar &amp; Comprehensive schools ranked for your Local Authority CAF form.
-                </div>
-              </div>
-              <span id="p2-caf-quota-badge" class="track-badge-quota quota-ok">
-                <span id="p2-caf-used-count">0</span> / 6 Preferences
-              </span>
-            </div>
-
-            <!-- Strategy Health Check Banner -->
-            <div id="p2-caf-strategy-banner" class="caf-strategy-banner">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <strong id="p2-strategy-health-title"><i class="fa-solid fa-shield-halved"></i> CAF Strategy Health Check</strong>
-                <span id="p2-strategy-status-tag" style="font-weight: 700;">Building List</span>
-              </div>
-              <div id="p2-strategy-health-desc" style="margin-top: 0.25rem; font-size: 0.8rem;">
-                Add Grammar and Comprehensive schools to build a balanced mix of Reach, Target, and Safety preferences.
-              </div>
-              <div class="caf-strategy-metrics">
-                <span class="caf-strategy-pill strategy-reach">🎯 Reach: <strong id="p2-count-reach">0</strong></span>
-                <span class="caf-strategy-pill strategy-target">⚖️ Target: <strong id="p2-count-target">0</strong></span>
-                <span class="caf-strategy-pill strategy-safety">🛡️ Safety: <strong id="p2-count-safety">0</strong></span>
-              </div>
-            </div>
-
-            <!-- Quick Add to CAF Search -->
-            <div style="margin-bottom: 1rem; position: relative;">
-              <input type="text" id="p2-caf-add-search" placeholder="Search school to add to State CAF slot..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem;">
-              <div id="p2-caf-add-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 50; display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);"></div>
-            </div>
-
-            <!-- 6 Numbered Slot Cards -->
-            <div id="p2-caf-slots-list" class="caf-slots-list">
-              <!-- Rendered via JS (6 slots) -->
-            </div>
-          </div>
-
-          <!-- Track 2: Independent Direct Admissions Tracker (Unlimited) -->
-          <div class="track-card">
-            <div class="track-header">
-              <div>
-                <div class="track-title">
-                  <i class="fa-solid fa-graduation-cap" style="color: #7c3aed;"></i> Track 2: Independent Direct (Unlimited)
-                </div>
-                <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.15rem;">
-                  Fee-paying &amp; bursary schools applied to directly with no statutory limits.
-                </div>
-              </div>
-              <span class="track-badge-quota" style="background: #f3e8ff; color: #7c3aed; border: 1px solid #e9d5ff;">
-                <span id="p2-indep-count">0</span> Schools
-              </span>
-            </div>
-
-            <!-- Quick Add to Independent Search -->
-            <div style="margin-bottom: 1rem; position: relative;">
-              <input type="text" id="p2-indep-add-search" placeholder="Search independent school to track..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem;">
-              <div id="p2-indep-add-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 50; display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);"></div>
-            </div>
-
-            <!-- Independent Schools List Container -->
-            <div id="p2-indep-list-container" style="display: flex; flex-direction: column; gap: 0.65rem;">
-              <!-- Rendered via JS -->
-            </div>
-          </div>
-
-        </div>
-
-      </div>
-
-
-      <!-- ================= P2 SUBPANE 3: SIDE-BY-SIDE DECISION MATRIX ================= -->
+      <!-- ================= P2 SUBPANE 2: SIDE-BY-SIDE DECISION MATRIX ================= -->
       <div id="p2-view-matrix" class="parent2-view-section">
         <div class="decision-matrix-card">
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.75rem;">
@@ -378,7 +293,7 @@
       </div>
 
 
-      <!-- ================= P2 SUBPANE 4: ADMISSIONS TIMELINE & CALENDAR ================= -->
+      <!-- ================= P2 SUBPANE 3: ADMISSIONS TIMELINE & CALENDAR ================= -->
       <div id="p2-view-calendar" class="parent2-view-section">
         <div class="decision-matrix-card">
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.25rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1rem;">
@@ -457,6 +372,14 @@
             <div class="side-tab-info">
               <span class="side-tab-title">Admission Timeline</span>
               <span class="side-tab-desc">Exam dates &amp; deadlines</span>
+            </div>
+          </button>
+
+          <button class="admin-side-tab classic-side-tab" data-target-classic-tab="dualtrack" id="classic-side-tab-dualtrack" title="Dual Tracking">
+            <span class="side-tab-icon"><i class="fa-solid fa-layer-group" style="color: #7c3aed;"></i></span>
+            <div class="side-tab-info">
+              <span class="side-tab-title">Dual Tracking</span>
+              <span class="side-tab-desc">State CAF &amp; Independent</span>
             </div>
           </button>
         </aside>
@@ -746,6 +669,85 @@
               <div id="calendar-view-container">
                 <!-- Rendered by JS -->
               </div>
+            </div>
+          </div>
+
+          <!-- SUBPANE 4: DUAL TRACKING -->
+          <div id="classic-subpane-dualtrack" class="classic-subpane" style="display: none;">
+            <div class="dual-track-grid">
+              
+              <!-- Track 1: State & Grammar Application Hub (Max 6 Choices) -->
+              <div class="track-card">
+                <div class="track-header">
+                  <div>
+                    <div class="track-title">
+                      <i class="fa-solid fa-building-columns" style="color: #2563eb;"></i> Track 1: State CAF Application (Max 6)
+                    </div>
+                    <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.15rem;">
+                      Grammar &amp; Comprehensive schools ranked for your Local Authority CAF form.
+                    </div>
+                  </div>
+                  <span id="p2-caf-quota-badge" class="track-badge-quota quota-ok">
+                    <span id="p2-caf-used-count">0</span> / 6 Preferences
+                  </span>
+                </div>
+
+                <!-- Strategy Health Check Banner -->
+                <div id="p2-caf-strategy-banner" class="caf-strategy-banner">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong id="p2-strategy-health-title"><i class="fa-solid fa-shield-halved"></i> CAF Strategy Health Check</strong>
+                    <span id="p2-strategy-status-tag" style="font-weight: 700;">Building List</span>
+                  </div>
+                  <div id="p2-strategy-health-desc" style="margin-top: 0.25rem; font-size: 0.8rem;">
+                    Add Grammar and Comprehensive schools to build a balanced mix of Reach, Target, and Safety preferences.
+                  </div>
+                  <div class="caf-strategy-metrics">
+                    <span class="caf-strategy-pill strategy-reach">🎯 Reach: <strong id="p2-count-reach">0</strong></span>
+                    <span class="caf-strategy-pill strategy-target">⚖️ Target: <strong id="p2-count-target">0</strong></span>
+                    <span class="caf-strategy-pill strategy-safety">🛡️ Safety: <strong id="p2-count-safety">0</strong></span>
+                  </div>
+                </div>
+
+                <!-- Quick Add to CAF Search -->
+                <div style="margin-bottom: 1rem; position: relative;">
+                  <input type="text" id="p2-caf-add-search" placeholder="Search school to add to State CAF slot..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem;">
+                  <div id="p2-caf-add-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 50; display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);"></div>
+                </div>
+
+                <!-- 6 Numbered Slot Cards -->
+                <div id="p2-caf-slots-list" class="caf-slots-list">
+                  <!-- Rendered via JS (6 slots) -->
+                </div>
+              </div>
+
+              <!-- Track 2: Independent Direct Admissions Tracker (Unlimited) -->
+              <div class="track-card">
+                <div class="track-header">
+                  <div>
+                    <div class="track-title">
+                      <i class="fa-solid fa-graduation-cap" style="color: #7c3aed;"></i> Track 2: Independent Direct (Unlimited)
+                    </div>
+                    <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.15rem;">
+                      Fee-paying &amp; bursary schools applied to directly with no statutory limits.
+                    </div>
+                  </div>
+                  <span class="track-badge-quota" style="background: #f3e8ff; color: #7c3aed; border: 1px solid #e9d5ff;">
+                    <span id="p2-indep-count">0</span> Schools
+                  </span>
+                </div>
+
+                <!-- Quick Add to Independent Search -->
+                <div style="margin-bottom: 1rem; position: relative;">
+                  <input type="text" id="p2-indep-add-search" placeholder="Search independent school to track..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem;">
+                  <div id="p2-indep-add-suggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 50; display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);"></div>
+                </div>
+
+                <!-- Independent Schools List Container -->
+                <div id="p2-indep-list-container" style="display: flex; flex-direction: column; gap: 0.65rem;">
+                  <!-- Rendered via JS -->
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -1362,6 +1364,41 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
           <!-- ================= TAB 6: SETTINGS ================= -->
           <div id="admin-subpane-settings" class="admin-subpane" style="display: none;">
             
+            <!-- Feature & Portal Visibility Settings -->
+            <div class="admin-card" style="margin-bottom: 1.5rem;">
+              <div class="card-title-bar">
+                <h3><i class="fa-solid fa-toggle-on" style="color: #4f46e5;"></i> Feature &amp; Portal Visibility Settings</h3>
+                <span id="p2-toggle-status-badge" style="font-size: 0.82rem; font-weight: 700; color: #dc2626; background: #fee2e2; padding: 0.25rem 0.65rem; border-radius: 6px;">
+                  Status: Disabled (Hidden)
+                </span>
+              </div>
+              <p class="helper-text">Control which parent-facing portals and experimental capabilities are accessible to parents and public navigation.</p>
+              
+              <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.25rem; margin-top: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                  <div style="max-width: 680px;">
+                    <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.35rem;">
+                      <i class="fa-solid fa-sparkles" style="color: #f59e0b; font-size: 1.15rem;"></i>
+                      <strong style="font-size: 1.02rem; color: #1e293b;">Parent Portal 2.0 (Dual-Track Admissions Hub)</strong>
+                      <span class="badge-new-pill" style="font-size: 0.68rem;">NEW</span>
+                    </div>
+                    <p style="font-size: 0.86rem; color: #64748b; margin: 0; line-height: 1.45;">
+                      When <strong>enabled</strong>, authenticated parents can access Parent Portal 2.0 (Matchmaker Wizard, 6-preference State CAF ranking, Independent school tracking, and Calendar sync). When <strong>disabled (default)</strong>, Parent Portal 2.0 is completely hidden and all users use the Classic Parent Portal.
+                    </p>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 1rem;">
+                    <label class="switch-toggle" title="Toggle Parent Portal 2.0">
+                      <input type="checkbox" id="setting-parent2-enabled">
+                      <span class="slider"></span>
+                    </label>
+                    <button type="button" id="btn-save-system-settings" class="btn btn-primary" style="font-size: 0.86rem; padding: 0.5rem 1.1rem; display: flex; align-items: center; gap: 0.4rem;">
+                      <i class="fa-solid fa-floppy-disk"></i> Save Portal Settings
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div class="admin-card">
               <div class="card-title-bar">
                 <h3><i class="fa-solid fa-sliders" style="color: #4f46e5;"></i> Recommendation Algorithm Weights Customizer</h3>

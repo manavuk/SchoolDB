@@ -787,6 +787,31 @@ app.post('/api/recommendation-settings', (req, res) => {
   }
 });
 
+// GET /api/system-settings - Get system and feature configuration settings
+app.get('/api/system-settings', (req, res) => {
+  try {
+    const settings = db.getSystemSettings();
+    res.json(settings);
+  } catch (err) {
+    res.json({ parentPortal2Enabled: false });
+  }
+});
+
+// POST /api/system-settings - Update system and feature configuration settings (Admin only)
+app.post('/api/system-settings', (req, res) => {
+  try {
+    const settings = req.body;
+    if (!settings || typeof settings !== 'object') {
+      return res.status(400).json({ error: 'Valid settings payload is required' });
+    }
+    const updated = db.saveSystemSettings(settings);
+    res.json({ message: 'System settings updated successfully', settings: updated });
+  } catch (err) {
+    console.error('Failed to save system settings:', err);
+    res.status(500).json({ error: 'Failed to save system settings' });
+  }
+});
+
 // Helper to parse cookies from incoming HTTP request
 function parseCookies(req) {
   const list = {};

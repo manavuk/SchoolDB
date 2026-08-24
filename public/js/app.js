@@ -15,8 +15,26 @@ let parent2State = {
   cafList: [],          // Up to 6 State/Grammar schools in preference rank order (1st to 6th)
   independentList: [],  // Unlimited independent schools
   parentNotes: {},      // schoolId -> { notes, bursary, scholarship, openDay }
-  activeSubView: 'matchmaker' // 'matchmaker', 'dualtrack', 'matrix', 'calendar'
+  activeSubView: 'matchmaker' // 'matchmaker', 'matrix', 'calendar'
 };
+
+// System & Feature Flag Settings
+let systemSettings = {
+  parentPortal2Enabled: false
+};
+
+// Fetch global system configuration & feature flags
+async function fetchSystemSettings() {
+  try {
+    const res = await fetch('/api/system-settings');
+    if (res.ok) {
+      const data = await res.json();
+      systemSettings = { ...systemSettings, ...data };
+    }
+  } catch (err) {
+    console.error('Failed to fetch system settings:', err);
+  }
+}
 
 // Helper to show non-blocking persistent toast notifications
 function showToast(message, type = 'success', duration = 5000) {
@@ -73,10 +91,11 @@ async function initApp() {
   // 3. Register DOM event listeners
   setupEventListeners();
 
-  // 4. Fetch initial school catalog & stats before UI permission routing
+  // 4. Fetch initial school catalog, stats & system settings before UI permission routing
+  await fetchSystemSettings();
   await fetchStats();
   await loadSchools();
-  loadRecWeights();
+  loadAdminSettings();
   populateManualMergeDropdowns();
 
   // 5. Fetch user portfolio & load application data
@@ -405,6 +424,7 @@ function applyPermissionsUI() {
   const adminTabBtn = document.getElementById('tab-admin-btn');
   const parent2TabBtn = document.getElementById('tab-parent2-btn');
   const recommendTabBtn = document.getElementById('tab-recommend-btn');
+  const recommendTabLabel = document.getElementById('recommend-tab-label');
 
   // Enforce tab access permissions: Admin Portal hidden unless session holds explicit permission
   const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
@@ -414,17 +434,29 @@ function applyPermissionsUI() {
 
   updateAuthUserBadge();
 
-  if (!currentUserAccount) {
+  const isP2Enabled = Boolean(systemSettings.parentPortal2Enabled);
+
+  // Update Classic/Parent Portal label dynamically
+  if (recommendTabLabel) {
+    recommendTabLabel.textContent = isP2Enabled ? 'Classic Portal' : 'Parent Portal';
+  }
+
+  if (!currentUserAccount || !isP2Enabled) {
     if (parent2TabBtn) parent2TabBtn.style.display = 'none';
   } else {
     if (parent2TabBtn) parent2TabBtn.style.display = 'inline-flex';
   }
 
-  // Landing page hierarchy: Land on Admin Portal if admin, otherwise land on Parent Portal 2.0 (New Default)
+  // Landing page hierarchy:
+  // 1. Admin lands on Admin Portal
+  // 2. If Parent Portal 2.0 is enabled and user is logged in, land on Parent Portal 2.0
+  // 3. Otherwise land on Classic Portal (recommend)
   if (canViewAdmin) {
     switchTab('admin');
-  } else {
+  } else if (isP2Enabled && currentUserAccount) {
     switchTab('parent2');
+  } else {
+    switchTab('recommend');
   }
 }
 
@@ -440,6 +472,14 @@ function switchTab(tabName) {
   const adminContent = document.getElementById('admin-tab-content') || document.getElementById('admin-content');
   const directoryContent = document.getElementById('directory-tab-content') || document.getElementById('directory-content');
 
+  const isP2Enabled = Boolean(systemSettings.parentPortal2Enabled);
+  const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
+
+  // If tabName is parent2 but feature is disabled and not admin, route to Classic Portal
+  if (tabName === 'parent2' && !isP2Enabled && !canViewAdmin) {
+    tabName = 'recommend';
+  }
+
   // Reset tab button states
   [parent2TabBtn, recommendTabBtn, adminTabBtn, directoryTabBtn].forEach(btn => {
     if (btn) btn.classList.remove('active');
@@ -449,8 +489,6 @@ function switchTab(tabName) {
   [parent2Content, recommendContent, adminContent, directoryContent].forEach(c => {
     if (c) c.style.display = 'none';
   });
-
-  const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
 
   if (tabName === 'parent2') {
     if (parent2TabBtn) parent2TabBtn.classList.add('active');
@@ -473,11 +511,18 @@ function switchTab(tabName) {
     switchAdminSubTab(targetSubTab);
     loadAdminFieldReports();
   } else {
-    // Default fallback to Parent Portal 2.0
-    if (parent2TabBtn) parent2TabBtn.classList.add('active');
-    if (parent2Content) parent2Content.style.display = 'block';
-    renderParent2Views();
-    fetchRecommendations();
+    // Default fallback: If P2 enabled, parent2; otherwise recommend
+    if (isP2Enabled) {
+      if (parent2TabBtn) parent2TabBtn.classList.add('active');
+      if (parent2Content) parent2Content.style.display = 'block';
+      renderParent2Views();
+      fetchRecommendations();
+    } else {
+      if (recommendTabBtn) recommendTabBtn.classList.add('active');
+      if (recommendContent) recommendContent.style.display = 'block';
+      const targetSubTab = localStorage.getItem('classic_active_subtab') || 'find';
+      switchClassicSubTab(targetSubTab);
+    }
   }
 }
 
@@ -508,6 +553,8 @@ function switchClassicSubTab(subTabName) {
     fetchRecommendations();
   } else if (subTabName === 'shortlist' || subTabName === 'timeline') {
     renderUserDashboard();
+  } else if (subTabName === 'dualtrack') {
+    renderDualTrackHub();
   }
 }
 
@@ -587,7 +634,7 @@ function switchAdminSubTab(subTabName) {
   } else if (subTabName === 'corrections') {
     loadAdminFieldReports();
   } else if (subTabName === 'settings') {
-    loadRecWeights();
+    loadAdminSettings();
   }
 }
 
@@ -1604,6 +1651,18 @@ function setupEventListeners() {
 
   const weightsForm = document.getElementById('rec-weights-form');
   if (weightsForm) weightsForm.addEventListener('submit', saveRecWeights);
+
+  const btnSaveSystemSettings = document.getElementById('btn-save-system-settings');
+  if (btnSaveSystemSettings) {
+    btnSaveSystemSettings.addEventListener('click', saveSystemSettingsHandler);
+  }
+
+  const p2ToggleInput = document.getElementById('setting-parent2-enabled');
+  if (p2ToggleInput) {
+    p2ToggleInput.addEventListener('change', () => {
+      saveSystemSettingsHandler();
+    });
+  }
 
 
 
@@ -3689,6 +3748,72 @@ async function saveRecWeights(e) {
   }
 }
 
+// Load Admin Portal Settings (Rec weights & System Feature toggles)
+async function loadAdminSettings() {
+  await loadRecWeights();
+  await loadSystemSettings();
+}
+
+async function loadSystemSettings() {
+  await fetchSystemSettings();
+  updateSystemSettingsUI();
+}
+
+function updateSystemSettingsUI() {
+  const p2Toggle = document.getElementById('setting-parent2-enabled');
+  const statusBadge = document.getElementById('p2-toggle-status-badge');
+  const isEnabled = Boolean(systemSettings.parentPortal2Enabled);
+
+  if (p2Toggle) {
+    p2Toggle.checked = isEnabled;
+  }
+
+  if (statusBadge) {
+    if (isEnabled) {
+      statusBadge.textContent = 'Status: Enabled (Visible to Parents)';
+      statusBadge.style.color = '#166534';
+      statusBadge.style.background = '#dcfce7';
+    } else {
+      statusBadge.textContent = 'Status: Disabled (Hidden from Parents)';
+      statusBadge.style.color = '#dc2626';
+      statusBadge.style.background = '#fee2e2';
+    }
+  }
+}
+
+async function saveSystemSettingsHandler() {
+  const p2Toggle = document.getElementById('setting-parent2-enabled');
+  const isEnabled = p2Toggle ? p2Toggle.checked : false;
+
+  try {
+    const res = await fetch('/api/system-settings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ parentPortal2Enabled: isEnabled })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.settings) {
+        systemSettings = { ...systemSettings, ...data.settings };
+      } else {
+        systemSettings.parentPortal2Enabled = isEnabled;
+      }
+      updateSystemSettingsUI();
+      applyPermissionsUI();
+      showToast(`Parent Portal 2.0 is now ${isEnabled ? 'enabled' : 'hidden'}!`, 'success');
+    } else {
+      showToast('Failed to save portal settings', 'error');
+    }
+  } catch (err) {
+    console.error('Error saving system settings:', err);
+    showToast('Error saving portal settings', 'error');
+  }
+}
+
 // Fetch recommendations based on userSelectedSchools, location, and absolute gender filter
 // Load Parent Recommendation Profile & Preferences
 async function loadUserRecProfile() {
@@ -4665,8 +4790,6 @@ function renderParent2Views() {
   renderParent2HeaderStats();
   if (parent2State.activeSubView === 'matchmaker') {
     fetchRecommendations();
-  } else if (parent2State.activeSubView === 'dualtrack') {
-    renderDualTrackHub();
   } else if (parent2State.activeSubView === 'matrix') {
     renderDecisionMatrix();
   } else if (parent2State.activeSubView === 'calendar') {
@@ -4916,7 +5039,8 @@ async function addSchoolToStateCaf(school) {
 
   if (parent2State.cafList.length >= 6) {
     if (confirm(`You have reached the 6-school State CAF limit!\n\nWould you like to open the Dual-Track Admissions Hub to swap an existing choice for ${school.name}?`)) {
-      switchParent2SubView('dualtrack');
+      switchPrimaryTab('recommend');
+      switchClassicSubTab('dualtrack');
     }
     return;
   }

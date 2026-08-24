@@ -197,6 +197,14 @@ function initTables() {
     );
   `);
 
+  // 5b. System Settings table (Feature flags & Admin configuration)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+
   // 6. Persistent Sessions table (30-day session lifetime)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -571,12 +579,14 @@ function recordToUser(row) {
       if (Array.isArray(parsed)) permissions = parsed;
     } catch (e) {}
   }
+  const isAdmin = permissions.includes('admin:portal') || row.email === 'admin@edulondon.sch.uk' || row.email === 'aa@bb.cc';
   return {
     id: row.id,
     name: row.name,
     email: row.email,
     password: row.password,
     permissions,
+    role: isAdmin ? 'admin' : 'user',
     createdAt: row.createdAt
   };
 }
@@ -820,6 +830,50 @@ function saveRecSettings(weights) {
   `);
   stmt.run('default', JSON.stringify(weights));
   return getRecSettings();
+}
+
+// System Settings (Feature Flags & Admin Configuration)
+function getSystemSettings() {
+  const DEFAULT_SETTINGS = {
+    parentPortal2Enabled: false
+  };
+
+  const sqlite = getDb();
+  const rows = sqlite.prepare('SELECT key, value FROM system_settings').all();
+  const result = { ...DEFAULT_SETTINGS };
+  for (const row of rows) {
+    try {
+      result[row.key] = JSON.parse(row.value);
+    } catch (e) {
+      result[row.key] = row.value;
+    }
+  }
+  return result;
+}
+
+function saveSystemSettings(settings) {
+  const sqlite = getDb();
+  const stmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO system_settings (key, value)
+    VALUES (?, ?)
+  `);
+
+  sqlite.exec('BEGIN TRANSACTION;');
+  try {
+    for (const [k, v] of Object.entries(settings)) {
+      stmt.run(k, JSON.stringify(v));
+    }
+    sqlite.exec('COMMIT;');
+  } catch (err) {
+    sqlite.exec('ROLLBACK;');
+    throw err;
+  }
+  return getSystemSettings();
+}
+
+function getSystemSetting(key, defaultValue = null) {
+  const settings = getSystemSettings();
+  return settings[key] !== undefined ? settings[key] : defaultValue;
 }
 
 // Persistent Session Storage (30 days)
@@ -1172,6 +1226,9 @@ module.exports = {
   insertReviewedPairsBulk,
   getRecSettings,
   saveRecSettings,
+  getSystemSettings,
+  saveSystemSettings,
+  getSystemSetting,
   saveSession,
   getSession,
   deleteSession,
