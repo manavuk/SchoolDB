@@ -405,8 +405,12 @@ function schoolToParams(s) {
   const gcseAttainment8 = (s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined && s.gcseAttainment8 !== '') ? parseFloat(s.gcseAttainment8) : null;
   const ebaccAveragePointScore = (s.ebaccAveragePointScore !== null && s.ebaccAveragePointScore !== undefined && s.ebaccAveragePointScore !== '') ? parseFloat(s.ebaccAveragePointScore) : null;
 
+  const schoolId = (s.id && s.id.toString().trim())
+    ? s.id.toString().trim()
+    : (s.urn ? `sch-gov-${s.urn}` : `sch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+
   return {
-    id: s.id,
+    id: schoolId,
     name: s.name || '',
     urn: s.urn || '',
     la: s.la || '',
@@ -1204,6 +1208,820 @@ function getFieldConfidenceStats(schoolId, userId = null) {
   return confidenceStats;
 }
 
+// ----------------------------------------------------
+// Date Anomaly & Timeline Quality Analysis Engine
+// ----------------------------------------------------
+
+const TIMELINE_MONTHS = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12
+};
+
+function parseTimelineDate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const s = dateStr.trim();
+  const lowerStr = s.toLowerCase();
+
+  if (
+    ['tbc', 'n/a', '—', '-', 'none', 'tbd'].includes(lowerStr) ||
+    !s ||
+    lowerStr.startsWith('n/a') ||
+    lowerStr.startsWith('none') ||
+    lowerStr.startsWith('tbc') ||
+    lowerStr.startsWith('tbd') ||
+    lowerStr.startsWith('open year-round') ||
+    lowerStr.startsWith('rolling') ||
+    lowerStr.startsWith('bespoke') ||
+    lowerStr.includes('non-selective') ||
+    lowerStr.startsWith('after assessment') ||
+    lowerStr.startsWith('after exam') ||
+    lowerStr.startsWith('following') ||
+    lowerStr.startsWith('same day') ||
+    lowerStr.startsWith('same date') ||
+    lowerStr.startsWith('concurrent') ||
+    lowerStr.startsWith('with interview') ||
+    lowerStr.startsWith('with exam')
+  ) {
+    return null;
+  }
+
+  // Split out trailing target entry year notes like "— for Sept 2029 entry"
+  const cleanStr = s.replace(/—\s*for\s+Sept\w*\s+202\d\s+entry/i, '').trim();
+
+  // Find year associated with the main event
+  const yearMatches = cleanStr.match(/\b(202\d)\b/g);
+  let year = yearMatches ? parseInt(yearMatches[0], 10) : null;
+
+  // Find month
+  let month = null;
+  const lower = cleanStr.toLowerCase();
+  for (const [mName, mNum] of Object.entries(TIMELINE_MONTHS)) {
+    const reg = new RegExp(`\\b${mName}\\b`, 'i');
+    if (reg.test(lower)) {
+      month = mNum;
+      break;
+    }
+  }
+
+  // Seasons / terms fallback
+  if (!month) {
+    if (lower.includes('autumn')) month = 10;
+    else if (lower.includes('spring')) month = 2;
+    else if (lower.includes('summer')) month = 6;
+  }
+
+  if (!year) {
+    if (month && month >= 8) year = 2026;
+    else if (month && month <= 4) year = 2027;
+    else year = 2026;
+  }
+
+  // Find day
+  let day = 15;
+  const dayMatch = cleanStr.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/);
+  if (dayMatch) {
+    const d = parseInt(dayMatch[1], 10);
+    if (d >= 1 && d <= 31 && d !== year) {
+      day = d;
+    }
+  }
+
+  return {
+    year,
+    month: month || 6,
+    day,
+    timestamp: new Date(year, (month || 6) - 1, day).getTime(),
+    raw: s
+  };
+}
+
+function analyzeSchoolAdmissionDates(school) {
+  const dates = school.entranceExamDates ? (typeof school.entranceExamDates === 'string' ? JSON.parse(school.entranceExamDates) : school.entranceExamDates) : {};
+  const p = school.pillaiDetails ? (typeof school.pillaiDetails === 'string' ? JSON.parse(school.pillaiDetails) : school.pillaiDetails) : {};
+  const k = school.kpsDetails ? (typeof school.kpsDetails === 'string' ? JSON.parse(school.kpsDetails) : school.kpsDetails) : {};
+
+  // Extract raw dates across all sources
+  const regOpenRaw = p.registrationOpens || dates.registrationOpen || null;
+  const regCloseRaw = p.registrationDeadline || k.registrationCloseDate || k.registrationCloses || dates.registrationDeadline || null;
+  const exam1Raw = p.firstExamDate || k.firstExamDate || dates.examDate || null;
+  const exam2Raw = p.secondExamDate || k.secondStageExamDate || dates.secondExamDate || null;
+  const results1Raw = p.firstExamResults || k.firstStageResult || dates.resultsDate || null;
+  const results2Raw = p.secondExamResults || k.secondStageResult || null;
+  const interviewRaw = p.interview || k.interviewGroupActivity || k.interviewsDate || dates.interviewInfo || null;
+  const offerRaw = p.offersAcceptance || k.offerDate || null;
+  const offerAcceptRaw = k.offerAcceptByDate || null;
+
+  // Check if school has any admissions dates
+  const hasAnyDate = [regOpenRaw, regCloseRaw, exam1Raw, exam2Raw, results1Raw, interviewRaw, offerRaw, offerAcceptRaw]
+    .some(v => v && typeof v === 'string' && !['tbc', 'n/a', '—', '-', ''].includes(v.trim().toLowerCase()));
+
+  if (!hasAnyDate) {
+    return null; // School has no admissions timeline data
+  }
+
+  // Parse milestones
+  const pRegOpen = parseTimelineDate(regOpenRaw);
+  const pRegClose = parseTimelineDate(regCloseRaw);
+  const pExam1 = parseTimelineDate(exam1Raw);
+  const pExam2 = parseTimelineDate(exam2Raw);
+  const pResults1 = parseTimelineDate(results1Raw);
+  const pInterview = parseTimelineDate(interviewRaw);
+  const pOffer = parseTimelineDate(offerRaw);
+  const pOfferAccept = parseTimelineDate(offerAcceptRaw);
+
+  const anomalies = [];
+  let penalty = 0;
+
+  // 1. Chronological Inversions Check
+  if (pRegOpen && pRegClose && pRegOpen.timestamp > pRegClose.timestamp) {
+    anomalies.push({
+      type: 'CHRONO_INVERSION',
+      severity: 'high',
+      field: 'registrationOpen',
+      message: `Registration Opens (${regOpenRaw}) is after Registration Deadline (${regCloseRaw})`,
+      affected: ['registrationOpen', 'registrationDeadline']
+    });
+    penalty += 35;
+  }
+
+  if (pRegClose && pExam1 && (pRegClose.timestamp - pExam1.timestamp > 2 * 86400000)) {
+    anomalies.push({
+      type: 'CHRONO_INVERSION',
+      severity: 'high',
+      field: 'registrationDeadline',
+      message: `Registration Deadline (${regCloseRaw}) is after 1st Stage Exam (${exam1Raw})`,
+      affected: ['registrationDeadline', 'examDate']
+    });
+    penalty += 30;
+  }
+
+  if (pExam1 && pResults1 && pExam1.timestamp > pResults1.timestamp) {
+    const isOfferString = /national offer/i.test(results1Raw) || /march 2027/i.test(results1Raw);
+    if (!isOfferString) {
+      anomalies.push({
+        type: 'CHRONO_INVERSION',
+        severity: 'high',
+        field: 'examDate',
+        message: `1st Stage Exam (${exam1Raw}) is after Exam Results (${results1Raw})`,
+        affected: ['examDate', 'resultsDate']
+      });
+      penalty += 30;
+    }
+  }
+
+  if (pExam1 && pExam2 && pExam1.timestamp > pExam2.timestamp) {
+    anomalies.push({
+      type: 'CHRONO_INVERSION',
+      severity: 'high',
+      field: 'secondExamDate',
+      message: `1st Stage Exam (${exam1Raw}) is after 2nd Stage Exam (${exam2Raw})`,
+      affected: ['examDate', 'secondExamDate']
+    });
+    penalty += 25;
+  }
+
+  // 2. Outdated Years Check (2023/2024 historical references)
+  const dateEntries = [
+    { field: 'registrationOpen', val: regOpenRaw },
+    { field: 'registrationDeadline', val: regCloseRaw },
+    { field: 'examDate', val: exam1Raw },
+    { field: 'secondExamDate', val: exam2Raw },
+    { field: 'resultsDate', val: results1Raw },
+    { field: 'interviewInfo', val: interviewRaw },
+    { field: 'offersAcceptance', val: offerRaw }
+  ];
+
+  for (const de of dateEntries) {
+    if (de.val && typeof de.val === 'string') {
+      if (/\b(2023|2024)\b/.test(de.val)) {
+        anomalies.push({
+          type: 'OUTDATED_CYCLE',
+          severity: 'medium',
+          field: de.field,
+          message: `Historical past year (2023/2024) referenced in ${de.field}: "${de.val}"`,
+          affected: [de.field]
+        });
+        penalty += 20;
+      }
+    }
+  }
+
+  // 3. Source Discrepancies (Pillai vs KPS)
+  if (p.firstExamDate && k.firstExamDate && p.firstExamDate !== k.firstExamDate) {
+    const pD = parseTimelineDate(p.firstExamDate);
+    const kD = parseTimelineDate(k.firstExamDate);
+    if (pD && kD && Math.abs(pD.timestamp - kD.timestamp) > 7 * 86400000) {
+      anomalies.push({
+        type: 'SOURCE_CONFLICT',
+        severity: 'medium',
+        field: 'examDate',
+        message: `Conflicting exam dates between sources: Pillai ("${p.firstExamDate}") vs KPS ("${k.firstExamDate}")`,
+        affected: ['examDate']
+      });
+      penalty += 15;
+    }
+  }
+
+  // Calculate Base Confidence Score (100 down to 20)
+  let qualityScore = Math.max(20, Math.min(95, 90 - penalty));
+  if (anomalies.length === 0) qualityScore = 90;
+
+  // Generate Proposed Clean Dates for 2026/2027 Cycle
+  const isIndependent = school.schoolType === 'Independent' || (school.rawSchoolType && school.rawSchoolType.toLowerCase().includes('independent'));
+  const isGrammar = school.schoolType === 'Grammar' || (school.rawSchoolType && school.rawSchoolType.toLowerCase().includes('grammar'));
+
+  const proposedDates = {
+    registrationOpen: regOpenRaw || (isGrammar ? '1 May 2026' : (isIndependent ? 'June 2026' : '1 September 2026')),
+    registrationDeadline: regCloseRaw || (isGrammar ? 'July 2026' : (isIndependent ? 'November 2026' : '31 October 2026')),
+    examDate: exam1Raw || (isGrammar ? 'September 2026' : (isIndependent ? 'November/December 2026' : 'N/A')),
+    secondExamDate: exam2Raw || null,
+    resultsDate: results1Raw || (isGrammar ? 'Mid-October 2026' : (isIndependent ? 'December 2026 / January 2027' : '1 March 2027')),
+    interviewInfo: interviewRaw || (isIndependent ? 'January 2027' : null),
+    offersAcceptance: offerRaw || (isIndependent ? 'Offers mid-Feb 2027; accept early March 2027' : 'National Offer Day 1 March 2027')
+  };
+
+  // Correct specific inverted cases in proposed dates
+  if (pRegOpen && pRegClose && pRegOpen.timestamp > pRegClose.timestamp) {
+    if (pRegOpen.year === 2027 && pRegClose.year === 2026) {
+      proposedDates.registrationOpen = proposedDates.registrationOpen.replace(/2027/g, '2026');
+    } else if (proposedDates.registrationOpen.includes('1 June 2026') && proposedDates.registrationDeadline.includes('15 May 2026')) {
+      proposedDates.registrationOpen = '1 May 2026';
+      proposedDates.registrationDeadline = '15 June 2026';
+    } else {
+      proposedDates.registrationOpen = '1 May 2026';
+    }
+  }
+
+  // If registration open / close has 2027 for a 2026 autumn exam (e.g. Bexley consortium)
+  if (pRegClose && pExam1 && pRegClose.year === 2027 && pExam1.year === 2026) {
+    proposedDates.registrationOpen = '1 May 2026';
+    proposedDates.registrationDeadline = '3 July 2026 (SIF / 11+ Reg)';
+  }
+
+  // Grammar / Selective School with 31 October deadline vs September Exam (31 Oct is CAF deadline, 11+ is July)
+  if (pRegClose && pExam1 && pRegClose.timestamp >= pExam1.timestamp) {
+    if (isGrammar || proposedDates.examDate.toLowerCase().includes('september')) {
+      proposedDates.registrationOpen = '1 May 2026';
+      proposedDates.registrationDeadline = '10 July 2026 (11+ Registration; CAF 31 Oct)';
+    } else if (isIndependent) {
+      if (proposedDates.registrationDeadline.includes('10 November') || proposedDates.registrationDeadline.includes('November')) {
+        proposedDates.examDate = 'Late November / December 2026';
+      } else if (proposedDates.registrationDeadline.includes('31 October') || proposedDates.registrationDeadline.includes('October')) {
+        proposedDates.examDate = 'November/December 2026 (Year 6 Autumn Term)';
+      }
+    } else {
+      // General comprehensive/state with aptitude test
+      proposedDates.registrationDeadline = 'Early September 2026';
+    }
+  }
+
+  // Clean outdated year references in proposed
+  for (const [k, v] of Object.entries(proposedDates)) {
+    if (typeof v === 'string') {
+      proposedDates[k] = v
+        .replace(/\b2024\b/g, '2026')
+        .replace(/\b2023\b/g, '2026')
+        .replace(/\(was[^\)]+\)/gi, '')
+        .trim();
+    }
+  }
+
+  return {
+    schoolId: school.id,
+    schoolName: school.name,
+    schoolType: school.schoolType,
+    la: school.la,
+    region: school.region,
+    qualityScore,
+    confidenceLevel: qualityScore >= 80 ? 'High' : (qualityScore >= 60 ? 'Medium' : 'Low'),
+    anomaliesCount: anomalies.length,
+    anomalies,
+    currentDates: {
+      registrationOpen: regOpenRaw,
+      registrationDeadline: regCloseRaw,
+      examDate: exam1Raw,
+      secondExamDate: exam2Raw,
+      resultsDate: results1Raw,
+      interviewInfo: interviewRaw,
+      offersAcceptance: offerRaw
+    },
+    proposedDates
+  };
+}
+
+function getAllDateAnomalies() {
+  const sqlite = getDb();
+  const schools = sqlite.prepare('SELECT id, name, schoolType, rawSchoolType, la, region, entranceExamDates, pillaiDetails, kpsDetails FROM schools').all();
+  
+  const allAnalyzed = schools.map(analyzeSchoolAdmissionDates).filter(Boolean);
+  const anomaliesOnly = allAnalyzed.filter(s => s.anomaliesCount > 0);
+
+  const stats = {
+    totalSchoolsWithDates: allAnalyzed.length,
+    totalAnomalies: anomaliesOnly.length,
+    chronoInversions: anomaliesOnly.filter(s => s.anomalies.some(a => a.type === 'CHRONO_INVERSION')).length,
+    outdatedCycles: anomaliesOnly.filter(s => s.anomalies.some(a => a.type === 'OUTDATED_CYCLE')).length,
+    sourceConflicts: anomaliesOnly.filter(s => s.anomalies.some(a => a.type === 'SOURCE_CONFLICT')).length,
+    avgQualityScore: allAnalyzed.length > 0 ? Math.round(allAnalyzed.reduce((acc, s) => acc + s.qualityScore, 0) / allAnalyzed.length) : 0
+  };
+
+  return { stats, anomalies: anomaliesOnly, allSchools: allAnalyzed };
+}
+
+function applyDateAnomalyFix(schoolId, proposedDates, reviewedBy = 'Admin Reviewer') {
+  const sqlite = getDb();
+  const school = getSchoolById(schoolId);
+  if (!school) return null;
+
+  const existingDates = school.entranceExamDates || {};
+  const updatedDates = { ...existingDates, ...proposedDates };
+
+  let pillai = school.pillaiDetails || {};
+  if (proposedDates.registrationOpen) pillai.registrationOpens = proposedDates.registrationOpen;
+  if (proposedDates.registrationDeadline) pillai.registrationDeadline = proposedDates.registrationDeadline;
+  if (proposedDates.examDate) pillai.firstExamDate = proposedDates.examDate;
+  if (proposedDates.secondExamDate) pillai.secondExamDate = proposedDates.secondExamDate;
+  if (proposedDates.resultsDate) pillai.firstExamResults = proposedDates.resultsDate;
+  if (proposedDates.offersAcceptance) pillai.offersAcceptance = proposedDates.offersAcceptance;
+
+  let kps = school.kpsDetails || {};
+  if (proposedDates.registrationDeadline) kps.registrationCloseDate = proposedDates.registrationDeadline;
+  if (proposedDates.examDate) kps.firstExamDate = proposedDates.examDate;
+  if (proposedDates.secondExamDate) kps.secondStageExamDate = proposedDates.secondExamDate;
+
+  sqlite.exec('BEGIN TRANSACTION;');
+  try {
+    const updateStmt = sqlite.prepare(`
+      UPDATE schools 
+      SET entranceExamDates = ?, pillaiDetails = ?, kpsDetails = ?
+      WHERE id = ?
+    `);
+    updateStmt.run(JSON.stringify(updatedDates), JSON.stringify(pillai), JSON.stringify(kps), schoolId);
+
+    // Remove legacy low-confidence downvotes and mark as admin reviewed high confidence
+    const deleteVotesStmt = sqlite.prepare('DELETE FROM field_confidence_votes WHERE schoolId = ? AND fieldName = ?');
+    const markReviewStmt = sqlite.prepare(`
+      INSERT OR REPLACE INTO admin_field_reviews (schoolId, fieldName, reviewedBy, reviewedAt)
+      VALUES (?, ?, ?, ?)
+    `);
+
+    const dateFieldNames = ['entranceExamDates', 'registrationOpen', 'registrationDeadline', 'examDate', 'secondExamDate', 'resultsDate', 'offersAcceptance'];
+    const now = new Date().toISOString();
+    for (const f of dateFieldNames) {
+      deleteVotesStmt.run(schoolId, f);
+      markReviewStmt.run(schoolId, f, reviewedBy, now);
+    }
+
+    sqlite.exec('COMMIT;');
+  } catch (e) {
+    sqlite.exec('ROLLBACK;');
+    throw e;
+  }
+
+  return getSchoolById(schoolId);
+}
+
+function applyAllDateAnomalyFixes(reviewedBy = 'Admin Auto-Fix') {
+  const { anomalies } = getAllDateAnomalies();
+  const updatedSchools = [];
+  for (const item of anomalies) {
+    const res = applyDateAnomalyFix(item.schoolId, item.proposedDates, reviewedBy);
+    if (res) updatedSchools.push(res);
+  }
+  return updatedSchools;
+}
+
+function autoSyncAllDateConfidenceScores() {
+  const sqlite = getDb();
+  const { allSchools } = getAllDateAnomalies();
+  const now = new Date().toISOString();
+
+  const insertVoteStmt = sqlite.prepare(`
+    INSERT OR REPLACE INTO field_confidence_votes (userId, schoolId, fieldName, vote, votedAt)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const deleteVoteStmt = sqlite.prepare(`
+    DELETE FROM field_confidence_votes WHERE userId = 'system_quality_auto' AND schoolId = ?
+  `);
+
+  sqlite.exec('BEGIN TRANSACTION;');
+  try {
+    for (const s of allSchools) {
+      deleteVoteStmt.run(s.schoolId);
+
+      const fieldNames = ['entranceExamDates', 'registrationOpen', 'registrationDeadline', 'examDate', 'resultsDate'];
+      if (s.anomaliesCount > 0) {
+        // Lower confidence for schools with anomalies
+        for (const fn of fieldNames) {
+          insertVoteStmt.run('system_quality_auto', s.schoolId, fn, -1, now);
+        }
+      } else {
+        // Boost confidence for schools with clean, verified timeline
+        for (const fn of fieldNames) {
+          insertVoteStmt.run('system_quality_auto', s.schoolId, fn, 1, now);
+        }
+      }
+    }
+    sqlite.exec('COMMIT;');
+  } catch (err) {
+    sqlite.exec('ROLLBACK;');
+    throw err;
+  }
+
+  return allSchools.length;
+}
+
+function getDataQualitySummary() {
+  const database = getDb();
+  const total = database.prepare('SELECT COUNT(*) as c FROM schools').get().c;
+
+  const schoolTypes = database.prepare('SELECT schoolType, COUNT(*) as c FROM schools GROUP BY schoolType').all();
+  const schoolTypeMap = {};
+  for (const st of schoolTypes) schoolTypeMap[st.schoolType || 'Unknown'] = st.c;
+
+  const blankExamTypes = database.prepare("SELECT COUNT(*) as c FROM schools WHERE entranceExamType IS NULL OR entranceExamType = ''").get().c;
+  const blankDates = database.prepare("SELECT COUNT(*) as c FROM schools WHERE entranceExamDates IS NULL OR entranceExamDates = '' OR entranceExamDates = '{}'").get().c;
+
+  const topExamTypes = database.prepare(`
+    SELECT entranceExamType, COUNT(*) as c
+    FROM schools
+    WHERE entranceExamType IS NOT NULL AND entranceExamType != ''
+    GROUP BY entranceExamType
+    ORDER BY c DESC
+    LIMIT 10
+  `).all();
+
+  const anomalyData = getAllDateAnomalies();
+
+  return {
+    totalSchools: total,
+    schoolTypes: schoolTypeMap,
+    examTypeCoverage: {
+      filled: total - blankExamTypes,
+      blank: blankExamTypes,
+      percentage: total > 0 ? Math.round(((total - blankExamTypes) / total) * 100) : 0
+    },
+    datesCoverage: {
+      filled: total - blankDates,
+      blank: blankDates,
+      percentage: total > 0 ? Math.round(((total - blankDates) / total) * 100) : 0
+    },
+    topExamTypes,
+    qualityStats: anomalyData.stats
+  };
+}
+
+function generateEnrichmentPreview() {
+  const database = getDb();
+  const matrixPath = path.join(__dirname, 'data', 'admissions_knowledge_matrix.json');
+  let matrix = { state_consortia: [], independent_consortia: [] };
+  try {
+    if (fs.existsSync(matrixPath)) {
+      matrix = JSON.parse(fs.readFileSync(matrixPath, 'utf8'));
+    }
+  } catch (e) {}
+
+  const standardStateDates = {
+    registrationOpen: '1 September 2026',
+    registrationDeadline: '31 October 2026 (Midnight CAF)',
+    examDate: 'N/A (Non-selective Admissions)',
+    secondExamDate: null,
+    resultsDate: '1 March 2027 (National Offer Day)',
+    interviewInfo: 'None (Statutory Admissions Code)',
+    offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+  };
+
+  const faithStateDates = {
+    registrationOpen: '1 September 2026',
+    registrationDeadline: '31 October 2026 (Midnight CAF & SIF Submission)',
+    examDate: 'N/A (Faith Priority Criteria)',
+    secondExamDate: null,
+    resultsDate: '1 March 2027 (National Offer Day)',
+    interviewInfo: 'None (Priest / Clergy / Faith SIF Reference)',
+    offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+  };
+
+  const bandingStateDates = {
+    registrationOpen: '1 September 2026',
+    registrationDeadline: '31 October 2026 (Midnight CAF)',
+    examDate: 'Late September / October 2026 (Non-selective Fair Banding Assessment)',
+    secondExamDate: null,
+    resultsDate: '1 March 2027 (National Offer Day)',
+    interviewInfo: 'None',
+    offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+  };
+
+  const aptitudeStateDates = {
+    registrationOpen: '1 September 2026',
+    registrationDeadline: '11 September 2026 (Specialist Aptitude Registration; CAF 31 Oct)',
+    examDate: 'October 2026 (Specialist Aptitude Assessment)',
+    secondExamDate: null,
+    resultsDate: '1 March 2027 (National Offer Day)',
+    interviewInfo: 'Audition / Practical Assessment (if applicable)',
+    offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+  };
+
+  const standardIndepDates = {
+    registrationOpen: '1 June 2026',
+    registrationDeadline: '6 November 2026',
+    examDate: 'January 2027 (Entrance Assessment & Written Papers)',
+    secondExamDate: null,
+    resultsDate: '12 February 2027',
+    interviewInfo: 'January 2027 (Individual interview & group taster session)',
+    offersAcceptance: 'Offers posted 12 Feb 2027; Acceptance deadline 5 March 2027'
+  };
+
+  const prepJuniorDates = {
+    registrationOpen: '1 June 2026',
+    registrationDeadline: '20 November 2026',
+    examDate: 'January 2027 (7+ / 8+ Junior Assessment & Classroom Activity)',
+    secondExamDate: null,
+    resultsDate: '12 February 2027',
+    interviewInfo: 'January 2027 (Informal student & parent meeting)',
+    offersAcceptance: 'Offers posted mid-Feb 2027; Acceptance deadline early March 2027'
+  };
+
+  const sendIndepDates = {
+    registrationOpen: 'Open Year-Round (Rolling Admissions)',
+    registrationDeadline: 'Rolling Basis (Subject to place availability)',
+    examDate: 'Bespoke Educational & Specialist Assessment',
+    secondExamDate: null,
+    resultsDate: 'Within 2-3 weeks of assessment',
+    interviewInfo: 'Taster days & multidisciplinary observation',
+    offersAcceptance: 'Formal offer made via Local Authority / EHCP agreement'
+  };
+
+  const swHertsDates = {
+    registrationOpen: '11 May 2026',
+    registrationDeadline: '19 June 2026',
+    examDate: '5 September 2026 (Academic Test) & 7 September 2026 (Music Aptitude)',
+    secondExamDate: null,
+    resultsDate: '16 October 2026',
+    interviewInfo: 'None',
+    offersAcceptance: 'CAF 31 Oct 2026; National Offer Day 1 March 2027; Accept by 15 March 2027'
+  };
+
+  const schools = database.prepare(`
+    SELECT s.*, g.ADMPOL, g.MINORGROUP, g.RELCHAR, g.SCHOOLTYPE as govSchoolType, g.AGELOW, g.AGEHIGH
+    FROM schools s
+    LEFT JOIN all_schools_gov g ON s.urn = g.URN
+  `).all();
+
+  const proposedChanges = [];
+  let typeChangesCount = 0;
+  let examTypeChangesCount = 0;
+  let dateChangesCount = 0;
+
+  for (const s of schools) {
+    const normName = (s.name || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    const sLa = (s.la || '').toLowerCase().trim();
+    const isGovSelective = s.ADMPOL === 'Selective';
+    const isIndependent = s.schoolType === 'Independent' || (s.MINORGROUP && s.MINORGROUP.includes('Independent'));
+
+    let proposedType = s.schoolType || 'Comprehensive';
+    let proposedRawType = s.rawSchoolType || '';
+    let proposedExamType = s.entranceExamType || '';
+    let proposedDatesObj = null;
+
+    // 1. SW Herts Consortium
+    const isSwHerts = normName.includes('watford grammar') || normName.includes('parmiter') || normName.includes('rickmansworth') || normName.includes('st clement danes') || normName.includes('queens');
+    if (isSwHerts) {
+      proposedType = 'Grammar';
+      proposedRawType = 'Grammar (Partially Selective Academy Converter)';
+      proposedExamType = '11+ SW Herts Consortium (GL Assessment & Music Aptitude Test)';
+      proposedDatesObj = swHertsDates;
+    } else if (isIndependent) {
+      // Independent School Logic
+      const ageLow = s.AGELOW !== null && s.AGELOW !== undefined ? parseInt(s.AGELOW, 10) : null;
+      const ageHigh = s.AGEHIGH !== null && s.AGEHIGH !== undefined ? parseInt(s.AGEHIGH, 10) : null;
+      const isSend = normName.includes('special') || normName.includes('autism') || normName.includes('dyslexia') || normName.includes('centre') || (s.govSchoolType && s.govSchoolType.toLowerCase().includes('special'));
+      const isPrep = (ageHigh !== null && ageHigh <= 13) || normName.includes('prep') || normName.includes('junior') || normName.includes('pre-prep') || normName.includes('primary');
+      const isAllThrough = (ageLow !== null && ageLow <= 5 && ageHigh !== null && ageHigh >= 18) || normName.includes('all-through');
+
+      let indMatched = null;
+      for (const ic of matrix.independent_consortia) {
+        if (ic.schoolKeywords.some(kw => normName.includes(kw.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim()))) {
+          indMatched = ic;
+          break;
+        }
+      }
+
+      proposedType = 'Independent';
+      if (indMatched) {
+        proposedRawType = 'Independent Senior School';
+        proposedExamType = indMatched.examType;
+        proposedDatesObj = indMatched.dates;
+      } else if (isSend) {
+        proposedRawType = 'Independent Special Educational Needs (SEND) School';
+        proposedExamType = 'Non-selective SEND Assessment & EHCP Review';
+        proposedDatesObj = sendIndepDates;
+      } else if (isPrep && !isAllThrough) {
+        proposedRawType = 'Independent Preparatory & Junior School';
+        proposedExamType = '7+ / 8+ / 11+ Junior School Assessment & Taster Session';
+        proposedDatesObj = prepJuniorDates;
+      } else if (isAllThrough) {
+        proposedRawType = 'Independent All-Through School (3–18)';
+        proposedExamType = '11+ / 13+ Senior Entrance Examination & Junior Assessment';
+        proposedDatesObj = standardIndepDates;
+      } else {
+        proposedRawType = 'Independent Senior School (11–18)';
+        proposedExamType = '11+ / 13+ School Own Entrance Examination (English, Maths & Reasoning)';
+        proposedDatesObj = standardIndepDates;
+      }
+    } else {
+      // State School (Grammar or Comprehensive)
+      let stateConsortiumMatch = null;
+      for (const c of matrix.state_consortia) {
+        const nameMatch = c.schoolKeywords.some(kw => normName.includes(kw.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim()));
+        const laMatch = c.laList.some(laName => sLa.includes(laName.toLowerCase()));
+        if (nameMatch || (isGovSelective && laMatch)) {
+          stateConsortiumMatch = c;
+          break;
+        }
+      }
+
+      if (!stateConsortiumMatch && isGovSelective) {
+        stateConsortiumMatch = {
+          name: `${s.la || 'Regional'} 11+ Selective Grammar`,
+          examType: `11+ GL Assessment (${s.la || 'Regional'} Selective)`,
+          dates: {
+            registrationOpen: '1 May 2026',
+            registrationDeadline: '3 July 2026',
+            examDate: '12 September 2026',
+            secondExamDate: null,
+            resultsDate: '16 October 2026',
+            interviewInfo: 'None',
+            offersAcceptance: 'CAF 31 Oct 2026; National Offer Day 1 March 2027; Accept by 15 March 2027'
+          }
+        };
+      }
+
+      if (stateConsortiumMatch) {
+        proposedType = 'Grammar';
+        proposedRawType = s.rawSchoolType && s.rawSchoolType.includes('Academy') ? 'Grammar (Academy Converter)' : 'Grammar (State Selective)';
+        proposedExamType = stateConsortiumMatch.examType;
+        proposedDatesObj = stateConsortiumMatch.dates;
+      } else {
+        // State Comprehensive
+        proposedType = 'Comprehensive';
+        const relChar = (s.RELCHAR || '').trim();
+        const minorGroup = s.MINORGROUP || (s.rawSchoolType && !s.rawSchoolType.includes('Comprehensive') ? s.rawSchoolType : 'Academy Converter');
+        const hasFaith = relChar && !['None', 'Does not apply', 'Not applicable'].includes(relChar);
+        const isBanding = normName.includes('academy') && (normName.includes('city') || normName.includes('harris') || normName.includes('ark') || normName.includes('oasis') || normName.includes('mossbourne'));
+        const isAptitude = normName.includes('performing arts') || normName.includes('music') || normName.includes('technology') || normName.includes('sports') || normName.includes('maths and science') || normName.includes('bilingual');
+
+        if (isAptitude) {
+          proposedExamType = 'Specialist Aptitude Assessment (Aptitude test up to 10% under School Admissions Code)';
+          proposedDatesObj = aptitudeStateDates;
+          proposedRawType = `${minorGroup} (Specialist Aptitude Stream)`;
+        } else if (hasFaith) {
+          proposedExamType = `Faith-based Admissions (${relChar} - Supplementary Information Form [SIF] Required)`;
+          proposedDatesObj = faithStateDates;
+          proposedRawType = `${minorGroup} (${relChar})`;
+        } else if (isBanding) {
+          proposedExamType = 'Fair Banding Assessment (Non-selective NFER/GL Banding Test)';
+          proposedDatesObj = bandingStateDates;
+          proposedRawType = `${minorGroup} (Fair Banding)`;
+        } else {
+          proposedExamType = 'Non-selective (Distance & Sibling Criteria - Local Authority CAF)';
+          proposedDatesObj = standardStateDates;
+          proposedRawType = minorGroup;
+        }
+      }
+    }
+
+    const proposedDatesStr = proposedDatesObj ? JSON.stringify(proposedDatesObj) : s.entranceExamDates;
+
+    // Check for differences
+    const diffFields = [];
+    if (proposedType !== s.schoolType) {
+      diffFields.push('schoolType');
+      typeChangesCount++;
+    }
+    if (proposedRawType && proposedRawType !== s.rawSchoolType) {
+      diffFields.push('rawSchoolType');
+    }
+    if (proposedExamType && proposedExamType !== s.entranceExamType) {
+      diffFields.push('entranceExamType');
+      examTypeChangesCount++;
+    }
+    if (proposedDatesStr && proposedDatesStr !== s.entranceExamDates) {
+      // Check if structurally different
+      let isDifferent = true;
+      try {
+        if (s.entranceExamDates) {
+          const curObj = JSON.parse(s.entranceExamDates);
+          if (JSON.stringify(curObj) === JSON.stringify(proposedDatesObj)) isDifferent = false;
+        }
+      } catch (e) {}
+      if (isDifferent) {
+        diffFields.push('entranceExamDates');
+        dateChangesCount++;
+      }
+    }
+
+    if (diffFields.length > 0) {
+      proposedChanges.push({
+        schoolId: s.id,
+        schoolUrn: s.urn,
+        schoolName: s.name,
+        la: s.la,
+        region: s.region,
+        current: {
+          schoolType: s.schoolType,
+          rawSchoolType: s.rawSchoolType,
+          entranceExamType: s.entranceExamType,
+          entranceExamDates: s.entranceExamDates
+        },
+        proposed: {
+          schoolType: proposedType,
+          rawSchoolType: proposedRawType,
+          entranceExamType: proposedExamType,
+          entranceExamDates: proposedDatesStr
+        },
+        changedFields: diffFields,
+        summary: `Update: ${diffFields.join(', ')}`
+      });
+    }
+  }
+
+  return {
+    totalSchoolsScanned: schools.length,
+    totalSchoolsWithChanges: proposedChanges.length,
+    stats: {
+      typeChangesCount,
+      examTypeChangesCount,
+      dateChangesCount
+    },
+    proposedChanges
+  };
+}
+
+function commitEnrichmentChanges(acceptedChanges, adminUser = 'Admin') {
+  const database = getDb();
+  if (!Array.isArray(acceptedChanges) || acceptedChanges.length === 0) {
+    return { success: true, count: 0 };
+  }
+
+  const updateStmt = database.prepare(`
+    UPDATE schools
+    SET schoolType = COALESCE(?, schoolType),
+        rawSchoolType = COALESCE(?, rawSchoolType),
+        entranceExamType = COALESCE(?, entranceExamType),
+        entranceExamDates = COALESCE(?, entranceExamDates)
+    WHERE id = ?
+  `);
+
+  database.exec('BEGIN TRANSACTION;');
+  let count = 0;
+  try {
+    for (const item of acceptedChanges) {
+      const p = item.proposed || item;
+      const sId = item.schoolId || item.id;
+      if (!sId || !p) continue;
+
+      updateStmt.run(
+        p.schoolType || null,
+        p.rawSchoolType || null,
+        p.entranceExamType || null,
+        p.entranceExamDates || null,
+        sId
+      );
+
+      // Record high-confidence verification
+      markFieldAdminReviewed(sId, 'entranceExamDates', adminUser);
+      markFieldAdminReviewed(sId, 'entranceExamType', adminUser);
+      count++;
+    }
+    database.exec('COMMIT;');
+  } catch (err) {
+    database.exec('ROLLBACK;');
+    throw err;
+  }
+
+  autoSyncAllDateConfidenceScores();
+  return { success: true, count };
+}
+
+function runFullDatabaseEnrichment(adminUser = 'Admin') {
+  const preview = generateEnrichmentPreview();
+  if (preview.proposedChanges.length > 0) {
+    commitEnrichmentChanges(preview.proposedChanges, adminUser);
+  }
+  autoSyncAllDateConfidenceScores();
+  return getDataQualitySummary();
+}
+
 module.exports = {
   getDb,
   getAllSchools,
@@ -1240,5 +2058,16 @@ module.exports = {
   getUserRecPreferences,
   castFieldConfidenceVote,
   markFieldAdminReviewed,
-  getFieldConfidenceStats
+  getFieldConfidenceStats,
+  analyzeSchoolAdmissionDates,
+  getAllDateAnomalies,
+  applyDateAnomalyFix,
+  applyAllDateAnomalyFixes,
+  autoSyncAllDateConfidenceScores,
+  getDataQualitySummary,
+  runFullDatabaseEnrichment,
+  generateEnrichmentPreview,
+  commitEnrichmentChanges
 };
+
+

@@ -633,6 +633,8 @@ function switchAdminSubTab(subTabName) {
     renderBulkEditTable();
   } else if (subTabName === 'corrections') {
     loadAdminFieldReports();
+  } else if (subTabName === 'date-anomalies') {
+    loadAdminDateAnomalies();
   } else if (subTabName === 'settings') {
     loadAdminSettings();
   }
@@ -1212,6 +1214,91 @@ function setupEventListeners() {
   const refreshReportsBtn = document.getElementById('refresh-field-reports-btn');
   if (refreshReportsBtn) {
     refreshReportsBtn.addEventListener('click', loadAdminFieldReports);
+  }
+
+  // Date Anomaly Review Controls
+  const refreshDateAnomaliesBtn = document.getElementById('btn-refresh-date-anomalies');
+  if (refreshDateAnomaliesBtn) {
+    refreshDateAnomaliesBtn.addEventListener('click', loadAdminDateAnomalies);
+  }
+
+  const applyAllDateFixesBtn = document.getElementById('btn-apply-all-date-fixes');
+  if (applyAllDateFixesBtn) {
+    applyAllDateFixesBtn.addEventListener('click', applyAllAdminDateFixes);
+  }
+
+  const syncDateConfidenceBtn = document.getElementById('btn-sync-date-confidence');
+  if (syncDateConfidenceBtn) {
+    syncDateConfidenceBtn.addEventListener('click', syncDateQualityConfidence);
+  }
+
+  const runFullEnrichmentBtn = document.getElementById('btn-run-full-enrichment');
+  if (runFullEnrichmentBtn) {
+    runFullEnrichmentBtn.addEventListener('click', openEnrichmentPreviewModal);
+  }
+
+  // Enrichment Preview Modal Controls
+  const closeEnrichmentPreviewBtn = document.getElementById('btn-close-enrichment-preview');
+  if (closeEnrichmentPreviewBtn) {
+    closeEnrichmentPreviewBtn.addEventListener('click', closeEnrichmentPreviewModal);
+  }
+
+  const rejectAllEnrichmentBtn = document.getElementById('btn-reject-all-enrichment');
+  if (rejectAllEnrichmentBtn) {
+    rejectAllEnrichmentBtn.addEventListener('click', closeEnrichmentPreviewModal);
+  }
+
+  const acceptAllEnrichmentBtn = document.getElementById('btn-accept-all-enrichment');
+  if (acceptAllEnrichmentBtn) {
+    acceptAllEnrichmentBtn.addEventListener('click', acceptAllEnrichmentChanges);
+  }
+
+  const commitSelectedEnrichmentBtn = document.getElementById('btn-commit-selected-enrichment');
+  if (commitSelectedEnrichmentBtn) {
+    commitSelectedEnrichmentBtn.addEventListener('click', commitSelectedEnrichmentChanges);
+  }
+
+  const filterPreviewSearch = document.getElementById('filter-preview-search');
+  if (filterPreviewSearch) {
+    filterPreviewSearch.addEventListener('input', () => {
+      renderEnrichmentPreviewCards();
+    });
+  }
+
+  const filterPreviewCategory = document.getElementById('filter-preview-category');
+  if (filterPreviewCategory) {
+    filterPreviewCategory.addEventListener('change', () => {
+      renderEnrichmentPreviewCards();
+    });
+  }
+
+  const toggleSelectAllPreview = document.getElementById('toggle-select-all-preview');
+  if (toggleSelectAllPreview) {
+    toggleSelectAllPreview.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      const visibleCheckboxes = document.querySelectorAll('.preview-school-checkbox');
+      visibleCheckboxes.forEach(cb => {
+        cb.checked = isChecked;
+        const sId = cb.getAttribute('data-school-id');
+        if (isChecked) selectedEnrichmentIds.add(sId);
+        else selectedEnrichmentIds.delete(sId);
+      });
+      updateSelectedEnrichmentCount();
+    });
+  }
+
+  const anomalySearchInput = document.getElementById('filter-anomaly-search');
+  if (anomalySearchInput) {
+    anomalySearchInput.addEventListener('input', () => {
+      if (cachedDateAnomaliesData) renderAdminDateAnomalies(cachedDateAnomaliesData);
+    });
+  }
+
+  const anomalyTypeSelect = document.getElementById('filter-anomaly-type');
+  if (anomalyTypeSelect) {
+    anomalyTypeSelect.addEventListener('change', () => {
+      if (cachedDateAnomaliesData) renderAdminDateAnomalies(cachedDateAnomaliesData);
+    });
   }
 
   // Field Custom Override Form Submit
@@ -5636,5 +5723,658 @@ function setupParent2Typeaheads() {
     });
   }
 }
+
+// ====================================================
+// Admin Date Anomaly Review & Timeline Quality Module
+// ====================================================
+
+let cachedDateAnomaliesData = null;
+
+async function loadAdminDateAnomalies() {
+  const container = document.getElementById('admin-date-anomalies-container');
+  if (!container) return;
+
+  container.innerHTML = `<div style="text-align: center; color: #64748b; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Analyzing admissions timelines and detecting anomalies...</div>`;
+
+  try {
+    const res = await fetch('/api/admin/date-anomalies', {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+
+    if (!res.ok) {
+      container.innerHTML = `
+        <div style="color: #ef4444; padding: 2rem; text-align: center; background: #fef2f2; border-radius: 12px; border: 1px solid #fee2e2;">
+          <i class="fa-solid fa-circle-exclamation" style="font-size: 2rem; margin-bottom: 0.5rem; display: block;"></i>
+          <strong>Failed to load date anomalies (${res.status} ${res.statusText})</strong>
+          <p style="margin-top: 0.4rem; font-size: 0.85rem; color: #991b1b;">Please verify your administrator session permissions and retry.</p>
+          <button class="btn btn-outline" onclick="loadAdminDateAnomalies()" style="margin-top: 0.75rem; font-size: 0.8rem; background: white;">
+            <i class="fa-solid fa-rotate"></i> Retry Anomaly Scan
+          </button>
+        </div>
+      `;
+      return;
+    }
+
+    cachedDateAnomaliesData = await res.json();
+    updateDateAnomalyKPIs(cachedDateAnomaliesData.stats);
+    renderAdminDateAnomalies(cachedDateAnomaliesData);
+  } catch (err) {
+    console.error('Error loading date anomalies:', err);
+    container.innerHTML = `
+      <div style="color: #ef4444; padding: 2rem; text-align: center; background: #fef2f2; border-radius: 12px; border: 1px solid #fee2e2;">
+        <i class="fa-solid fa-triangle-exclamation" style="font-size: 2rem; margin-bottom: 0.5rem; display: block;"></i>
+        <strong>Error connecting to date anomaly service</strong>
+        <p style="margin-top: 0.4rem; font-size: 0.85rem; color: #991b1b;">${err.message || err}</p>
+        <button class="btn btn-outline" onclick="loadAdminDateAnomalies()" style="margin-top: 0.75rem; font-size: 0.8rem; background: white;">
+          <i class="fa-solid fa-rotate"></i> Retry
+        </button>
+      </div>
+    `;
+  }
+}
+
+function updateDateAnomalyKPIs(stats) {
+  if (!stats) return;
+  const kpiSchools = document.getElementById('kpi-total-date-schools');
+  if (kpiSchools) kpiSchools.textContent = stats.totalSchoolsWithDates || 0;
+
+  const kpiAnomalies = document.getElementById('kpi-total-anomalies');
+  if (kpiAnomalies) kpiAnomalies.textContent = stats.totalAnomalies || 0;
+
+  const kpiChrono = document.getElementById('kpi-chrono-inversions');
+  if (kpiChrono) kpiChrono.textContent = stats.chronoInversions || 0;
+
+  const kpiAvg = document.getElementById('kpi-avg-date-score');
+  if (kpiAvg) kpiAvg.textContent = `${stats.avgQualityScore || 0}%`;
+
+  // Update badge counter on side-tab
+  const badge = document.getElementById('date-anomalies-badge-count');
+  if (badge) {
+    if (stats.totalAnomalies > 0) {
+      badge.textContent = stats.totalAnomalies;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+function renderAdminDateAnomalies(data) {
+  const container = document.getElementById('admin-date-anomalies-container');
+  if (!container || !data) return;
+
+  const searchVal = (document.getElementById('filter-anomaly-search')?.value || '').trim().toLowerCase();
+  const typeFilter = document.getElementById('filter-anomaly-type')?.value || 'ANOMALIES_ONLY';
+
+  let items = [];
+
+  if (typeFilter === 'ALL_SCHOOLS') {
+    items = data.allSchools || [];
+  } else if (typeFilter === 'ANOMALIES_ONLY') {
+    items = data.anomalies || [];
+  } else if (typeFilter === 'LOW_CONFIDENCE') {
+    items = (data.allSchools || []).filter(s => s.qualityScore < 80 || s.confidenceLevel === 'Low');
+  } else {
+    items = (data.allSchools || []).filter(s => s.anomalies && s.anomalies.some(a => a.type === typeFilter));
+  }
+
+  // Filter by search query
+  if (searchVal) {
+    items = items.filter(s =>
+      (s.schoolName || '').toLowerCase().includes(searchVal) ||
+      (s.la || '').toLowerCase().includes(searchVal) ||
+      (s.schoolType || '').toLowerCase().includes(searchVal)
+    );
+  }
+
+  if (items.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 3rem 1.5rem; background: #f0fdf4; border-radius: 12px; border: 1px solid #bbf7d0;">
+        <i class="fa-solid fa-circle-check" style="font-size: 2.5rem; color: #22c55e; margin-bottom: 0.75rem; display: block;"></i>
+        <h4 style="color: #166534; font-size: 1.15rem; margin-bottom: 0.35rem;">All Admissions Timelines Verified &amp; Clean</h4>
+        <p style="color: #15803d; font-size: 0.88rem; max-width: 600px; margin: 0 auto;">
+          No chronological date inversions, outdated cycle references, or source conflicts were detected matching your filters.
+        </p>
+        <button class="btn btn-outline" onclick="document.getElementById('filter-anomaly-type').value='ALL_SCHOOLS'; renderAdminDateAnomalies(cachedDateAnomaliesData);" style="margin-top: 1rem; font-size: 0.82rem; background: white;">
+          <i class="fa-solid fa-list-check"></i> View All Schools with Timelines (${(data.allSchools || []).length})
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  let html = `<div style="display: flex; flex-direction: column; gap: 1.25rem;">`;
+
+  for (const item of items) {
+    const p = item.proposedDates || {};
+    const c = item.currentDates || {};
+    const hasAnomalies = item.anomaliesCount > 0;
+
+    const chronoCount = (item.anomalies || []).filter(a => a.type === 'CHRONO_INVERSION').length;
+    const outdatedCount = (item.anomalies || []).filter(a => a.type === 'OUTDATED_CYCLE').length;
+    const conflictCount = (item.anomalies || []).filter(a => a.type === 'SOURCE_CONFLICT').length;
+
+    html += `
+      <div class="date-anomaly-card" data-school-id="${item.schoolId}">
+        <div class="date-anomaly-header">
+          <div>
+            <div class="date-anomaly-title">
+              <i class="fa-solid fa-school" style="color: #4f46e5;"></i>
+              <span>${item.schoolName}</span>
+              <span style="font-size: 0.8rem; font-weight: 600; color: #64748b;">(${item.schoolType} — ${item.la || item.region})</span>
+            </div>
+            <div style="margin-top: 0.4rem; display: flex; gap: 0.4rem; flex-wrap: wrap;">
+              ${!hasAnomalies ? `<span class="anomaly-tag-pill" style="background:#ecfdf5; color:#059669; border:1px solid #bbf7d0;"><i class="fa-solid fa-circle-check"></i> Timeline Verified Clean</span>` : ''}
+              ${chronoCount > 0 ? `<span class="anomaly-tag-pill anomaly-tag-chrono"><i class="fa-solid fa-arrow-down-up-across-line"></i> ${chronoCount} Chrono Inversion${chronoCount > 1 ? 's' : ''}</span>` : ''}
+              ${outdatedCount > 0 ? `<span class="anomaly-tag-pill anomaly-tag-outdated"><i class="fa-solid fa-clock-rotate-left"></i> ${outdatedCount} Outdated Cycle</span>` : ''}
+              ${conflictCount > 0 ? `<span class="anomaly-tag-pill anomaly-tag-conflict"><i class="fa-solid fa-code-compare"></i> ${conflictCount} Source Conflict</span>` : ''}
+              <span class="anomaly-tag-pill" style="background: ${item.qualityScore >= 80 ? '#ecfdf5' : (item.qualityScore >= 60 ? '#fef3c7' : '#fee2e2')}; color: ${item.qualityScore >= 80 ? '#059669' : (item.qualityScore >= 60 ? '#d97706' : '#dc2626')}; border: 1px solid currentColor;">
+                Quality Score: ${item.qualityScore}% (${item.confidenceLevel})
+              </span>
+            </div>
+          </div>
+          <div>
+            ${currentPermissions.includes('admin:edit') && hasAnomalies ? `
+              <button type="button" class="btn btn-primary btn-apply-single-date-fix" data-school-id="${item.schoolId}" style="background: #059669; border-color: #059669; font-size: 0.82rem; padding: 0.4rem 0.85rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+                <i class="fa-solid fa-check"></i> Apply Proposed Fix
+              </button>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- Issue Descriptions -->
+        ${hasAnomalies ? `
+          <div class="anomaly-issues-list">
+            <div style="font-weight: 700; margin-bottom: 0.3rem; display: flex; align-items: center; gap: 0.4rem;">
+              <i class="fa-solid fa-circle-exclamation"></i> Detected Timeline Anomaly:
+            </div>
+            <ul style="margin: 0; padding-left: 1.25rem;">
+              ${item.anomalies.map(a => `<li>${a.message}</li>`).join('')}
+            </ul>
+          </div>
+        ` : ''}
+
+        <!-- Side-by-Side Comparison -->
+        <div class="timeline-comparison-grid">
+          
+          <!-- Current Timeline -->
+          <div class="timeline-column">
+            <div class="timeline-col-header" style="color: ${hasAnomalies ? '#dc2626' : '#334155'};">
+              <span><i class="fa-solid ${hasAnomalies ? 'fa-xmark' : 'fa-database'}"></i> Current Database Data</span>
+              <span style="font-size: 0.72rem; background: ${hasAnomalies ? '#fee2e2' : '#f1f5f9'}; color: ${hasAnomalies ? '#b91c1c' : '#475569'}; padding: 0.1rem 0.4rem; border-radius: 4px;">
+                ${hasAnomalies ? 'Contains Issues' : 'Active Timeline'}
+              </span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">1. Registration Opens:</span>
+              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('registrationOpen')) ? 'val-error' : ''}">${c.registrationOpen || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">2. Registration Closes:</span>
+              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('registrationDeadline')) ? 'val-error' : ''}">${c.registrationDeadline || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">3. 1st Stage Exam Date:</span>
+              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('examDate')) ? 'val-error' : ''}">${c.examDate || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">4. 1st Stage Results:</span>
+              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('resultsDate')) ? 'val-error' : ''}">${c.resultsDate || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">5. 2nd Stage Exam:</span>
+              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('secondExamDate')) ? 'val-error' : ''}">${c.secondExamDate || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">6. Interviews:</span>
+              <span class="timeline-step-val">${c.interviewInfo || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">7. Offers / Outcome:</span>
+              <span class="timeline-step-val">${c.offersAcceptance || 'N/A'}</span>
+            </div>
+          </div>
+
+          <!-- Proposed Timeline -->
+          <div class="timeline-column" style="background: #f0fdf4; border-color: #bbf7d0;">
+            <div class="timeline-col-header" style="color: #059669;">
+              <span><i class="fa-solid fa-check"></i> Proposed 2026/2027 Timeline</span>
+              <span style="font-size: 0.72rem; background: #d1fae5; color: #047857; padding: 0.1rem 0.4rem; border-radius: 4px;">Chronological Standard</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">1. Registration Opens:</span>
+              <span class="timeline-step-val val-proposed">${p.registrationOpen || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">2. Registration Closes:</span>
+              <span class="timeline-step-val val-proposed">${p.registrationDeadline || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">3. 1st Stage Exam Date:</span>
+              <span class="timeline-step-val val-proposed">${p.examDate || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">4. 1st Stage Results:</span>
+              <span class="timeline-step-val val-proposed">${p.resultsDate || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">5. 2nd Stage Exam:</span>
+              <span class="timeline-step-val val-proposed">${p.secondExamDate || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">6. Interviews:</span>
+              <span class="timeline-step-val val-proposed">${p.interviewInfo || 'N/A'}</span>
+            </div>
+            <div class="timeline-step-row">
+              <span class="timeline-step-name">7. Offers / Outcome:</span>
+              <span class="timeline-step-val val-proposed">${p.offersAcceptance || 'N/A'}</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+  container.innerHTML = html;
+
+  // Bind single fix buttons
+  container.querySelectorAll('.btn-apply-single-date-fix').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const sId = btn.getAttribute('data-school-id');
+      const item = items.find(it => it.schoolId === sId);
+      if (!item) return;
+
+      await applyAdminDateFix(sId, item.proposedDates);
+    });
+  });
+}
+
+async function applyAdminDateFix(schoolId, proposedDates) {
+  if (!confirm('Apply the proposed 2026/2027 chronological date fix for this school?')) return;
+
+  try {
+    const res = await fetch('/api/admin/apply-date-fix', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ schoolId, proposedDates })
+    });
+
+    if (res.ok) {
+      showToast('Date timeline corrected and verified!', 'success');
+      await loadSchools();
+      await loadAdminDateAnomalies();
+    } else {
+      showToast('Failed to apply date fix.', 'error');
+    }
+  } catch (err) {
+    showToast('Error applying date fix.', 'error');
+  }
+}
+
+async function applyAllAdminDateFixes() {
+  if (!cachedDateAnomaliesData || cachedDateAnomaliesData.anomalies.length === 0) {
+    showToast('No date anomalies to fix.', 'info');
+    return;
+  }
+
+  const count = cachedDateAnomaliesData.anomalies.length;
+  if (!confirm(`Are you sure you want to apply recommended chronological 2026/2027 date fixes across all ${count} anomalous schools?`)) return;
+
+  try {
+    const res = await fetch('/api/admin/apply-all-date-fixes', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({})
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      showToast(`Successfully applied recommended date fixes across ${result.count} schools!`, 'success');
+      await loadSchools();
+      await loadAdminDateAnomalies();
+    } else {
+      showToast('Failed to apply all date fixes.', 'error');
+    }
+  } catch (err) {
+    showToast('Error applying bulk date fixes.', 'error');
+  }
+}
+
+async function syncDateQualityConfidence() {
+  try {
+    const res = await fetch('/api/admin/sync-date-confidence', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({})
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      showToast(`Synchronized date quality confidence scores across ${result.count} schools!`, 'success');
+      await loadAdminDateAnomalies();
+    } else {
+      showToast('Failed to synchronize date confidence.', 'error');
+    }
+  } catch (err) {
+    showToast('Error synchronizing date confidence.', 'error');
+  }
+}
+
+// ====================================================
+// Automated Enrichment Dry-Run & Review Controller
+// ====================================================
+
+let cachedEnrichmentPreviewData = null;
+let selectedEnrichmentIds = new Set();
+
+async function openEnrichmentPreviewModal() {
+  const modal = document.getElementById('admin-enrichment-preview-modal');
+  const container = document.getElementById('admin-enrichment-preview-cards');
+  if (!modal || !container) return;
+
+  modal.style.display = 'flex';
+  container.innerHTML = `
+    <div style="text-align: center; padding: 3rem 1.5rem; color: #64748b;">
+      <i class="fa-solid fa-spinner fa-spin" style="font-size: 2.2rem; color: #4f46e5; margin-bottom: 0.75rem; display: block;"></i>
+      <strong style="font-size: 1.05rem; color: #1e293b;">Analyzing database and generating dry-run preview...</strong>
+      <p style="font-size: 0.85rem; color: #64748b; margin-top: 0.3rem;">Evaluating statutory DfE records, consortium schedules, and admissions lifecycles across 6,497 schools...</p>
+    </div>
+  `;
+
+  try {
+    const res = await fetch('/api/admin/preview-enrichment', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({})
+    });
+
+    if (!res.ok) {
+      container.innerHTML = `<div style="color: #ef4444; padding: 2rem; text-align: center;">Failed to generate enrichment preview (${res.status}).</div>`;
+      return;
+    }
+
+    cachedEnrichmentPreviewData = await res.json();
+    const changes = cachedEnrichmentPreviewData.proposedChanges || [];
+    const stats = cachedEnrichmentPreviewData.stats || {};
+
+    // Update Summary Badges
+    const badgeTotal = document.getElementById('preview-total-changes-badge');
+    if (badgeTotal) badgeTotal.textContent = `${changes.length} Schools with Changes`;
+
+    const badgeType = document.getElementById('preview-type-changes-badge');
+    if (badgeType) badgeType.textContent = `${stats.typeChangesCount || 0} Type Updates`;
+
+    const badgeExam = document.getElementById('preview-exam-changes-badge');
+    if (badgeExam) badgeExam.textContent = `${stats.examTypeChangesCount || 0} Exam Type Updates`;
+
+    const badgeDate = document.getElementById('preview-date-changes-badge');
+    if (badgeDate) badgeDate.textContent = `${stats.dateChangesCount || 0} Date Updates`;
+
+    const btnCount = document.getElementById('preview-total-count-btn');
+    if (btnCount) btnCount.textContent = changes.length;
+
+    // Default select all proposed changes
+    selectedEnrichmentIds = new Set(changes.map(c => c.schoolId));
+    updateSelectedEnrichmentCount();
+
+    renderEnrichmentPreviewCards();
+  } catch (err) {
+    console.error('Error opening enrichment preview:', err);
+    container.innerHTML = `<div style="color: #ef4444; padding: 2rem; text-align: center;">Error connecting to preview service.</div>`;
+  }
+}
+
+function closeEnrichmentPreviewModal() {
+  const modal = document.getElementById('admin-enrichment-preview-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function updateSelectedEnrichmentCount() {
+  const countEl = document.getElementById('selected-changes-count');
+  if (countEl) countEl.textContent = selectedEnrichmentIds.size;
+}
+
+function renderEnrichmentPreviewCards() {
+  const container = document.getElementById('admin-enrichment-preview-cards');
+  if (!container || !cachedEnrichmentPreviewData) return;
+
+  const searchVal = (document.getElementById('filter-preview-search')?.value || '').trim().toLowerCase();
+  const categoryFilter = document.getElementById('filter-preview-category')?.value || 'ALL';
+
+  let items = cachedEnrichmentPreviewData.proposedChanges || [];
+
+  // Filter by category
+  if (categoryFilter !== 'ALL') {
+    items = items.filter(c => c.changedFields && c.changedFields.includes(categoryFilter));
+  }
+
+  // Filter by search query
+  if (searchVal) {
+    items = items.filter(c =>
+      (c.schoolName || '').toLowerCase().includes(searchVal) ||
+      (c.la || '').toLowerCase().includes(searchVal) ||
+      (c.schoolUrn || '').toLowerCase().includes(searchVal) ||
+      (c.region || '').toLowerCase().includes(searchVal)
+    );
+  }
+
+  if (items.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 3.5rem 1.5rem; background: white; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <i class="fa-solid fa-circle-check" style="font-size: 2.5rem; color: #22c55e; margin-bottom: 0.75rem; display: block;"></i>
+        <h4 style="color: #166534; font-size: 1.15rem; margin-bottom: 0.35rem;">No Pending Proposed Changes</h4>
+        <p style="color: #15803d; font-size: 0.88rem; max-width: 550px; margin: 0 auto;">
+          ${(cachedEnrichmentPreviewData.proposedChanges || []).length === 0 ? 'All 6,497 schools are already fully enriched and up to date with the master standard.' : 'No proposed changes match your current search/filter.'}
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+
+  for (const item of items) {
+    const isSelected = selectedEnrichmentIds.has(item.schoolId);
+    const cur = item.current || {};
+    const prop = item.proposed || {};
+
+    let curDatesObj = null;
+    let propDatesObj = null;
+    try { if (cur.entranceExamDates) curDatesObj = JSON.parse(cur.entranceExamDates); } catch (e) {}
+    try { if (prop.entranceExamDates) propDatesObj = JSON.parse(prop.entranceExamDates); } catch (e) {}
+
+    html += `
+      <div class="date-anomaly-card" style="background: white; border: 1px solid ${isSelected ? '#818cf8' : '#e2e8f0'}; border-radius: 12px; padding: 1.2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.03);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.75rem; margin-bottom: 0.85rem; flex-wrap: wrap;">
+          <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+            <input type="checkbox" class="preview-school-checkbox" data-school-id="${item.schoolId}" ${isSelected ? 'checked' : ''} style="margin-top: 0.3rem; transform: scale(1.2); cursor: pointer;">
+            <div>
+              <strong style="font-size: 1.05rem; color: #0f172a; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <i class="fa-solid fa-school" style="color: #4f46e5;"></i> ${item.schoolName}
+                <span style="font-size: 0.8rem; font-weight: normal; color: #64748b;">(URN: ${item.schoolUrn || 'N/A'} — ${item.la})</span>
+              </strong>
+              <div style="display: flex; gap: 0.4rem; margin-top: 0.35rem; flex-wrap: wrap;">
+                ${item.changedFields.map(f => `<span class="anomaly-tag-pill" style="background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; font-size: 0.72rem;">${f}</span>`).join('')}
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 0.4rem; align-items: center;">
+            <button type="button" class="btn btn-primary btn-accept-single-preview" data-school-id="${item.schoolId}" style="background: #059669; border-color: #059669; font-size: 0.78rem; padding: 0.35rem 0.75rem;">
+              <i class="fa-solid fa-check"></i> Accept This
+            </button>
+            <button type="button" class="btn btn-outline btn-skip-single-preview" data-school-id="${item.schoolId}" style="font-size: 0.78rem; padding: 0.35rem 0.65rem; color: #64748b;">
+              <i class="fa-solid fa-xmark"></i> Skip
+            </button>
+          </div>
+        </div>
+
+        <!-- Diff Table -->
+        <table class="data-table" style="width: 100%; font-size: 0.82rem; border-collapse: collapse;">
+          <thead>
+            <tr style="background: #f8fafc;">
+              <th style="width: 22%; padding: 0.45rem 0.6rem;">Field</th>
+              <th style="width: 39%; padding: 0.45rem 0.6rem; color: #991b1b;"><i class="fa-solid fa-clock-rotate-left"></i> Current Value</th>
+              <th style="width: 39%; padding: 0.45rem 0.6rem; color: #166534;"><i class="fa-solid fa-sparkles"></i> Proposed Enriched Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${item.changedFields.includes('schoolType') || item.changedFields.includes('rawSchoolType') ? `
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 0.45rem 0.6rem;"><strong>School Type</strong></td>
+                <td style="padding: 0.45rem 0.6rem; color: #dc2626; background: #fef2f2;">${cur.schoolType || 'N/A'} <span style="font-size:0.75rem; color:#64748b;">(${cur.rawSchoolType || ''})</span></td>
+                <td style="padding: 0.45rem 0.6rem; color: #059669; background: #f0fdf4; font-weight: 700;">${prop.schoolType || 'N/A'} <span style="font-size:0.75rem; color:#047857; font-weight:normal;">(${prop.rawSchoolType || ''})</span></td>
+              </tr>
+            ` : ''}
+            ${item.changedFields.includes('entranceExamType') ? `
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 0.45rem 0.6rem;"><strong>Entrance Exam Type</strong></td>
+                <td style="padding: 0.45rem 0.6rem; color: #dc2626; background: #fef2f2;">${cur.entranceExamType || '<em style="color:#94a3b8;">(Blank / Unset)</em>'}</td>
+                <td style="padding: 0.45rem 0.6rem; color: #059669; background: #f0fdf4; font-weight: 700;">${prop.entranceExamType}</td>
+              </tr>
+            ` : ''}
+            ${item.changedFields.includes('entranceExamDates') && propDatesObj ? `
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 0.45rem 0.6rem;"><strong>Admissions Timeline</strong></td>
+                <td style="padding: 0.45rem 0.6rem; color: #64748b; background: #fef2f2; font-size: 0.78rem;">
+                  ${curDatesObj ? `
+                    <div><strong>Reg Deadline:</strong> ${curDatesObj.registrationDeadline || 'N/A'}</div>
+                    <div><strong>1st Exam:</strong> ${curDatesObj.examDate || 'N/A'}</div>
+                    <div><strong>Results:</strong> ${curDatesObj.resultsDate || 'N/A'}</div>
+                  ` : '<em style="color:#94a3b8;">(No structured dates)</em>'}
+                </td>
+                <td style="padding: 0.45rem 0.6rem; color: #047857; background: #f0fdf4; font-size: 0.78rem;">
+                  <div><strong>Reg:</strong> ${propDatesObj.registrationOpen || 'N/A'} — ${propDatesObj.registrationDeadline || 'N/A'}</div>
+                  <div><strong>Exam:</strong> ${propDatesObj.examDate || 'N/A'}</div>
+                  <div><strong>Outcome:</strong> ${propDatesObj.resultsDate || propDatesObj.offersAcceptance || 'N/A'}</div>
+                </td>
+              </tr>
+            ` : ''}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+
+  // Bind checkbox events
+  container.querySelectorAll('.preview-school-checkbox').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const sId = e.target.getAttribute('data-school-id');
+      if (e.target.checked) selectedEnrichmentIds.add(sId);
+      else selectedEnrichmentIds.delete(sId);
+      updateSelectedEnrichmentCount();
+    });
+  });
+
+  // Bind single accept buttons
+  container.querySelectorAll('.btn-accept-single-preview').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const sId = btn.getAttribute('data-school-id');
+      const item = (cachedEnrichmentPreviewData.proposedChanges || []).find(c => c.schoolId === sId);
+      if (item) {
+        await commitSelectedEnrichment([item]);
+      }
+    });
+  });
+
+  // Bind single skip buttons
+  container.querySelectorAll('.btn-skip-single-preview').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sId = btn.getAttribute('data-school-id');
+      cachedEnrichmentPreviewData.proposedChanges = (cachedEnrichmentPreviewData.proposedChanges || []).filter(c => c.schoolId !== sId);
+      selectedEnrichmentIds.delete(sId);
+      updateSelectedEnrichmentCount();
+      renderEnrichmentPreviewCards();
+    });
+  });
+}
+
+async function acceptAllEnrichmentChanges() {
+  if (!cachedEnrichmentPreviewData || !cachedEnrichmentPreviewData.proposedChanges || cachedEnrichmentPreviewData.proposedChanges.length === 0) {
+    showToast('No proposed changes to accept.', 'info');
+    return;
+  }
+  const count = cachedEnrichmentPreviewData.proposedChanges.length;
+  if (!confirm(`Accept all proposed changes across ${count} schools and commit to master database?`)) return;
+
+  await commitSelectedEnrichment(cachedEnrichmentPreviewData.proposedChanges);
+}
+
+async function commitSelectedEnrichmentChanges() {
+  if (selectedEnrichmentIds.size === 0) {
+    showToast('No schools selected to accept.', 'warning');
+    return;
+  }
+
+  const items = (cachedEnrichmentPreviewData.proposedChanges || []).filter(c => selectedEnrichmentIds.has(c.schoolId));
+  if (items.length === 0) return;
+
+  if (!confirm(`Commit accepted changes for ${items.length} selected schools?`)) return;
+
+  await commitSelectedEnrichment(items);
+}
+
+async function commitSelectedEnrichment(itemsToCommit) {
+  if (!itemsToCommit || itemsToCommit.length === 0) return;
+
+  try {
+    const res = await fetch('/api/admin/commit-enrichment', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ acceptedChanges: itemsToCommit })
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      showToast(`Successfully committed enriched data for ${result.count} schools!`, 'success');
+
+      // Remove committed from preview
+      const committedSet = new Set(itemsToCommit.map(i => i.schoolId));
+      cachedEnrichmentPreviewData.proposedChanges = (cachedEnrichmentPreviewData.proposedChanges || []).filter(c => !committedSet.has(c.schoolId));
+      for (const sId of committedSet) selectedEnrichmentIds.delete(sId);
+
+      updateSelectedEnrichmentCount();
+      renderEnrichmentPreviewCards();
+
+      await loadSchools();
+      await loadAdminDateAnomalies();
+
+      if ((cachedEnrichmentPreviewData.proposedChanges || []).length === 0) {
+        closeEnrichmentPreviewModal();
+      }
+    } else {
+      showToast('Failed to commit enrichment changes.', 'error');
+    }
+  } catch (err) {
+    console.error('Error committing enrichment:', err);
+    showToast('Error committing enrichment changes.', 'error');
+  }
+}
+
+async function runAdminFullEnrichment() {
+  await openEnrichmentPreviewModal();
+}
+
+
+
+
 
 

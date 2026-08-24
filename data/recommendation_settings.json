@@ -1,8 +1,0 @@
-{
-  "weights": {
-    "location": 20,
-    "examType": 60,
-    "schoolType": 10,
-    "gender": 10
-  }
-}
