@@ -17,42 +17,42 @@ console.log(`Loaded ${stateSchools.length} Comprehensive schools for statutory p
 
 const standardStateDates = {
   registrationOpen: '1 September 2026',
-  registrationDeadline: '31 October 2026 (Midnight CAF)',
+  registrationDeadline: '31 October 2026',
   examDate: 'N/A (Non-selective Admissions)',
   secondExamDate: null,
-  resultsDate: '1 March 2027 (National Offer Day)',
-  interviewInfo: 'None (Statutory Admissions Code)',
-  offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+  resultsDate: '1 March 2027',
+  interviewInfo: 'None',
+  offersAcceptance: '15 March 2027'
 };
 
 const faithStateDates = {
   registrationOpen: '1 September 2026',
-  registrationDeadline: '31 October 2026 (Midnight CAF & SIF Submission)',
+  registrationDeadline: '31 October 2026',
   examDate: 'N/A (Faith Priority Criteria)',
   secondExamDate: null,
-  resultsDate: '1 March 2027 (National Offer Day)',
-  interviewInfo: 'None (Priest / Clergy / Faith SIF Reference)',
-  offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+  resultsDate: '1 March 2027',
+  interviewInfo: 'None (Supplementary Information Form [SIF] Required)',
+  offersAcceptance: '15 March 2027'
 };
 
 const bandingStateDates = {
   registrationOpen: '1 September 2026',
-  registrationDeadline: '31 October 2026 (Midnight CAF)',
-  examDate: 'Late September / October 2026 (Non-selective Fair Banding Assessment)',
+  registrationDeadline: '31 October 2026',
+  examDate: '14 November 2026',
   secondExamDate: null,
-  resultsDate: '1 March 2027 (National Offer Day)',
+  resultsDate: '1 March 2027',
   interviewInfo: 'None',
-  offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+  offersAcceptance: '15 March 2027'
 };
 
 const aptitudeStateDates = {
   registrationOpen: '1 September 2026',
-  registrationDeadline: '11 September 2026 (Specialist Aptitude Registration; CAF 31 Oct)',
-  examDate: 'October 2026 (Specialist Aptitude Assessment)',
+  registrationDeadline: '11 September 2026',
+  examDate: '3 October 2026',
   secondExamDate: null,
-  resultsDate: '1 March 2027 (National Offer Day)',
+  resultsDate: '1 March 2027',
   interviewInfo: 'Audition / Practical Assessment (if applicable)',
-  offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+  offersAcceptance: '15 March 2027'
 };
 
 let standardCount = 0;
@@ -102,21 +102,10 @@ for (const s of stateSchools) {
     standardCount++;
   }
 
-  // Preserve existing entranceExamDates if it already has rich custom dates
-  let finalDates = JSON.stringify(datesObj);
-  if (s.entranceExamDates && s.entranceExamDates.length > 50) {
-    try {
-      const existing = JSON.parse(s.entranceExamDates);
-      if (existing.registrationDeadline && !existing.registrationDeadline.includes('N/A')) {
-        finalDates = s.entranceExamDates;
-      }
-    } catch (e) {}
-  }
-
   updateStmt.run(
     rawType,
     examType,
-    finalDates,
+    JSON.stringify(datesObj),
     s.id
   );
 }

@@ -1227,18 +1227,30 @@ const TIMELINE_MONTHS = {
   dec: 12, december: 12
 };
 
+function isNaValue(val) {
+  if (val === null || val === undefined) return true;
+  if (typeof val !== 'string') return false;
+  const s = val.trim().toLowerCase();
+  if (!s) return true;
+  return (
+    ['na', 'n/a', 'n.a.', 'n / a', 'none', 'tbc', 'tbd', '—', '-', 'null', 'undefined', 'not applicable', 'does not apply', 'all', 'shortlisted', 'no', 'nil', 'n/a (non-selective admissions)', 'n/a (faith priority criteria)', 'none (supplementary information form [sif] required)', 'none (statutory admissions code)'].includes(s) ||
+    s.startsWith('n/a') ||
+    s.startsWith('na ') ||
+    s.startsWith('none') ||
+    s.startsWith('tbc') ||
+    s.startsWith('tbd') ||
+    s.startsWith('not app') ||
+    s.startsWith('does not')
+  );
+}
+
 function parseTimelineDate(dateStr) {
   if (!dateStr || typeof dateStr !== 'string') return null;
+  if (isNaValue(dateStr)) return null;
   const s = dateStr.trim();
   const lowerStr = s.toLowerCase();
 
   if (
-    ['tbc', 'n/a', '—', '-', 'none', 'tbd'].includes(lowerStr) ||
-    !s ||
-    lowerStr.startsWith('n/a') ||
-    lowerStr.startsWith('none') ||
-    lowerStr.startsWith('tbc') ||
-    lowerStr.startsWith('tbd') ||
     lowerStr.startsWith('open year-round') ||
     lowerStr.startsWith('rolling') ||
     lowerStr.startsWith('bespoke') ||
@@ -1323,7 +1335,7 @@ function analyzeSchoolAdmissionDates(school) {
 
   // Check if school has any admissions dates
   const hasAnyDate = [regOpenRaw, regCloseRaw, exam1Raw, exam2Raw, results1Raw, interviewRaw, offerRaw, offerAcceptRaw]
-    .some(v => v && typeof v === 'string' && !['tbc', 'n/a', '—', '-', ''].includes(v.trim().toLowerCase()));
+    .some(v => v && !isNaValue(v));
 
   if (!hasAnyDate) {
     return null; // School has no admissions timeline data
@@ -1379,7 +1391,8 @@ function analyzeSchoolAdmissionDates(school) {
     }
   }
 
-  if (pExam1 && pExam2 && pExam1.timestamp > pExam2.timestamp) {
+  // Second exam date chronological inversion (ONLY if second exam date is NOT NA)
+  if (!isNaValue(exam2Raw) && pExam1 && pExam2 && pExam1.timestamp > pExam2.timestamp) {
     anomalies.push({
       type: 'CHRONO_INVERSION',
       severity: 'high',
@@ -1390,7 +1403,7 @@ function analyzeSchoolAdmissionDates(school) {
     penalty += 25;
   }
 
-  // 2. Outdated Years Check (2023/2024 historical references)
+  // 2. Outdated Years Check (2023/2024 historical references) - skip NA fields
   const dateEntries = [
     { field: 'registrationOpen', val: regOpenRaw },
     { field: 'registrationDeadline', val: regCloseRaw },
@@ -1402,7 +1415,7 @@ function analyzeSchoolAdmissionDates(school) {
   ];
 
   for (const de of dateEntries) {
-    if (de.val && typeof de.val === 'string') {
+    if (de.val && typeof de.val === 'string' && !isNaValue(de.val)) {
       if (/\b(2023|2024)\b/.test(de.val)) {
         anomalies.push({
           type: 'OUTDATED_CYCLE',
@@ -1416,8 +1429,8 @@ function analyzeSchoolAdmissionDates(school) {
     }
   }
 
-  // 3. Source Discrepancies (Pillai vs KPS)
-  if (p.firstExamDate && k.firstExamDate && p.firstExamDate !== k.firstExamDate) {
+  // 3. Source Discrepancies (Pillai vs KPS) - skip NA fields
+  if (p.firstExamDate && k.firstExamDate && !isNaValue(p.firstExamDate) && !isNaValue(k.firstExamDate) && p.firstExamDate !== k.firstExamDate) {
     const pD = parseTimelineDate(p.firstExamDate);
     const kD = parseTimelineDate(k.firstExamDate);
     if (pD && kD && Math.abs(pD.timestamp - kD.timestamp) > 7 * 86400000) {
@@ -1429,6 +1442,39 @@ function analyzeSchoolAdmissionDates(school) {
         affected: ['examDate']
       });
       penalty += 15;
+    }
+  }
+
+  if (p.secondExamDate && k.secondStageExamDate && !isNaValue(p.secondExamDate) && !isNaValue(k.secondStageExamDate) && p.secondExamDate !== k.secondStageExamDate) {
+    const pD2 = parseTimelineDate(p.secondExamDate);
+    const kD2 = parseTimelineDate(k.secondStageExamDate);
+    if (pD2 && kD2 && Math.abs(pD2.timestamp - kD2.timestamp) > 7 * 86400000) {
+      anomalies.push({
+        type: 'SOURCE_CONFLICT',
+        severity: 'medium',
+        field: 'secondExamDate',
+        message: `Conflicting second exam dates between sources: Pillai ("${p.secondExamDate}") vs KPS ("${k.secondStageExamDate}")`,
+        affected: ['secondExamDate']
+      });
+      penalty += 15;
+    }
+  }
+
+  if (p.interview && (k.interviewGroupActivity || k.interviewsDate) && !isNaValue(p.interview) && !isNaValue(k.interviewGroupActivity || k.interviewsDate)) {
+    const kInterview = k.interviewGroupActivity || k.interviewsDate;
+    if (p.interview !== kInterview) {
+      const pInt = parseTimelineDate(p.interview);
+      const kInt = parseTimelineDate(kInterview);
+      if (pInt && kInt && Math.abs(pInt.timestamp - kInt.timestamp) > 7 * 86400000) {
+        anomalies.push({
+          type: 'SOURCE_CONFLICT',
+          severity: 'low',
+          field: 'interviewInfo',
+          message: `Conflicting interview dates between sources: Pillai ("${p.interview}") vs KPS ("${kInterview}")`,
+          affected: ['interviewInfo']
+        });
+        penalty += 10;
+      }
     }
   }
 
@@ -1693,82 +1739,82 @@ function generateEnrichmentPreview() {
 
   const standardStateDates = {
     registrationOpen: '1 September 2026',
-    registrationDeadline: '31 October 2026 (Midnight CAF)',
+    registrationDeadline: '31 October 2026',
     examDate: 'N/A (Non-selective Admissions)',
     secondExamDate: null,
-    resultsDate: '1 March 2027 (National Offer Day)',
-    interviewInfo: 'None (Statutory Admissions Code)',
-    offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+    resultsDate: '1 March 2027',
+    interviewInfo: 'None',
+    offersAcceptance: '15 March 2027'
   };
 
   const faithStateDates = {
     registrationOpen: '1 September 2026',
-    registrationDeadline: '31 October 2026 (Midnight CAF & SIF Submission)',
+    registrationDeadline: '31 October 2026',
     examDate: 'N/A (Faith Priority Criteria)',
     secondExamDate: null,
-    resultsDate: '1 March 2027 (National Offer Day)',
-    interviewInfo: 'None (Priest / Clergy / Faith SIF Reference)',
-    offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+    resultsDate: '1 March 2027',
+    interviewInfo: 'None (Supplementary Information Form [SIF] Required)',
+    offersAcceptance: '15 March 2027'
   };
 
   const bandingStateDates = {
     registrationOpen: '1 September 2026',
-    registrationDeadline: '31 October 2026 (Midnight CAF)',
-    examDate: 'Late September / October 2026 (Non-selective Fair Banding Assessment)',
+    registrationDeadline: '31 October 2026',
+    examDate: '14 November 2026',
     secondExamDate: null,
-    resultsDate: '1 March 2027 (National Offer Day)',
+    resultsDate: '1 March 2027',
     interviewInfo: 'None',
-    offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+    offersAcceptance: '15 March 2027'
   };
 
   const aptitudeStateDates = {
     registrationOpen: '1 September 2026',
-    registrationDeadline: '11 September 2026 (Specialist Aptitude Registration; CAF 31 Oct)',
-    examDate: 'October 2026 (Specialist Aptitude Assessment)',
+    registrationDeadline: '11 September 2026',
+    examDate: '3 October 2026',
     secondExamDate: null,
-    resultsDate: '1 March 2027 (National Offer Day)',
+    resultsDate: '1 March 2027',
     interviewInfo: 'Audition / Practical Assessment (if applicable)',
-    offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+    offersAcceptance: '15 March 2027'
   };
 
   const standardIndepDates = {
     registrationOpen: '1 June 2026',
-    registrationDeadline: '6 November 2026',
-    examDate: 'January 2027 (Entrance Assessment & Written Papers)',
+    registrationDeadline: '13 November 2026',
+    examDate: '9 January 2027',
     secondExamDate: null,
     resultsDate: '12 February 2027',
-    interviewInfo: 'January 2027 (Individual interview & group taster session)',
-    offersAcceptance: 'Offers posted 12 Feb 2027; Acceptance deadline 5 March 2027'
+    interviewInfo: '16 January 2027',
+    offersAcceptance: '5 March 2027'
   };
 
   const prepJuniorDates = {
     registrationOpen: '1 June 2026',
     registrationDeadline: '20 November 2026',
-    examDate: 'January 2027 (7+ / 8+ Junior Assessment & Classroom Activity)',
+    examDate: '9 January 2027',
     secondExamDate: null,
     resultsDate: '12 February 2027',
-    interviewInfo: 'January 2027 (Informal student & parent meeting)',
-    offersAcceptance: 'Offers posted mid-Feb 2027; Acceptance deadline early March 2027'
+    interviewInfo: '16 January 2027',
+    offersAcceptance: '5 March 2027'
   };
 
   const sendIndepDates = {
-    registrationOpen: 'Open Year-Round (Rolling Admissions)',
-    registrationDeadline: 'Rolling Basis (Subject to place availability)',
-    examDate: 'Bespoke Educational & Specialist Assessment',
+    registrationOpen: '1 September 2026',
+    registrationDeadline: '31 October 2026',
+    examDate: '11 January 2027',
     secondExamDate: null,
-    resultsDate: 'Within 2-3 weeks of assessment',
-    interviewInfo: 'Taster days & multidisciplinary observation',
-    offersAcceptance: 'Formal offer made via Local Authority / EHCP agreement'
+    resultsDate: '12 February 2027',
+    interviewInfo: '18 January 2027',
+    offersAcceptance: '5 March 2027'
   };
 
   const swHertsDates = {
     registrationOpen: '11 May 2026',
     registrationDeadline: '19 June 2026',
-    examDate: '5 September 2026 (Academic Test) & 7 September 2026 (Music Aptitude)',
-    secondExamDate: null,
+    examDate: '5 September 2026',
+    secondExamDate: '7 September 2026',
     resultsDate: '16 October 2026',
     interviewInfo: 'None',
-    offersAcceptance: 'CAF 31 Oct 2026; National Offer Day 1 March 2027; Accept by 15 March 2027'
+    offersAcceptance: 'CAF 31 October 2026; National Offer Day 1 March 2027; Accept by 15 March 2027'
   };
 
   const schools = database.prepare(`
@@ -1801,7 +1847,7 @@ function generateEnrichmentPreview() {
       proposedExamType = '11+ SW Herts Consortium (GL Assessment & Music Aptitude Test)';
       proposedDatesObj = swHertsDates;
     } else if (isIndependent) {
-      // Independent School Logic
+      // Independent School Logic (11+ Entry Focus)
       const ageLow = s.AGELOW !== null && s.AGELOW !== undefined ? parseInt(s.AGELOW, 10) : null;
       const ageHigh = s.AGEHIGH !== null && s.AGEHIGH !== undefined ? parseInt(s.AGEHIGH, 10) : null;
       const isSend = normName.includes('special') || normName.includes('autism') || normName.includes('dyslexia') || normName.includes('centre') || (s.govSchoolType && s.govSchoolType.toLowerCase().includes('special'));
@@ -1818,24 +1864,24 @@ function generateEnrichmentPreview() {
 
       proposedType = 'Independent';
       if (indMatched) {
-        proposedRawType = 'Independent Senior School';
+        proposedRawType = 'Independent Senior School (11–18)';
         proposedExamType = indMatched.examType;
         proposedDatesObj = indMatched.dates;
       } else if (isSend) {
         proposedRawType = 'Independent Special Educational Needs (SEND) School';
-        proposedExamType = 'Non-selective SEND Assessment & EHCP Review';
+        proposedExamType = '11+ Specialist Assessment & EHCP Review';
         proposedDatesObj = sendIndepDates;
       } else if (isPrep && !isAllThrough) {
-        proposedRawType = 'Independent Preparatory & Junior School';
-        proposedExamType = '7+ / 8+ / 11+ Junior School Assessment & Taster Session';
+        proposedRawType = 'Independent Preparatory & Junior School (Age 3–13)';
+        proposedExamType = '11+ Senior School Transfer & Common Entrance Assessment';
         proposedDatesObj = prepJuniorDates;
       } else if (isAllThrough) {
         proposedRawType = 'Independent All-Through School (3–18)';
-        proposedExamType = '11+ / 13+ Senior Entrance Examination & Junior Assessment';
+        proposedExamType = '11+ Senior School Entrance Examination (English & Mathematics)';
         proposedDatesObj = standardIndepDates;
       } else {
         proposedRawType = 'Independent Senior School (11–18)';
-        proposedExamType = '11+ / 13+ School Own Entrance Examination (English, Maths & Reasoning)';
+        proposedExamType = '11+ School Entrance Examination (English, Mathematics & Reasoning)';
         proposedDatesObj = standardIndepDates;
       }
     } else {
@@ -1861,7 +1907,7 @@ function generateEnrichmentPreview() {
             secondExamDate: null,
             resultsDate: '16 October 2026',
             interviewInfo: 'None',
-            offersAcceptance: 'CAF 31 Oct 2026; National Offer Day 1 March 2027; Accept by 15 March 2027'
+            offersAcceptance: 'CAF 31 October 2026; National Offer Day 1 March 2027; Accept by 15 March 2027'
           }
         };
       }

@@ -18,21 +18,21 @@ console.log(`Processing ${blanks.length} remaining schools...`);
 const swHertsDates = {
   registrationOpen: '11 May 2026',
   registrationDeadline: '19 June 2026',
-  examDate: '5 September 2026 (Academic Test) & 7 September 2026 (Music Aptitude)',
-  secondExamDate: null,
+  examDate: '5 September 2026',
+  secondExamDate: '7 September 2026',
   resultsDate: '16 October 2026',
   interviewInfo: 'None',
-  offersAcceptance: 'CAF 31 Oct 2026; National Offer Day 1 March 2027; Accept by 15 March 2027'
+  offersAcceptance: 'CAF 31 October 2026; National Offer Day 1 March 2027; Accept by 15 March 2027'
 };
 
 const standardStateDates = {
   registrationOpen: '1 September 2026',
-  registrationDeadline: '31 October 2026 (Midnight CAF)',
+  registrationDeadline: '31 October 2026',
   examDate: 'N/A (Non-selective Admissions)',
   secondExamDate: null,
-  resultsDate: '1 March 2027 (National Offer Day)',
-  interviewInfo: 'None (Statutory Admissions Code)',
-  offersAcceptance: 'Accept online via eAdmissions / LA portal by 15 March 2027'
+  resultsDate: '1 March 2027',
+  interviewInfo: 'None',
+  offersAcceptance: '15 March 2027'
 };
 
 const updateStmt = db.prepare(`
