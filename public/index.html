@@ -771,16 +771,21 @@
 
   <!-- ADMIN PORTAL VIEW (Main Workspace & Operations Hub with Side Tabs) -->
   <div id="admin-tab-content" style="display: none;">
-    <section class="admin-portal-wrapper">
+    <section class="admin-portal-wrapper" id="admin-portal-wrapper">
 
       <!-- Admin Workspace Layout: Side Tabs Navigation + Subtab Content Viewport -->
-      <div class="admin-side-layout">
+      <div class="admin-side-layout" id="admin-side-layout">
         
         <!-- Vertical Side Tabs Navigation -->
-        <aside class="admin-side-nav">
-          <div class="side-nav-heading">MANAGEMENT TABS</div>
+        <aside class="admin-side-nav" id="admin-side-nav">
+          <div class="side-nav-header-row" style="display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0.4rem 0.5rem; margin-bottom: 0.2rem; border-bottom: 1px solid #f1f5f9;">
+            <span class="side-nav-heading" id="admin-side-nav-title" style="padding: 0; margin: 0;">MANAGEMENT TABS</span>
+            <button type="button" id="admin-sidebar-toggle-btn" class="btn-sidebar-collapse" title="Collapse Sidebar" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #64748b; font-size: 0.78rem; transition: all 0.2s;">
+              <i class="fa-solid fa-angles-left"></i>
+            </button>
+          </div>
           
-          <button class="admin-side-tab active" data-target-tab="directory" id="side-tab-btn-directory">
+          <button class="admin-side-tab active" data-target-tab="directory" id="side-tab-btn-directory" title="Directory View">
             <span class="side-tab-icon"><i class="fa-solid fa-building-columns"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">Directory View</span>
@@ -788,7 +793,7 @@
             </div>
           </button>
 
-<button class="admin-side-tab" data-target-tab="bulk-edit" id="side-tab-btn-bulk-edit">
+          <button class="admin-side-tab" data-target-tab="bulk-edit" id="side-tab-btn-bulk-edit" title="Bulk Edit">
             <span class="side-tab-icon"><i class="fa-solid fa-table-cells"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">Bulk Edit</span>
@@ -796,7 +801,7 @@
             </div>
           </button>
 
-          <button class="admin-side-tab" data-target-tab="corrections" id="side-tab-btn-corrections">
+          <button class="admin-side-tab" data-target-tab="corrections" id="side-tab-btn-corrections" title="Data Corrections">
             <span class="side-tab-icon"><i class="fa-solid fa-triangle-exclamation" style="color: #ea580c;"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">Data Corrections</span>
@@ -805,7 +810,7 @@
             <span class="side-tab-counter" id="corrections-badge-count" style="display: none;">0</span>
           </button>
 
-          <button class="admin-side-tab" data-target-tab="date-anomalies" id="side-tab-btn-date-anomalies">
+          <button class="admin-side-tab" data-target-tab="date-anomalies" id="side-tab-btn-date-anomalies" title="Date Anomaly Review">
             <span class="side-tab-icon"><i class="fa-solid fa-calendar-xmark" style="color: #ef4444;"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">Date Anomaly Review</span>
@@ -814,7 +819,7 @@
             <span class="side-tab-counter" id="date-anomalies-badge-count" style="display: none; background: #ef4444;">0</span>
           </button>
 
-          <button class="admin-side-tab" data-target-tab="merge" id="side-tab-btn-merge">
+          <button class="admin-side-tab" data-target-tab="merge" id="side-tab-btn-merge" title="Merge & De-Duplicate">
             <span class="side-tab-icon"><i class="fa-solid fa-code-merge" style="color: #7c3aed;"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">Merge &amp; De-Duplicate</span>
@@ -824,7 +829,7 @@
 
           <div class="side-nav-heading" style="margin-top: 1.25rem;">DATA &amp; CONFIGURATION</div>
 
-          <button class="admin-side-tab" data-target-tab="import-export" id="side-tab-btn-import-export">
+          <button class="admin-side-tab" data-target-tab="import-export" id="side-tab-btn-import-export" title="Import & Export">
             <span class="side-tab-icon"><i class="fa-solid fa-right-left" style="color: #059669;"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">Import &amp; Export</span>
@@ -832,7 +837,7 @@
             </div>
           </button>
 
-          <button class="admin-side-tab" data-target-tab="settings" id="side-tab-btn-settings">
+          <button class="admin-side-tab" data-target-tab="settings" id="side-tab-btn-settings" title="Settings">
             <span class="side-tab-icon"><i class="fa-solid fa-sliders" style="color: #4f46e5;"></i></span>
             <div class="side-tab-info">
               <span class="side-tab-title">Settings</span>
@@ -842,7 +847,7 @@
         </aside>
 
         <!-- Main Viewport for Active Subtab Content -->
-        <main class="admin-side-content">
+        <main class="admin-side-content" id="admin-side-content">
 
           <!-- ================= TAB 1: DIRECTORY VIEW ================= -->
           <div id="admin-subpane-directory" class="admin-subpane active">

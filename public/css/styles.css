@@ -1302,9 +1302,16 @@ body {
    ========================================================================== */
 
 .admin-portal-wrapper {
-  max-width: 1550px;
+  max-width: 1680px;
+  width: 100%;
   margin: 1.5rem auto 3rem auto;
   padding: 0 1.5rem;
+  transition: max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s ease;
+}
+
+.admin-portal-wrapper.sidebar-collapsed {
+  max-width: 100%;
+  padding: 0 2rem;
 }
 
 .admin-top-banner {
@@ -1531,48 +1538,81 @@ body {
   box-shadow: 0 2px 4px rgba(234, 88, 12, 0.3);
 }
 
-/* Collapsible Classic Parent Portal Sidebar */
-#classic-side-layout {
+/* Collapsible Classic Parent Portal & Admin Portal Sidebars */
+#classic-side-layout,
+#admin-side-layout,
+.admin-side-layout {
   transition: grid-template-columns 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 100%;
 }
 
-#classic-side-layout.collapsed {
-  grid-template-columns: 70px minmax(0, 1fr);
+#classic-side-layout.collapsed,
+#admin-side-layout.collapsed,
+.admin-side-layout.collapsed {
+  grid-template-columns: 70px minmax(0, 1fr) !important;
 }
 
-#classic-side-nav {
-  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s ease;
+#classic-side-nav,
+#admin-side-nav,
+.admin-side-nav {
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s ease, max-width 0.25s ease;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-#classic-side-nav.collapsed {
-  padding: 0.85rem 0.4rem;
-  width: 70px;
-  align-items: center;
+#classic-side-nav.collapsed,
+#admin-side-nav.collapsed,
+.admin-side-nav.collapsed {
+  padding: 0.85rem 0.4rem !important;
+  width: 70px !important;
+  max-width: 70px !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  align-items: center !important;
 }
 
-#classic-side-nav.collapsed #classic-side-nav-title {
-  display: none;
+#classic-side-nav.collapsed #classic-side-nav-title,
+#admin-side-nav.collapsed #admin-side-nav-title,
+.admin-side-nav.collapsed #admin-side-nav-title,
+#admin-side-nav.collapsed .side-nav-heading,
+.admin-side-nav.collapsed .side-nav-heading {
+  display: none !important;
 }
 
-#classic-side-nav.collapsed .side-tab-info {
-  display: none;
+#classic-side-nav.collapsed .side-tab-info,
+#admin-side-nav.collapsed .side-tab-info,
+.admin-side-nav.collapsed .side-tab-info {
+  display: none !important;
 }
 
-#classic-side-nav.collapsed .admin-side-tab {
-  justify-content: center;
-  padding: 0.65rem 0.35rem;
-  gap: 0;
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
-  margin: 0 auto;
+#admin-side-nav.collapsed .side-nav-header-row,
+.admin-side-nav.collapsed .side-nav-header-row {
+  justify-content: center !important;
+  padding: 0 0 0.5rem 0 !important;
+  width: 100% !important;
 }
 
-#classic-side-nav.collapsed .side-tab-icon {
-  margin: 0 auto;
+#classic-side-nav.collapsed .admin-side-tab,
+#admin-side-nav.collapsed .admin-side-tab,
+.admin-side-nav.collapsed .admin-side-tab {
+  justify-content: center !important;
+  padding: 0.65rem 0.35rem !important;
+  gap: 0 !important;
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 10px !important;
+  margin: 0 auto !important;
 }
 
-#classic-side-nav.collapsed .side-tab-counter {
+#classic-side-nav.collapsed .side-tab-icon,
+#admin-side-nav.collapsed .side-tab-icon,
+.admin-side-nav.collapsed .side-tab-icon {
+  margin: 0 auto !important;
+}
+
+#classic-side-nav.collapsed .side-tab-counter,
+#admin-side-nav.collapsed .side-tab-counter,
+.admin-side-nav.collapsed .side-tab-counter {
   position: absolute;
   top: 3px;
   right: 3px;
@@ -1591,9 +1631,47 @@ body {
   border-color: #94a3b8 !important;
 }
 
-/* Subpane Transitions */
+/* Subpane Transitions & Full Width Content Expansion */
+#admin-side-content,
 .admin-side-content {
   min-width: 0;
+  width: 100%;
+  flex: 1;
+}
+
+#admin-side-content .main-layout,
+.admin-side-content .main-layout {
+  max-width: 100% !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr) !important;
+  gap: 1.5rem;
+}
+
+#admin-side-content .content-area,
+.admin-side-content .content-area {
+  min-width: 0;
+  width: 100%;
+}
+
+#admin-side-content .schools-grid,
+.admin-side-content .schools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 1.5rem;
+  width: 100%;
+}
+
+#admin-side-content .table-responsive,
+.admin-side-content .table-responsive,
+#admin-side-content .admin-card,
+.admin-side-content .admin-card,
+#admin-side-content .bulk-edit-container,
+.admin-side-content .bulk-edit-container {
+  width: 100% !important;
+  max-width: 100% !important;
 }
 
 .admin-subpane {

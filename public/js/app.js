@@ -508,6 +508,7 @@ function switchTab(tabName) {
     if (adminTabBtn) adminTabBtn.classList.add('active');
     if (adminContent) adminContent.style.display = 'block';
     const targetSubTab = tabName === 'directory' ? 'directory' : (localStorage.getItem('admin_active_subtab') || 'directory');
+    initAdminSidebarCollapse();
     switchAdminSubTab(targetSubTab);
     loadAdminFieldReports();
   } else {
@@ -638,6 +639,53 @@ function switchAdminSubTab(subTabName) {
   } else if (subTabName === 'settings') {
     loadAdminSettings();
   }
+}
+
+// Collapsible Admin Portal Sidebar Controller
+function initAdminSidebarCollapse() {
+  const toggleBtn = document.getElementById('admin-sidebar-toggle-btn');
+  const layout = document.getElementById('admin-side-layout');
+  const nav = document.getElementById('admin-side-nav');
+  const wrapper = document.getElementById('admin-portal-wrapper');
+
+  if (!toggleBtn || !layout || !nav) return;
+
+  // Restore saved state from localStorage
+  const isCollapsed = localStorage.getItem('admin_sidebar_collapsed') === 'true';
+  if (isCollapsed) {
+    layout.classList.add('collapsed');
+    nav.classList.add('collapsed');
+    if (wrapper) wrapper.classList.add('sidebar-collapsed');
+    toggleBtn.innerHTML = '<i class="fa-solid fa-angles-right"></i>';
+    toggleBtn.title = 'Expand Sidebar';
+  } else {
+    layout.classList.remove('collapsed');
+    nav.classList.remove('collapsed');
+    if (wrapper) wrapper.classList.remove('sidebar-collapsed');
+    toggleBtn.innerHTML = '<i class="fa-solid fa-angles-left"></i>';
+    toggleBtn.title = 'Collapse Sidebar';
+  }
+
+  toggleBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const willCollapse = !layout.classList.contains('collapsed');
+    if (willCollapse) {
+      layout.classList.add('collapsed');
+      nav.classList.add('collapsed');
+      if (wrapper) wrapper.classList.add('sidebar-collapsed');
+      toggleBtn.innerHTML = '<i class="fa-solid fa-angles-right"></i>';
+      toggleBtn.title = 'Expand Sidebar';
+      localStorage.setItem('admin_sidebar_collapsed', 'true');
+    } else {
+      layout.classList.remove('collapsed');
+      nav.classList.remove('collapsed');
+      if (wrapper) wrapper.classList.remove('sidebar-collapsed');
+      toggleBtn.innerHTML = '<i class="fa-solid fa-angles-left"></i>';
+      toggleBtn.title = 'Collapse Sidebar';
+      localStorage.setItem('admin_sidebar_collapsed', 'false');
+    }
+  };
 }
 
 
@@ -1613,6 +1661,9 @@ function setupEventListeners() {
       if (target) switchAdminSubTab(target);
     });
   });
+
+  // Admin Sidebar Collapse Toggle
+  initAdminSidebarCollapse();
 
   // Classic Portal Side Tabs Navigation Buttons
   document.querySelectorAll('.classic-side-tab[data-target-classic-tab]').forEach(tabBtn => {
