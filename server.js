@@ -812,6 +812,46 @@ app.post('/api/system-settings', (req, res) => {
   }
 });
 
+// GET /api/admin/database-instance - Get current DB instance status & metadata
+app.get('/api/admin/database-instance', (req, res) => {
+  try {
+    const meta = db.getDatabaseInstancesMetadata();
+    res.json(meta);
+  } catch (err) {
+    console.error('Failed to get database instance metadata:', err);
+    res.status(500).json({ error: 'Failed to retrieve database instance information' });
+  }
+});
+
+// POST /api/admin/database-instance - Switch active DB instance between production and test
+app.post('/api/admin/database-instance', (req, res) => {
+  try {
+    const { instance } = req.body || {};
+    if (!instance || !['production', 'test'].includes(instance.toLowerCase())) {
+      return res.status(400).json({ error: 'Valid instance value ("production" or "test") is required' });
+    }
+    const result = db.setActiveDatabaseInstance(instance);
+    res.json({
+      message: `Switched active database to ${result.activeInstance.toUpperCase()} instance`,
+      ...result
+    });
+  } catch (err) {
+    console.error('Failed to switch database instance:', err);
+    res.status(500).json({ error: err.message || 'Failed to switch database instance' });
+  }
+});
+
+// POST /api/admin/reset-test-database - Reset/clone test DB copy from production master
+app.post('/api/admin/reset-test-database', (req, res) => {
+  try {
+    const result = db.resetTestDatabaseFromProduction();
+    res.json(result);
+  } catch (err) {
+    console.error('Failed to reset test database:', err);
+    res.status(500).json({ error: err.message || 'Failed to reset test database' });
+  }
+});
+
 // Helper to parse cookies from incoming HTTP request
 function parseCookies(req) {
   const list = {};

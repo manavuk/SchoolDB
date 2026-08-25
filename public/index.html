@@ -29,8 +29,20 @@
       display: none !important;
     }
   </style>
-</head>
 <body>
+
+  <!-- Sticky Test Environment Active Banner (Visible when test DB is active) -->
+  <div id="test-env-banner" class="env-test-banner" style="display: none;">
+    <div class="banner-content">
+      <i class="fa-solid fa-triangle-exclamation" style="font-size: 1.1rem;"></i>
+      <span><strong>TEST DATABASE ENVIRONMENT ACTIVE</strong> &mdash; You are operating on <code>schooldb_test.sqlite</code>. Changes will not affect the production database.</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+      <button type="button" id="btn-banner-switch-prod" class="btn" style="background: #1e293b; color: white; padding: 0.25rem 0.75rem; font-size: 0.78rem; font-weight: 700; border-radius: 6px;">
+        <i class="fa-solid fa-arrow-right-arrow-left"></i> Switch to Production
+      </button>
+    </div>
+  </div>
 
   <!-- Top Navigation Bar -->
   <header class="navbar">
@@ -1488,6 +1500,62 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
           <!-- ================= TAB 6: SETTINGS ================= -->
           <div id="admin-subpane-settings" class="admin-subpane" style="display: none;">
             
+            <!-- Database Instance & Environment Switcher Card -->
+            <div class="admin-card" style="margin-bottom: 1.5rem;">
+              <div class="card-title-bar">
+                <h3><i class="fa-solid fa-database" style="color: #4f46e5;"></i> Database Environment &amp; Instance Control</h3>
+                <span id="db-instance-active-pill" class="badge-env-pill badge-env-prod">
+                  <i class="fa-solid fa-circle-check"></i> PRODUCTION (schooldb.sqlite)
+                </span>
+              </div>
+              <p class="helper-text">Seamlessly switch between the live <strong>Production Database</strong> and an isolated <strong>Test Database</strong> copy for experiments, testing new features, or batch modifications without impacting live parent portals.</p>
+
+              <div class="db-env-grid">
+                <!-- Production DB Card -->
+                <div id="db-card-prod" class="db-env-card active-prod">
+                  <div class="db-env-header">
+                    <span class="db-env-title">
+                      <i class="fa-solid fa-shield-halved" style="color: #10b981;"></i> Production Database
+                    </span>
+                    <span class="badge-env-pill badge-env-prod">Live Master</span>
+                  </div>
+                  <p style="font-size: 0.84rem; color: #475569; margin: 0 0 0.5rem 0;">Primary canonical database for live user portfolios, school directory, and admissions data.</p>
+                  <div class="db-env-meta">
+                    <div><strong>File:</strong> <code>data/schooldb.sqlite</code></div>
+                    <div id="db-prod-meta-schools"><strong>Schools:</strong> Loading...</div>
+                    <div id="db-prod-meta-mtime"><strong>Last Modified:</strong> -</div>
+                  </div>
+                  <button type="button" id="btn-select-prod-db" class="btn btn-primary" style="width: 100%; margin-top: 0.85rem; font-size: 0.85rem; font-weight: 700;">
+                    <i class="fa-solid fa-check"></i> Active (Production)
+                  </button>
+                </div>
+
+                <!-- Test DB Card -->
+                <div id="db-card-test" class="db-env-card">
+                  <div class="db-env-header">
+                    <span class="db-env-title">
+                      <i class="fa-solid fa-flask-vial" style="color: #f59e0b;"></i> Test Database Copy
+                    </span>
+                    <span class="badge-env-pill badge-env-test">Sandbox</span>
+                  </div>
+                  <p style="font-size: 0.84rem; color: #475569; margin: 0 0 0.5rem 0;">Isolated clone of the database for safe testing, experimental modifications, and dry-runs.</p>
+                  <div class="db-env-meta">
+                    <div><strong>File:</strong> <code>data/schooldb_test.sqlite</code></div>
+                    <div id="db-test-meta-schools"><strong>Schools:</strong> Loading...</div>
+                    <div id="db-test-meta-mtime"><strong>Last Modified:</strong> -</div>
+                  </div>
+                  <div style="display: flex; gap: 0.5rem; margin-top: 0.85rem;">
+                    <button type="button" id="btn-select-test-db" class="btn btn-outline" style="flex: 1; font-size: 0.85rem; font-weight: 700;">
+                      <i class="fa-solid fa-arrow-right-to-bracket"></i> Switch to Test DB
+                    </button>
+                    <button type="button" id="btn-reset-test-db" class="btn btn-outline" title="Clone fresh copy from Production" style="padding: 0.5rem 0.75rem; font-size: 0.85rem; color: #dc2626; border-color: #fecdd3;" onclick="resetTestDbConfirmation()">
+                      <i class="fa-solid fa-arrows-rotate"></i> Reset
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Feature & Portal Visibility Settings -->
             <div class="admin-card" style="margin-bottom: 1.5rem;">
               <div class="card-title-bar">

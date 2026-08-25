@@ -2,10 +2,44 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 
-function resolveDatabasePath() {
+const PROD_DB_NAME = 'schooldb.sqlite';
+const TEST_DB_NAME = 'schooldb_test.sqlite';
+const INSTANCE_CONFIG_FILE = 'active_instance.json';
+
+function getLocalDataDir() {
+  const localDataDir = path.join(__dirname, 'data');
+  if (!fs.existsSync(localDataDir)) {
+    try {
+      fs.mkdirSync(localDataDir, { recursive: true });
+    } catch (e) {}
+  }
+  return localDataDir;
+}
+
+function getActiveInstanceType() {
+  if (process.env.DB_INSTANCE) {
+    return process.env.DB_INSTANCE.toLowerCase() === 'test' ? 'test' : 'production';
+  }
+  const configPath = path.join(getLocalDataDir(), INSTANCE_CONFIG_FILE);
+  if (fs.existsSync(configPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (parsed.activeInstance === 'test') return 'test';
+    } catch (e) {}
+  }
+  return 'production';
+}
+
+let currentActiveInstance = getActiveInstanceType();
+let currentDbPath = null;
+
+function resolveDatabasePath(instanceType = null) {
   if (process.env.DB_PATH) {
     return process.env.DB_PATH;
   }
+
+  const activeType = instanceType || currentActiveInstance;
+  const dbFileName = activeType === 'test' ? TEST_DB_NAME : PROD_DB_NAME;
 
   const isServerless = Boolean(
     process.env.LAMBDA_TASK_ROOT ||
@@ -16,13 +50,18 @@ function resolveDatabasePath() {
   );
 
   if (isServerless) {
-    const tmpDbPath = path.join('/tmp', 'schooldb.sqlite');
-    const seedDbPath = path.join(__dirname, 'data', 'schooldb.sqlite');
+    const tmpDbPath = path.join('/tmp', dbFileName);
+    const seedDbPath = path.join(__dirname, 'data', dbFileName);
+    const prodSeedPath = path.join(__dirname, 'data', PROD_DB_NAME);
 
     // Copy initial seed DB from read-only /var/task to writable /tmp if /tmp DB doesn't exist
     try {
-      if (fs.existsSync(seedDbPath) && !fs.existsSync(tmpDbPath)) {
-        fs.copyFileSync(seedDbPath, tmpDbPath);
+      if (!fs.existsSync(tmpDbPath)) {
+        if (fs.existsSync(seedDbPath)) {
+          fs.copyFileSync(seedDbPath, tmpDbPath);
+        } else if (fs.existsSync(prodSeedPath)) {
+          fs.copyFileSync(prodSeedPath, tmpDbPath);
+        }
       }
     } catch (err) {
       console.warn('Warning: Could not copy seed database to /tmp:', err.message);
@@ -31,29 +70,39 @@ function resolveDatabasePath() {
     return tmpDbPath;
   }
 
-  const localDataDir = path.join(__dirname, 'data');
-  if (!fs.existsSync(localDataDir)) {
-    try {
-      fs.mkdirSync(localDataDir, { recursive: true });
-    } catch (e) {}
-  }
-  return path.join(localDataDir, 'schooldb.sqlite');
-}
+  const dataDir = getLocalDataDir();
+  const prodPath = path.join(dataDir, PROD_DB_NAME);
+  const testPath = path.join(dataDir, TEST_DB_NAME);
 
-const DB_PATH = resolveDatabasePath();
+  // If test instance requested but does not exist, clone from production
+  if (activeType === 'test' && !fs.existsSync(testPath)) {
+    if (fs.existsSync(prodPath)) {
+      try {
+        fs.copyFileSync(prodPath, testPath);
+      } catch (e) {}
+    }
+  }
+
+  return path.join(dataDir, dbFileName);
+}
 
 let db = null;
 
 function getDb() {
-  if (!db) {
-    const targetDir = path.dirname(DB_PATH);
+  const targetPath = resolveDatabasePath(currentActiveInstance);
+  if (!db || currentDbPath !== targetPath) {
+    if (db) {
+      try { db.close(); } catch (e) {}
+    }
+    const targetDir = path.dirname(targetPath);
     if (!fs.existsSync(targetDir)) {
       try {
         fs.mkdirSync(targetDir, { recursive: true });
       } catch (e) {}
     }
 
-    db = new DatabaseSync(DB_PATH);
+    db = new DatabaseSync(targetPath);
+    currentDbPath = targetPath;
 
     try {
       db.exec('PRAGMA journal_mode = WAL;');
@@ -64,6 +113,126 @@ function getDb() {
     initTables();
   }
   return db;
+}
+
+function getActiveDatabaseInstance() {
+  return currentActiveInstance;
+}
+
+function isTestInstanceActive() {
+  return currentActiveInstance === 'test';
+}
+
+function setActiveDatabaseInstance(targetInstance) {
+  const normalized = (targetInstance || '').toLowerCase() === 'test' ? 'test' : 'production';
+  const dataDir = getLocalDataDir();
+  const prodPath = path.join(dataDir, PROD_DB_NAME);
+  const testPath = path.join(dataDir, TEST_DB_NAME);
+
+  if (normalized === 'test' && !fs.existsSync(testPath)) {
+    if (fs.existsSync(prodPath)) {
+      fs.copyFileSync(prodPath, testPath);
+    }
+  }
+
+  if (db) {
+    try { db.close(); } catch (e) {}
+    db = null;
+    currentDbPath = null;
+  }
+
+  currentActiveInstance = normalized;
+
+  // Persist preference
+  const configPath = path.join(dataDir, INSTANCE_CONFIG_FILE);
+  try {
+    fs.writeFileSync(configPath, JSON.stringify({
+      activeInstance: normalized,
+      updatedAt: new Date().toISOString()
+    }, null, 2), 'utf8');
+  } catch (e) {}
+
+  const activeDb = getDb();
+  const schoolCount = activeDb.prepare('SELECT COUNT(*) as c FROM schools').get().c;
+
+  return {
+    success: true,
+    activeInstance: normalized,
+    dbPath: currentDbPath,
+    totalSchools: schoolCount,
+    isProduction: normalized === 'production'
+  };
+}
+
+function resetTestDatabaseFromProduction() {
+  const dataDir = getLocalDataDir();
+  const prodPath = path.join(dataDir, PROD_DB_NAME);
+  const testPath = path.join(dataDir, TEST_DB_NAME);
+
+  if (!fs.existsSync(prodPath)) {
+    throw new Error('Production database (schooldb.sqlite) does not exist.');
+  }
+
+  const wasTest = currentActiveInstance === 'test';
+  if (wasTest && db) {
+    try { db.close(); } catch (e) {}
+    db = null;
+    currentDbPath = null;
+  }
+
+  fs.copyFileSync(prodPath, testPath);
+
+  if (wasTest) {
+    getDb();
+  }
+
+  return {
+    success: true,
+    message: 'Test database (schooldb_test.sqlite) successfully reset from production master.',
+    testDbPath: testPath,
+    timestamp: new Date().toISOString()
+  };
+}
+
+function getDatabaseInstancesMetadata() {
+  const dataDir = getLocalDataDir();
+  const prodPath = path.join(dataDir, PROD_DB_NAME);
+  const testPath = path.join(dataDir, TEST_DB_NAME);
+
+  let prodStats = { exists: fs.existsSync(prodPath), totalSchools: 0, sizeBytes: 0, lastModified: null };
+  let testStats = { exists: fs.existsSync(testPath), totalSchools: 0, sizeBytes: 0, lastModified: null };
+
+  if (prodStats.exists) {
+    const s = fs.statSync(prodPath);
+    prodStats.sizeBytes = s.size;
+    prodStats.lastModified = s.mtime;
+    try {
+      const tempDb = new DatabaseSync(prodPath);
+      prodStats.totalSchools = tempDb.prepare('SELECT COUNT(*) as c FROM schools').get().c;
+      tempDb.close();
+    } catch (e) {}
+  }
+
+  if (testStats.exists) {
+    const s = fs.statSync(testPath);
+    testStats.sizeBytes = s.size;
+    testStats.lastModified = s.mtime;
+    try {
+      const tempDb = new DatabaseSync(testPath);
+      testStats.totalSchools = tempDb.prepare('SELECT COUNT(*) as c FROM schools').get().c;
+      tempDb.close();
+    } catch (e) {}
+  }
+
+  return {
+    activeInstance: currentActiveInstance,
+    isProduction: currentActiveInstance === 'production',
+    currentDbPath: currentDbPath || resolveDatabasePath(currentActiveInstance),
+    instances: {
+      production: prodStats,
+      test: testStats
+    }
+  };
 }
 
 function initTables() {
@@ -2252,7 +2421,12 @@ module.exports = {
   getDataQualitySummary,
   runFullDatabaseEnrichment,
   generateEnrichmentPreview,
-  commitEnrichmentChanges
+  commitEnrichmentChanges,
+  getActiveDatabaseInstance,
+  isTestInstanceActive,
+  setActiveDatabaseInstance,
+  resetTestDatabaseFromProduction,
+  getDatabaseInstancesMetadata
 };
 
 

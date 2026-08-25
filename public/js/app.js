@@ -1751,6 +1751,22 @@ function setupEventListeners() {
     });
   }
 
+  // Database Instance Controls
+  const btnSelectProdDb = document.getElementById('btn-select-prod-db');
+  if (btnSelectProdDb) {
+    btnSelectProdDb.addEventListener('click', () => switchDatabaseInstance('production'));
+  }
+
+  const btnSelectTestDb = document.getElementById('btn-select-test-db');
+  if (btnSelectTestDb) {
+    btnSelectTestDb.addEventListener('click', () => switchDatabaseInstance('test'));
+  }
+
+  const btnBannerSwitchProd = document.getElementById('btn-banner-switch-prod');
+  if (btnBannerSwitchProd) {
+    btnBannerSwitchProd.addEventListener('click', () => switchDatabaseInstance('production'));
+  }
+
 
 
   const filterInputs = ['search-input', 'la-select', 'type-select', 'gender-select', 'ofsted-select', 'exam-select', 'hot-select'];
@@ -3835,10 +3851,11 @@ async function saveRecWeights(e) {
   }
 }
 
-// Load Admin Portal Settings (Rec weights & System Feature toggles)
+// Load Admin Portal Settings (Rec weights & System Feature toggles & DB Instance)
 async function loadAdminSettings() {
   await loadRecWeights();
   await loadSystemSettings();
+  await loadDatabaseInstanceSettings();
 }
 
 async function loadSystemSettings() {
@@ -3898,6 +3915,172 @@ async function saveSystemSettingsHandler() {
   } catch (err) {
     console.error('Error saving system settings:', err);
     showToast('Error saving portal settings', 'error');
+  }
+}
+
+// Database Environment & Instance Management (Production vs Test Sandbox)
+let currentDbMeta = null;
+
+async function loadDatabaseInstanceSettings() {
+  try {
+    const res = await fetch('/api/admin/database-instance', {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+    if (res.ok) {
+      currentDbMeta = await res.json();
+      updateDatabaseInstanceUI(currentDbMeta);
+    }
+  } catch (err) {
+    console.error('Error fetching database instance metadata:', err);
+  }
+}
+
+function updateDatabaseInstanceUI(meta) {
+  if (!meta) return;
+  const isProd = meta.activeInstance === 'production';
+  
+  // Update sticky top banner
+  const banner = document.getElementById('test-env-banner');
+  if (banner) {
+    banner.style.display = isProd ? 'none' : 'flex';
+  }
+
+  // Update Settings Subpane Pills & Cards
+  const activePill = document.getElementById('db-instance-active-pill');
+  if (activePill) {
+    if (isProd) {
+      activePill.className = 'badge-env-pill badge-env-prod';
+      activePill.innerHTML = '<i class="fa-solid fa-circle-check"></i> PRODUCTION (schooldb.sqlite)';
+    } else {
+      activePill.className = 'badge-env-pill badge-env-test';
+      activePill.innerHTML = '<i class="fa-solid fa-flask-vial"></i> TEST ENVIRONMENT (schooldb_test.sqlite)';
+    }
+  }
+
+  const prodCard = document.getElementById('db-card-prod');
+  const testCard = document.getElementById('db-card-test');
+  const btnProd = document.getElementById('btn-select-prod-db');
+  const btnTest = document.getElementById('btn-select-test-db');
+
+  if (prodCard) {
+    prodCard.className = `db-env-card ${isProd ? 'active-prod' : ''}`;
+  }
+  if (testCard) {
+    testCard.className = `db-env-card ${!isProd ? 'active-test' : ''}`;
+  }
+
+  if (btnProd) {
+    if (isProd) {
+      btnProd.className = 'btn btn-primary';
+      btnProd.innerHTML = '<i class="fa-solid fa-check"></i> Active (Production)';
+      btnProd.disabled = true;
+    } else {
+      btnProd.className = 'btn btn-outline';
+      btnProd.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i> Switch to Production';
+      btnProd.disabled = false;
+    }
+  }
+
+  if (btnTest) {
+    if (!isProd) {
+      btnTest.className = 'btn btn-primary';
+      btnTest.style.background = '#d97706';
+      btnTest.style.borderColor = '#d97706';
+      btnTest.innerHTML = '<i class="fa-solid fa-check"></i> Active (Test Sandbox)';
+      btnTest.disabled = true;
+    } else {
+      btnTest.className = 'btn btn-outline';
+      btnTest.style.background = '';
+      btnTest.style.borderColor = '';
+      btnTest.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i> Switch to Test DB';
+      btnTest.disabled = false;
+    }
+  }
+
+  // Update Meta labels
+  if (meta.instances) {
+    const prodSchools = document.getElementById('db-prod-meta-schools');
+    const prodMtime = document.getElementById('db-prod-meta-mtime');
+    const testSchools = document.getElementById('db-test-meta-schools');
+    const testMtime = document.getElementById('db-test-meta-mtime');
+
+    if (prodSchools && meta.instances.production) {
+      prodSchools.innerHTML = `<strong>Schools:</strong> ${(meta.instances.production.totalSchools || 0).toLocaleString()} records`;
+    }
+    if (prodMtime && meta.instances.production && meta.instances.production.lastModified) {
+      prodMtime.innerHTML = `<strong>Last Modified:</strong> ${new Date(meta.instances.production.lastModified).toLocaleDateString()} ${new Date(meta.instances.production.lastModified).toLocaleTimeString()}`;
+    }
+    if (testSchools && meta.instances.test) {
+      testSchools.innerHTML = `<strong>Schools:</strong> ${(meta.instances.test.totalSchools || 0).toLocaleString()} records`;
+    }
+    if (testMtime && meta.instances.test && meta.instances.test.lastModified) {
+      testMtime.innerHTML = `<strong>Last Modified:</strong> ${new Date(meta.instances.test.lastModified).toLocaleDateString()} ${new Date(meta.instances.test.lastModified).toLocaleTimeString()}`;
+    }
+  }
+}
+
+async function switchDatabaseInstance(targetInstance) {
+  const norm = (targetInstance || '').toLowerCase() === 'test' ? 'test' : 'production';
+  const confirmMsg = norm === 'test'
+    ? 'Switch active database to the TEST environment (schooldb_test.sqlite)? Changes made while in test mode will not affect production.'
+    : 'Switch active database back to the PRODUCTION environment (schooldb.sqlite)?';
+
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    showToast(`Switching active database to ${norm.toUpperCase()}...`, 'info');
+    const res = await fetch('/api/admin/database-instance', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ instance: norm })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(`Switched to ${norm.toUpperCase()} database (${data.totalSchools} schools).`, 'success');
+      await loadDatabaseInstanceSettings();
+      if (typeof loadSchools === 'function') await loadSchools();
+      if (typeof loadAdminSchools === 'function') await loadAdminSchools();
+      if (typeof loadAdminAuditData === 'function') await loadAdminAuditData();
+    } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed to switch database', 'error');
+    }
+  } catch (err) {
+    console.error('Error switching database instance:', err);
+    showToast('Failed to switch database instance', 'error');
+  }
+}
+
+async function resetTestDbConfirmation() {
+  if (!confirm('Are you sure you want to reset the Test Database? This will overwrite schooldb_test.sqlite with the latest clean copy of the Production Database.')) {
+    return;
+  }
+
+  try {
+    showToast('Cloning fresh copy from Production Database...', 'info');
+    const res = await fetch('/api/admin/reset-test-database', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(data.message || 'Test database reset successfully!', 'success');
+      await loadDatabaseInstanceSettings();
+    } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed to reset test database', 'error');
+    }
+  } catch (err) {
+    console.error('Error resetting test database:', err);
+    showToast('Failed to reset test database', 'error');
   }
 }
 
