@@ -698,15 +698,31 @@ async function fetchStats() {
 
     // Populate LA dropdown
     const laSelect = document.getElementById('la-select');
-    const prevVal = laSelect.value;
-    laSelect.innerHTML = '<option value="">All Boroughs / Local Authorities</option>';
-    data.localAuthorities.forEach(la => {
-      const opt = document.createElement('option');
-      opt.value = la;
-      opt.textContent = la;
-      laSelect.appendChild(opt);
-    });
-    laSelect.value = prevVal;
+    if (laSelect) {
+      const prevVal = laSelect.value;
+      laSelect.innerHTML = '<option value="">All Boroughs / Local Authorities</option>';
+      data.localAuthorities.forEach(la => {
+        const opt = document.createElement('option');
+        opt.value = la;
+        opt.textContent = la;
+        laSelect.appendChild(opt);
+      });
+      laSelect.value = prevVal;
+    }
+
+    // Populate Region dropdown
+    const regionSelect = document.getElementById('region-select');
+    if (regionSelect && data.regions) {
+      const prevReg = regionSelect.value;
+      regionSelect.innerHTML = '<option value="">All UK Regions</option>';
+      data.regions.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = r;
+        regionSelect.appendChild(opt);
+      });
+      regionSelect.value = prevReg;
+    }
   } catch (err) {
     console.error('Failed to fetch stats:', err);
   }
@@ -783,34 +799,113 @@ function populateManualMergeDropdowns() {
   setupMergeTypeahead('manual-merge-input-b', 'manual-merge-school-b', 'manual-merge-suggestions-b');
 }
 
+// Render active filter chips above results
+function renderActiveFilterChips() {
+  const container = document.getElementById('active-filters-chips');
+  if (!container) return;
+
+  const chips = [];
+
+  const tagSelect = document.getElementById('tag-select');
+  if (tagSelect && tagSelect.value) {
+    const text = tagSelect.options[tagSelect.selectedIndex]?.text || tagSelect.value;
+    chips.push({ id: 'tag-select', label: text });
+  }
+
+  const regionSelect = document.getElementById('region-select');
+  if (regionSelect && regionSelect.value) {
+    chips.push({ id: 'region-select', label: `Region: ${regionSelect.value}` });
+  }
+
+  const laSelect = document.getElementById('la-select');
+  if (laSelect && laSelect.value) {
+    chips.push({ id: 'la-select', label: `Borough: ${laSelect.value}` });
+  }
+
+  const typeSelect = document.getElementById('type-select');
+  if (typeSelect && typeSelect.value) {
+    chips.push({ id: 'type-select', label: `Type: ${typeSelect.value}` });
+  }
+
+  const searchInput = document.getElementById('search-input');
+  if (searchInput && searchInput.value.trim()) {
+    chips.push({ id: 'search-input', label: `"${searchInput.value.trim()}"` });
+  }
+
+  const stageSelect = document.getElementById('second-stage-select');
+  if (stageSelect && stageSelect.value) {
+    chips.push({ id: 'second-stage-select', label: `2nd Stage: ${stageSelect.value === 'yes' ? 'Yes' : 'No'}` });
+  }
+
+  const feeSelect = document.getElementById('fee-select');
+  if (feeSelect && feeSelect.value) {
+    chips.push({ id: 'fee-select', label: `Funding: ${feeSelect.value}` });
+  }
+
+  if (chips.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = chips.map(c => `
+    <span class="active-filter-chip" data-clear-filter="${c.id}" style="display: inline-flex; align-items: center; gap: 0.3rem; background: #e0e7ff; color: #4338ca; border: 1px solid #c7d2fe; border-radius: 999px; padding: 0.15rem 0.55rem; font-size: 0.75rem; font-weight: 600; cursor: pointer;" title="Click to remove filter">
+      ${c.label} <i class="fa-solid fa-xmark" style="font-size: 0.7rem; opacity: 0.7;"></i>
+    </span>
+  `).join('');
+
+  container.querySelectorAll('[data-clear-filter]').forEach(el => {
+    el.addEventListener('click', () => {
+      const targetId = el.getAttribute('data-clear-filter');
+      const targetEl = document.getElementById(targetId);
+      if (targetEl) {
+        targetEl.value = '';
+        loadSchools();
+      }
+    });
+  });
+}
+
 // Fetch schools based on filters
 async function loadSchools() {
-  const search = document.getElementById('search-input').value;
-  const la = document.getElementById('la-select').value;
-  const type = document.getElementById('type-select').value;
-  const gender = document.getElementById('gender-select').value;
-  const ofsted = document.getElementById('ofsted-select').value;
-  const exam = document.getElementById('exam-select').value;
+  const search = document.getElementById('search-input') ? document.getElementById('search-input').value.trim() : '';
+  const tag = document.getElementById('tag-select') ? document.getElementById('tag-select').value.trim() : '';
+  const region = document.getElementById('region-select') ? document.getElementById('region-select').value.trim() : '';
+  const la = document.getElementById('la-select') ? document.getElementById('la-select').value.trim() : '';
+  const type = document.getElementById('type-select') ? document.getElementById('type-select').value.trim() : '';
+  const gender = document.getElementById('gender-select') ? document.getElementById('gender-select').value.trim() : '';
+  const ofsted = document.getElementById('ofsted-select') ? document.getElementById('ofsted-select').value.trim() : '';
+  const exam = document.getElementById('exam-select') ? document.getElementById('exam-select').value.trim() : '';
+  const secondStage = document.getElementById('second-stage-select') ? document.getElementById('second-stage-select').value.trim() : '';
+  const confidence = document.getElementById('confidence-select') ? document.getElementById('confidence-select').value.trim() : '';
+  const fee = document.getElementById('fee-select') ? document.getElementById('fee-select').value.trim() : '';
+  const hotSelect = document.getElementById('hot-select') ? document.getElementById('hot-select').value.trim() : '';
 
-  const hotSelect = document.getElementById('hot-select') ? document.getElementById('hot-select').value : '';
+  renderActiveFilterChips();
 
   const queryParams = new URLSearchParams();
   if (search) queryParams.append('search', search);
+  if (tag) queryParams.append('tag', tag);
+  if (region) queryParams.append('region', region);
   if (la) queryParams.append('la', la);
   if (type) queryParams.append('type', type);
   if (gender) queryParams.append('gender', gender);
   if (ofsted) queryParams.append('ofsted', ofsted);
   if (exam) queryParams.append('exam', exam);
+  if (secondStage) queryParams.append('secondStage', secondStage);
+  if (confidence) queryParams.append('confidence', confidence);
+  if (fee) queryParams.append('fee', fee);
   if (hotSelect === 'hot') queryParams.append('hot', 'true');
   if (hotSelect === 'official') queryParams.append('official', 'true');
-
 
   try {
     const res = await fetch(`/api/schools?${queryParams.toString()}`);
     const data = await res.json();
-    currentSchools = data.schools;
+    currentSchools = data.schools || [];
 
-    document.getElementById('results-num').textContent = data.total;
+    const resNum = document.getElementById('results-num');
+    if (resNum) {
+      resNum.textContent = data.total !== undefined ? data.total.toLocaleString() : currentSchools.length.toLocaleString();
+    }
     const quickTotal = document.getElementById('admin-quick-total-schools');
     if (quickTotal && data.total !== undefined) {
       quickTotal.textContent = data.total.toLocaleString();
@@ -823,6 +918,7 @@ async function loadSchools() {
     console.error('Error fetching schools list:', err);
   }
 }
+window.loadSchools = loadSchools;
 
 // Global format helpers
 const formatOfsted = r => (r === 'Independent (ISI Excellent)' ? 'ISI Excellent' : (r || 'N/A'));
@@ -862,17 +958,30 @@ function renderSchools() {
   const cardsContainer = document.getElementById('schools-container');
   const tableBody = document.getElementById('schools-table-body');
 
-  cardsContainer.innerHTML = '';
-  tableBody.innerHTML = '';
+  if (cardsContainer) cardsContainer.innerHTML = '';
+  if (tableBody) tableBody.innerHTML = '';
 
   if (currentSchools.length === 0) {
-    cardsContainer.innerHTML = `
-      <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; background: white; border-radius: 12px; border: 1px solid #e2e8f0;">
-        <i class="fa-solid fa-folder-open" style="font-size: 2.5rem; color: #94a3b8; margin-bottom: 1rem;"></i>
-        <h3>No matching high schools found</h3>
-        <p style="color: #64748b; font-size: 0.9rem;">Try adjusting your filter criteria or search keyword.</p>
-      </div>
-    `;
+    if (cardsContainer) {
+      cardsContainer.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 3rem; background: white; border-radius: 12px; border: 1px solid #e2e8f0;">
+          <i class="fa-solid fa-folder-open" style="font-size: 2.5rem; color: #94a3b8; margin-bottom: 1rem;"></i>
+          <h3>No matching high schools found</h3>
+          <p style="color: #64748b; font-size: 0.9rem;">Try adjusting your filter criteria or search keyword.</p>
+        </div>
+      `;
+    }
+    if (tableBody) {
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align: center; padding: 3rem; color: #64748b;">
+            <i class="fa-solid fa-folder-open" style="font-size: 2rem; color: #94a3b8; margin-bottom: 0.5rem; display: block;"></i>
+            <strong>No matching high schools found</strong>
+            <div style="font-size: 0.85rem; margin-top: 0.25rem;">Try adjusting your filter criteria or search keyword.</div>
+          </td>
+        </tr>
+      `;
+    }
     return;
   }
 
@@ -889,6 +998,28 @@ function renderSchools() {
 
     const isCompared = compareList.some(s => s.id === school.id);
 
+    // Dynamic Badges & Tags
+    let tagsArr = [];
+    if (Array.isArray(school.verification_tags)) tagsArr = school.verification_tags;
+    else if (typeof school.verification_tags === 'string') {
+      try { tagsArr = JSON.parse(school.verification_tags); } catch(e) { tagsArr = [school.verification_tags]; }
+    }
+
+    const isLLM = tagsArr.includes('llm_enriched') || tagsArr.includes('llm_verified') || tagsArr.includes('gemini_crawl') || tagsArr.includes('chatgpt_crawl') || school.verification_status === 'llm_enriched' || Boolean(school.llm_enriched_at);
+    const isAutoVerified = tagsArr.includes('auto_verified') || tagsArr.includes('web_verified') || school.verification_status === 'auto_verified' || school.verification_status === 'verified' || Boolean(school.verified_at);
+    const isTwoStage = school.second_stage_exam_required === 'Yes' || (school.entranceExamType && (school.entranceExamType.includes('Two-Stage') || school.entranceExamType.includes('Stage 2'))) || tagsArr.includes('two_stage_exam');
+    const hasDatesVerified = tagsArr.includes('dates_verified') || tagsArr.includes('dates_current') || tagsArr.includes('p0_cycle_current');
+    const hasDates = school.entranceExamDates && school.entranceExamDates !== '{}' && school.entranceExamDates !== 'null';
+    const hasFees = Boolean(school.feesTermly || school.registrationFee);
+
+    let tagBadgesHtml = '';
+    if (isLLM) tagBadgesHtml += `<span class="badge-tag badge-tag-llm" data-tag-filter="llm_enriched" title="Filter by AI LLM Enriched"><i class="fa-solid fa-robot"></i> LLM Enriched</span>`;
+    if (isAutoVerified) tagBadgesHtml += `<span class="badge-tag badge-tag-verified" data-tag-filter="auto_verified" title="Filter by Web Verified"><i class="fa-solid fa-circle-check"></i> Web Verified</span>`;
+    if (hasDatesVerified) tagBadgesHtml += `<span class="badge-tag badge-tag-dates" data-tag-filter="dates_verified" title="Filter by Verified Admissions Dates"><i class="fa-regular fa-calendar-check"></i> Dates</span>`;
+    else if (hasDates) tagBadgesHtml += `<span class="badge-tag badge-tag-dates" data-tag-filter="dates_recorded" title="Filter by Admissions Dates Available"><i class="fa-regular fa-calendar"></i> Dates</span>`;
+    if (isTwoStage) tagBadgesHtml += `<span class="badge-tag badge-tag-stage" data-tag-filter="two_stage_exam" title="Filter by 2nd Stage Exam Required"><i class="fa-solid fa-layer-group"></i> 2-Stage</span>`;
+    if (hasFees) tagBadgesHtml += `<span class="badge-tag badge-tag-fees" data-tag-filter="fees_recorded" title="Filter by Fees Recorded"><i class="fa-solid fa-sterling-sign"></i> Fees</span>`;
+
     card.innerHTML = `
       <div>
         <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.35rem;">
@@ -904,6 +1035,8 @@ function renderSchools() {
           <span class="badge-ofsted"><i class="fa-solid fa-star"></i> ${formatOfsted(school.ofstedRating)}</span>
           <span class="badge-exam" title="${(school.entranceExamType || '').replace(/"/g, '&quot;')}"><i class="fa-solid fa-pen-to-square"></i> ${formatExam(school.entranceExamType)}</span>
         </div>
+
+        ${tagBadgesHtml ? `<div class="card-tags-row">${tagBadgesHtml}</div>` : ''}
 
         <div class="card-metrics-row">
           <div>
@@ -938,6 +1071,18 @@ function renderSchools() {
     // Attach safe event listeners for card actions
     card.querySelector('.btn-detail-trigger').addEventListener('click', () => openSchoolDetail(school.id));
     card.querySelector('.btn-compare-trigger').addEventListener('click', () => toggleCompare(school.id));
+    card.querySelectorAll('[data-tag-filter]').forEach(tagEl => {
+      tagEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const tagVal = tagEl.getAttribute('data-tag-filter');
+        const tagSelect = document.getElementById('tag-select');
+        if (tagSelect) {
+          tagSelect.value = tagVal;
+          loadSchools();
+        }
+      });
+    });
+
     if (currentPermissions.includes('admin:edit')) {
       const editBtn = card.querySelector('.btn-edit-trigger');
       const delBtn = card.querySelector('.btn-delete-trigger');
@@ -986,8 +1131,11 @@ function renderSchools() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="nowrap-cell" title="${fullName.replace(/"/g, '&quot;')}">
-        <strong>${displayName}</strong>
-        ${school.hot ? `<span class="badge-hot" style="font-size:0.68rem; padding:0.1rem 0.4rem; margin-left:0.4rem; display:inline-flex;"><i class="fa-solid fa-fire"></i>&nbsp;Hot</span>` : ''}
+        <div>
+          <strong>${displayName}</strong>
+          ${school.hot ? `<span class="badge-hot" style="font-size:0.68rem; padding:0.1rem 0.4rem; margin-left:0.4rem; display:inline-flex;"><i class="fa-solid fa-fire"></i>&nbsp;Hot</span>` : ''}
+        </div>
+        ${tagBadgesHtml ? `<div style="display:flex; gap:0.25rem; flex-wrap:wrap; margin-top:0.25rem;">${tagBadgesHtml}</div>` : ''}
       </td>
 
       <td class="nowrap-cell" title="${fullLA.replace(/"/g, '&quot;')}">${displayLA}</td>
@@ -1026,6 +1174,18 @@ function renderSchools() {
     // Attach safe event listeners for table row actions
     tr.querySelector('.btn-tbl-detail').addEventListener('click', () => openSchoolDetail(school.id));
     tr.querySelector('.btn-tbl-compare').addEventListener('click', () => toggleCompare(school.id));
+    tr.querySelectorAll('[data-tag-filter]').forEach(tagEl => {
+      tagEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const tagVal = tagEl.getAttribute('data-tag-filter');
+        const tagSelect = document.getElementById('tag-select');
+        if (tagSelect) {
+          tagSelect.value = tagVal;
+          loadSchools();
+        }
+      });
+    });
+
     if (currentPermissions.includes('admin:edit')) {
       const editBtn = tr.querySelector('.btn-tbl-edit');
       const delBtn = tr.querySelector('.btn-tbl-delete');
@@ -1856,21 +2016,32 @@ function setupEventListeners() {
 
 
 
-  const filterInputs = ['search-input', 'la-select', 'type-select', 'gender-select', 'ofsted-select', 'exam-select', 'hot-select'];
+  const filterInputs = [
+    'search-input', 'tag-select', 'region-select', 'la-select', 'hot-select',
+    'type-select', 'gender-select', 'ofsted-select', 'exam-select',
+    'second-stage-select', 'confidence-select', 'fee-select'
+  ];
   filterInputs.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', loadSchools);
   });
 
-  document.getElementById('search-input').addEventListener('input', debounce(loadSchools, 300));
+  const searchInputEl = document.getElementById('search-input');
+  if (searchInputEl) {
+    searchInputEl.addEventListener('input', debounce(loadSchools, 300));
+  }
 
   // Reset Filters
-  document.getElementById('reset-filters-btn').addEventListener('click', () => {
-    filterInputs.forEach(id => {
-      document.getElementById(id).value = '';
+  const resetBtn = document.getElementById('reset-filters-btn');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      filterInputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+      loadSchools();
     });
-    loadSchools();
-  });
+  }
 
   // View Toggles
   document.getElementById('view-cards-btn').addEventListener('click', () => {

@@ -64,16 +64,36 @@ function writeData(data) {
 // GET /api/schools - Search & Filter
 app.get('/api/schools', (req, res) => {
   let schools = readData();
-  const { search, type, gender, ofsted, exam, la, minPupils, maxPupils, hot, official } = req.query;
+  const {
+    search, type, gender, ofsted, exam, la, minPupils, maxPupils, hot, official,
+    tag, region, secondStage, confidence, fee
+  } = req.query;
 
   if (search) {
     const q = search.toLowerCase().trim();
-    schools = schools.filter(s =>
-      (s.name && s.name.toLowerCase().includes(q)) ||
-      (s.postcode && s.postcode.toLowerCase().includes(q)) ||
-      (s.la && s.la.toLowerCase().includes(q)) ||
-      (s.address && s.address.toLowerCase().includes(q))
-    );
+    schools = schools.filter(s => {
+      const name = (s.name || '').toLowerCase();
+      const postcode = (s.postcode || '').toLowerCase();
+      const laVal = (s.la || '').toLowerCase();
+      const addr = (s.address || '').toLowerCase();
+      const urn = (s.urn || '').toLowerCase();
+      const reg = (s.region || '').toLowerCase();
+      const examType = (s.entranceExamType || '').toLowerCase();
+      const policy = (s.admissionsPolicy || '').toLowerCase();
+      const desc = (s.description || '').toLowerCase();
+      const web = (s.website || '').toLowerCase();
+      const s1 = (s.stage_one_format_and_subjects || '').toLowerCase();
+      const s2 = (s.stage_two_format_and_subjects || '').toLowerCase();
+      let tagsStr = '';
+      if (s.verification_tags) {
+        tagsStr = Array.isArray(s.verification_tags) ? s.verification_tags.join(' ').toLowerCase() : String(s.verification_tags).toLowerCase();
+      }
+
+      return name.includes(q) || postcode.includes(q) || laVal.includes(q) ||
+             addr.includes(q) || urn.includes(q) || reg.includes(q) ||
+             examType.includes(q) || policy.includes(q) || desc.includes(q) ||
+             web.includes(q) || s1.includes(q) || s2.includes(q) || tagsStr.includes(q);
+    });
   }
 
   if (hot === 'true' || hot === 'hot') {
@@ -104,6 +124,110 @@ app.get('/api/schools', (req, res) => {
     schools = schools.filter(s => s.la && s.la.toLowerCase() === la.toLowerCase());
   }
 
+  if (region) {
+    schools = schools.filter(s => s.region && s.region.toLowerCase() === region.toLowerCase());
+  }
+
+  if (tag) {
+    const t = tag.toLowerCase().trim();
+    schools = schools.filter(s => {
+      let tagsArr = [];
+      if (Array.isArray(s.verification_tags)) tagsArr = s.verification_tags.map(x => String(x).toLowerCase());
+      else if (typeof s.verification_tags === 'string') {
+        try { tagsArr = JSON.parse(s.verification_tags).map(x => String(x).toLowerCase()); }
+        catch(e) { tagsArr = [s.verification_tags.toLowerCase()]; }
+      }
+
+      if (t === 'llm_enriched') {
+        return tagsArr.includes('llm_enriched') || tagsArr.includes('llm_verified') ||
+               tagsArr.includes('gemini_crawl') || tagsArr.includes('chatgpt_crawl') ||
+               s.verification_status === 'llm_enriched' ||
+               Boolean(s.llm_enriched_at);
+      }
+      if (t === 'auto_verified' || t === 'web_verified') {
+        return tagsArr.includes('auto_verified') || tagsArr.includes('web_verified') ||
+               s.verification_status === 'auto_verified' || s.verification_status === 'verified' ||
+               Boolean(s.verified_at);
+      }
+      if (t === 'dates_verified') {
+        return tagsArr.includes('dates_verified') || tagsArr.includes('dates_current') || tagsArr.includes('p0_cycle_current');
+      }
+      if (t === 'dates_recorded' || t === 'dates') {
+        return Boolean(s.entranceExamDates && s.entranceExamDates !== '{}' && s.entranceExamDates !== 'null');
+      }
+      if (t === 'two_stage_exam' || t === 'two_stage') {
+        return s.second_stage_exam_required === 'Yes' ||
+               (s.entranceExamType && (s.entranceExamType.includes('Two-Stage') || s.entranceExamType.includes('Stage 2'))) ||
+               tagsArr.includes('two_stage_exam');
+      }
+      if (t === 'fees_recorded' || t === 'fees') {
+        return Boolean(s.feesTermly || s.registrationFee);
+      }
+      if (t === 'has_website' || t === 'website') {
+        return Boolean(s.website && s.website.trim() && s.website !== 'N/A');
+      }
+      if (t === 'has_anomalies' || t === 'anomalies') {
+        return s.verification_status === 'has_anomalies' ||
+               s.verification_status === 'crawl_stuck' ||
+               s.verification_status === 'data_missing' ||
+               s.verification_status === 'dead_website' ||
+               s.verification_status === 'missing_website' ||
+               s.verification_status === 'llm_error' ||
+               tagsArr.includes('date_inversion') ||
+               tagsArr.includes('historical_date_stale') ||
+               tagsArr.includes('missing_website') ||
+               tagsArr.includes('dead_website') ||
+               tagsArr.includes('contact_mismatch') ||
+               tagsArr.includes('domain_mismatch') ||
+               tagsArr.includes('auto_verification_data_missing');
+      }
+      if (t === 'unscanned') {
+        const isEnriched = tagsArr.includes('llm_enriched') || tagsArr.includes('llm_verified') ||
+                           tagsArr.includes('gemini_crawl') || tagsArr.includes('chatgpt_crawl') ||
+                           s.verification_status === 'llm_enriched';
+        const isVerified = tagsArr.includes('auto_verified') || tagsArr.includes('web_verified') ||
+                           s.verification_status === 'auto_verified' || s.verification_status === 'verified' ||
+                           Boolean(s.verified_at);
+        return !isEnriched && !isVerified;
+      }
+      return tagsArr.includes(t);
+    });
+  }
+
+  if (secondStage) {
+    const ss = secondStage.toLowerCase().trim();
+    if (ss === 'yes') {
+      schools = schools.filter(s =>
+        s.second_stage_exam_required === 'Yes' ||
+        (s.entranceExamType && (s.entranceExamType.includes('Two-Stage') || s.entranceExamType.includes('Stage 2') || s.entranceExamType.includes('SET')))
+      );
+    } else if (ss === 'no') {
+      schools = schools.filter(s => s.second_stage_exam_required === 'No' || (!s.second_stage_exam_required && (!s.entranceExamType || !s.entranceExamType.includes('Two-Stage'))));
+    }
+  }
+
+  if (confidence) {
+    const c = confidence.toLowerCase().trim();
+    if (c === 'high' || c === 'verified') {
+      schools = schools.filter(s => (s.confidence_score || 0) >= 80);
+    } else if (c === 'medium') {
+      schools = schools.filter(s => (s.confidence_score || 0) >= 50 && (s.confidence_score || 0) < 80);
+    } else if (c === 'low' || c === 'unverified') {
+      schools = schools.filter(s => (s.confidence_score || 0) < 50);
+    }
+  }
+
+  if (fee) {
+    const f = fee.toLowerCase().trim();
+    if (f === 'state' || f === 'free') {
+      schools = schools.filter(s => s.schoolType === 'Comprehensive' || s.schoolType === 'Grammar' || s.schoolType === 'State');
+    } else if (f === 'independent' || f === 'paying') {
+      schools = schools.filter(s => s.schoolType && s.schoolType.includes('Independent'));
+    } else if (f === 'recorded') {
+      schools = schools.filter(s => Boolean(s.feesTermly || s.registrationFee));
+    }
+  }
+
   if (minPupils) {
     schools = schools.filter(s => s.pupilCount >= parseInt(minPupils, 10));
   }
@@ -111,7 +235,6 @@ app.get('/api/schools', (req, res) => {
   if (maxPupils) {
     schools = schools.filter(s => s.pupilCount <= parseInt(maxPupils, 10));
   }
-
 
   res.json({
     total: schools.length,
@@ -129,6 +252,7 @@ app.get('/api/stats', (req, res) => {
   const outstandingCount = schools.filter(s => s.ofstedRating && s.ofstedRating.toLowerCase() === 'outstanding').length;
 
   const localAuthorities = [...new Set(schools.map(s => s.la).filter(Boolean))].sort();
+  const regions = [...new Set(schools.map(s => s.region).filter(Boolean))].sort();
 
   res.json({
     total,
@@ -136,7 +260,8 @@ app.get('/api/stats', (req, res) => {
     independentCount,
     comprehensiveCount,
     outstandingCount,
-    localAuthorities
+    localAuthorities,
+    regions
   });
 });
 

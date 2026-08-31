@@ -12,7 +12,7 @@
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="alternate icon" type="image/png" href="favicon.png">
   <link rel="apple-touch-icon" href="favicon.png">
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css?v=2.2">
   <!-- Google Identity Services (GIS) OAuth 2.0 SDK -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script>
@@ -602,19 +602,41 @@
 
                 <div class="filter-group">
                   <label><i class="fa-solid fa-magnifying-glass"></i> Search Keyword</label>
-                  <input type="text" id="search-input" placeholder="School name, URN, keyword...">
+                  <input type="text" id="search-input" placeholder="Search by name, URN, tags, exam, policy...">
+                </div>
+
+                <div class="filter-group">
+                  <label><i class="fa-solid fa-tags" style="color: #6366f1;"></i> AI Tags &amp; Badges</label>
+                  <select id="tag-select" onchange="loadSchools()">
+                    <option value="">All Tags &amp; Badges</option>
+                    <option value="llm_enriched">🤖 AI LLM Enriched</option>
+                    <option value="auto_verified">✓ Auto Web Verified</option>
+                    <option value="dates_verified">📅 Verified Admissions Dates</option>
+                    <option value="two_stage_exam">📝 2nd Stage Exam Required</option>
+                    <option value="fees_recorded">💷 Fees Recorded</option>
+                    <option value="has_website">🌐 Website Listed</option>
+                    <option value="has_anomalies">⚠️ Flagged / Needs Review</option>
+                    <option value="unscanned">⏳ Un-scanned / Pending Crawl</option>
+                  </select>
+                </div>
+
+                <div class="filter-group">
+                  <label><i class="fa-solid fa-earth-europe"></i> Geographic Region</label>
+                  <select id="region-select" onchange="loadSchools()">
+                    <option value="">All UK Regions</option>
+                  </select>
                 </div>
 
                 <div class="filter-group">
                   <label><i class="fa-solid fa-map-location-dot"></i> Local Authority / Borough</label>
-                  <select id="la-select">
+                  <select id="la-select" onchange="loadSchools()">
                     <option value="">All Boroughs / Local Authorities</option>
                   </select>
                 </div>
 
                 <div class="filter-group">
                   <label><i class="fa-solid fa-fire" style="color: #ef4444;"></i> Status / Tier</label>
-                  <select id="hot-select">
+                  <select id="hot-select" onchange="loadSchools()">
                     <option value="">All Schools</option>
                     <option value="hot">🔥 Hot Schools Only</option>
                     <option value="official">✓ Official DfE Only</option>
@@ -623,7 +645,7 @@
 
                 <div class="filter-group">
                   <label><i class="fa-solid fa-school"></i> School Type</label>
-                  <select id="type-select">
+                  <select id="type-select" onchange="loadSchools()">
                     <option value="">All Types</option>
                     <option value="Grammar">Grammar</option>
                     <option value="Independent">Independent</option>
@@ -633,7 +655,7 @@
 
                 <div class="filter-group">
                   <label><i class="fa-solid fa-users"></i> Gender Intake</label>
-                  <select id="gender-select">
+                  <select id="gender-select" onchange="loadSchools()">
                     <option value="">All (Boys, Girls, Mixed)</option>
                     <option value="Girls">Girls Only</option>
                     <option value="Boys">Boys Only</option>
@@ -643,7 +665,7 @@
 
                 <div class="filter-group">
                   <label><i class="fa-solid fa-star"></i> Ofsted Rating</label>
-                  <select id="ofsted-select">
+                  <select id="ofsted-select" onchange="loadSchools()">
                     <option value="">All Ratings</option>
                     <option value="Outstanding">Outstanding</option>
                     <option value="Good">Good</option>
@@ -654,13 +676,42 @@
 
                 <div class="filter-group">
                   <label><i class="fa-solid fa-pen-nib"></i> Entrance Exam Type</label>
-                  <select id="exam-select">
+                  <select id="exam-select" onchange="loadSchools()">
                     <option value="">All Exam Types</option>
                     <option value="GL Assessment">11+ GL Assessment</option>
                     <option value="SET">Selective Eligibility Test (SET)</option>
                     <option value="Stage">Two-Stage 11+</option>
                     <option value="ISEB">ISEB / Common Entrance</option>
                     <option value="Banding">Banding Assessment</option>
+                  </select>
+                </div>
+
+                <div class="filter-group">
+                  <label><i class="fa-solid fa-layer-group"></i> 2nd Stage Exam</label>
+                  <select id="second-stage-select" onchange="loadSchools()">
+                    <option value="">All (Single &amp; Two-Stage)</option>
+                    <option value="yes">2nd Stage Exam Required (Yes)</option>
+                    <option value="no">Single Stage Only (No)</option>
+                  </select>
+                </div>
+
+                <div class="filter-group">
+                  <label><i class="fa-solid fa-shield-halved" style="color: #10b981;"></i> Data Confidence</label>
+                  <select id="confidence-select" onchange="loadSchools()">
+                    <option value="">All Confidence Levels</option>
+                    <option value="high">✓ Verified (Score 80%+)</option>
+                    <option value="medium">⚡ Medium (Score 50-79%)</option>
+                    <option value="low">❓ Unverified (&lt; 50%)</option>
+                  </select>
+                </div>
+
+                <div class="filter-group">
+                  <label><i class="fa-solid fa-sterling-sign" style="color: #059669;"></i> Funding &amp; Fee Status</label>
+                  <select id="fee-select" onchange="loadSchools()">
+                    <option value="">All Funding Types</option>
+                    <option value="state">State-Funded / Free (No Tuition Fees)</option>
+                    <option value="independent">Fee-Paying (Independent)</option>
+                    <option value="recorded">Fees Recorded in Database</option>
                   </select>
                 </div>
               </aside>
@@ -670,8 +721,11 @@
                 
                 <!-- Toolbar -->
                 <div class="workspace-toolbar">
-                  <div class="results-count">
-                    Showing <span id="results-num">0</span> matching schools
+                  <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                    <div class="results-count">
+                      Showing <span id="results-num">0</span> matching schools
+                    </div>
+                    <div id="active-filters-chips" style="display: flex; gap: 0.4rem; flex-wrap: wrap;"></div>
                   </div>
                   <div style="display: flex; align-items: center; gap: 0.75rem;">
                     <div class="view-toggles">
@@ -2448,7 +2502,7 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
     <button id="toast-close-btn" class="toast-close">&times;</button>
   </div>
 
-  <script src="js/app.js"></script>
+  <script src="js/app.js?v=2.2"></script>
 </body>
 </html>
 
