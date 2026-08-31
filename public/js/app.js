@@ -630,12 +630,12 @@ function switchAdminSubTab(subTabName) {
 
   if (subTabName === 'directory') {
     renderSchools();
+  } else if (subTabName === 'data-enrichment') {
+    initDataEnrichmentTab();
   } else if (subTabName === 'bulk-edit') {
     renderBulkEditTable();
   } else if (subTabName === 'corrections') {
     loadAdminFieldReports();
-  } else if (subTabName === 'date-anomalies') {
-    loadAdminDateAnomalies();
   } else if (subTabName === 'settings') {
     loadAdminSettings();
   }
@@ -1264,20 +1264,14 @@ function setupEventListeners() {
     refreshReportsBtn.addEventListener('click', loadAdminFieldReports);
   }
 
-  // Date Anomaly Review Controls
-  const refreshDateAnomaliesBtn = document.getElementById('btn-refresh-date-anomalies');
-  if (refreshDateAnomaliesBtn) {
-    refreshDateAnomaliesBtn.addEventListener('click', loadAdminDateAnomalies);
+  const startWebScannerBtn = document.getElementById('btn-start-web-scanner');
+  if (startWebScannerBtn) {
+    startWebScannerBtn.addEventListener('click', startWebVerificationScan);
   }
 
-  const applyAllDateFixesBtn = document.getElementById('btn-apply-all-date-fixes');
-  if (applyAllDateFixesBtn) {
-    applyAllDateFixesBtn.addEventListener('click', applyAllAdminDateFixes);
-  }
-
-  const syncDateConfidenceBtn = document.getElementById('btn-sync-date-confidence');
-  if (syncDateConfidenceBtn) {
-    syncDateConfidenceBtn.addEventListener('click', syncDateQualityConfidence);
+  const stopWebScannerBtn = document.getElementById('btn-stop-web-scanner');
+  if (stopWebScannerBtn) {
+    stopWebScannerBtn.addEventListener('click', stopWebVerificationScan);
   }
 
   const runFullEnrichmentBtn = document.getElementById('btn-run-full-enrichment');
@@ -1306,6 +1300,26 @@ function setupEventListeners() {
     commitSelectedEnrichmentBtn.addEventListener('click', commitSelectedEnrichmentChanges);
   }
 
+  // Apply Verified Fixes Modal Controls
+  const closeApplyFixModalBtn = document.getElementById('btn-close-apply-fix-modal');
+  if (closeApplyFixModalBtn) {
+    closeApplyFixModalBtn.addEventListener('click', closeApplyVerifiedFixModal);
+  }
+  const cancelApplyFixBtn = document.getElementById('btn-cancel-apply-fix');
+  if (cancelApplyFixBtn) {
+    cancelApplyFixBtn.addEventListener('click', closeApplyVerifiedFixModal);
+  }
+  const confirmApplyFixBtn = document.getElementById('btn-confirm-apply-fix');
+  if (confirmApplyFixBtn) {
+    confirmApplyFixBtn.addEventListener('click', handleConfirmApplyVerifiedFix);
+  }
+  const applyFixModal = document.getElementById('apply-verified-fix-modal');
+  if (applyFixModal) {
+    applyFixModal.addEventListener('click', (e) => {
+      if (e.target === applyFixModal) closeApplyVerifiedFixModal();
+    });
+  }
+
   const filterPreviewSearch = document.getElementById('filter-preview-search');
   if (filterPreviewSearch) {
     filterPreviewSearch.addEventListener('input', () => {
@@ -1332,20 +1346,6 @@ function setupEventListeners() {
         else selectedEnrichmentIds.delete(sId);
       });
       updateSelectedEnrichmentCount();
-    });
-  }
-
-  const anomalySearchInput = document.getElementById('filter-anomaly-search');
-  if (anomalySearchInput) {
-    anomalySearchInput.addEventListener('input', () => {
-      if (cachedDateAnomaliesData) renderAdminDateAnomalies(cachedDateAnomaliesData);
-    });
-  }
-
-  const anomalyTypeSelect = document.getElementById('filter-anomaly-type');
-  if (anomalyTypeSelect) {
-    anomalyTypeSelect.addEventListener('change', () => {
-      if (cachedDateAnomaliesData) renderAdminDateAnomalies(cachedDateAnomaliesData);
     });
   }
 
@@ -1790,16 +1790,52 @@ function setupEventListeners() {
   const weightsForm = document.getElementById('rec-weights-form');
   if (weightsForm) weightsForm.addEventListener('submit', saveRecWeights);
 
-  const btnSaveSystemSettings = document.getElementById('btn-save-system-settings');
-  if (btnSaveSystemSettings) {
-    btnSaveSystemSettings.addEventListener('click', saveSystemSettingsHandler);
+  const btnRunLiveSearch = document.getElementById('btn-run-live-llm-search');
+  if (btnRunLiveSearch) {
+    btnRunLiveSearch.addEventListener('click', runLiveLlmSearchHandler);
   }
 
-  const p2ToggleInput = document.getElementById('setting-parent2-enabled');
-  if (p2ToggleInput) {
-    p2ToggleInput.addEventListener('change', () => {
-      saveSystemSettingsHandler();
+  const inputLiveQuery = document.getElementById('llm-live-school-query');
+  if (inputLiveQuery) {
+    inputLiveQuery.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runLiveLlmSearchHandler();
+      }
     });
+  }
+
+  const btnApplyLiveSearch = document.getElementById('btn-apply-live-search-school');
+  if (btnApplyLiveSearch) {
+    btnApplyLiveSearch.addEventListener('click', applyLiveSearchResultHandler);
+  }
+
+  // LLM live search result inspector tab switcher
+  document.querySelectorAll('.btn-llm-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetId = btn.getAttribute('data-target');
+      document.querySelectorAll('.btn-llm-tab').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'transparent';
+        b.style.color = '#64748b';
+        b.style.fontWeight = '600';
+      });
+      btn.classList.add('active');
+      btn.style.background = '#ede9fe';
+      btn.style.color = '#6d28d9';
+      btn.style.fontWeight = '700';
+
+      document.querySelectorAll('.llm-tab-pane').forEach(pane => {
+        pane.style.display = 'none';
+      });
+      const activePane = document.getElementById(targetId);
+      if (activePane) activePane.style.display = 'block';
+    });
+  });
+
+  const btnTestLlmCrawlSingle = document.getElementById('btn-test-llm-crawl-single');
+  if (btnTestLlmCrawlSingle) {
+    btnTestLlmCrawlSingle.addEventListener('click', testLlmCrawlSingleHandler);
   }
 
   // Database Instance Controls
@@ -3019,35 +3055,71 @@ async function openSchoolDetail(id) {
 
     const subjectsHtml = subjectsArray.length > 0
       ? subjectsArray.map(sub => `<span class="subject-tag">${sub}</span>`).join('')
-      : '<span style="color:#94a3b8;">No subjects cataloged</span>';
+      : '<span style="color:#94a3b8; font-size: 0.85rem;">No GCSE subjects cataloged</span>';
 
     const dates = school.entranceExamDates || {};
-
-    // Extract and reconcile all admissions data sources
     const k = school.kpsDetails || {};
     const p = school.pillaiDetails || {};
 
-    const regStatus = p.registrationStatus || null;
-    const regFee = k.registrationFee || null;
-    const regOpen = p.registrationOpens || dates.registrationOpen || null;
+    // ----------------------------------------------------
+    // Reconcile Multi-Source Admissions Data (DfE + Pillai + KPS + LLM)
+    // ----------------------------------------------------
+    const examBoard = p.examBoard || dates.examBoard || null;
+    const examType = school.entranceExamType || dates.entranceExamType || (examBoard ? `11+ Entrance Assessment (${examBoard})` : 'Standard 11+ Assessment');
+    const regStatus = p.registrationStatus || dates.registrationStatus || (dates.registrationDeadline ? 'Active / Configured' : null);
+    const regFee = school.registrationFee || k.registrationFee || dates.registrationFee || null;
+    const regOpen = p.registrationOpens || dates.registrationOpen || dates.registrationOpens || null;
     const regDeadline = p.registrationDeadline || k.registrationCloseDate || k.registrationCloses || dates.registrationDeadline || null;
-    const examBoard = p.examBoard || null;
-    const examType = school.entranceExamType || 'Standard Assessment';
+    const openEvents = p.openDayEvening || dates.openDayEvening || dates.openDays || dates.openEvents || null;
 
-    const firstExamDate = p.firstExamDate || k.firstExamDate || dates.examDate || null;
-    const firstExamSubjects = p.firstExamSubjects || k.firstExamFormatSubjects || k.examFormat || null;
-    const firstStageResult = p.firstExamResults || k.firstStageResult || null;
+    const formatDisplayDates = (d) => Array.isArray(d) ? d.filter(Boolean).join(', ') : (d || null);
 
-    const secondExamDate = p.secondExamDate || k.secondStageExamDate || null;
-    const secondExamSubjects = p.secondExamSubjects || k.secondExamFormatSubjects || null;
-    const secondStageResult = p.secondExamResults || k.secondStageResult || null;
+    // Stage 1 Examination
+    const rawFirstExamDate = p.firstExamDate || k.firstExamDate || dates.stage_one_examDate || dates.examDate || dates.firstExamDate || null;
+    const firstExamDate = formatDisplayDates(rawFirstExamDate);
+    const firstExamSubjects = school.stage_one_format_and_subjects || dates.stage_one_format_and_subjects || p.firstExamSubjects || k.firstExamFormatSubjects || k.examFormat || dates.firstExamSubjects || null;
+    const firstStageResult = p.firstExamResults || k.firstStageResult || dates.firstStageResult || dates.firstExamResults || null;
 
-    const interviewInfo = p.interview || k.interviewGroupActivity || k.interviewsDate || null;
-    const offersInfo = p.offersAcceptance || k.offerDate || dates.resultsDate || null;
-    const offerAcceptBy = k.offerAcceptByDate || null;
-    const openEvents = p.openDayEvening || null;
-    const scholarships = k.scholarshipsOffered || null;
-    const notes = p.notes || null;
+    // Stage 2 Examination
+    const secondStageRequired = school.second_stage_exam_required || dates.second_stage_exam_required || (p.secondExamDate || k.secondStageExamDate || dates.secondExamDate ? 'Yes (Selective 2nd Stage)' : 'No (Single Stage Examination)');
+    const rawSecondExamDate = p.secondExamDate || k.secondStageExamDate || dates.stage_two_examDate || dates.secondExamDate || null;
+    const secondExamDate = formatDisplayDates(rawSecondExamDate);
+    const secondExamSubjects = school.stage_two_format_and_subjects || dates.stage_two_format_and_subjects || p.secondExamSubjects || k.secondExamFormatSubjects || dates.secondExamSubjects || null;
+    const secondStageResult = p.secondExamResults || k.secondStageResult || dates.secondStageResult || dates.secondExamResults || null;
+
+    // Interviews & Offers
+    const rawInterviewInfo = p.interview || k.interviewGroupActivity || k.interviewsDate || dates.interviewDates || dates.interviewInfo || dates.interviewDate || null;
+    const interviewInfo = formatDisplayDates(rawInterviewInfo);
+    const offersInfo = p.offersAcceptance || k.offerDate || dates.resultsDate || dates.offersDate || dates.offersAcceptance || null;
+    const offerAcceptBy = k.offerAcceptByDate || dates.offerAcceptByDate || dates.offerAcceptBy || null;
+
+    // Financials & Tuition Fees
+    const feesTermly = school.feesTermly || dates.feesTermly || dates.feesPerTerm || p.feesTermly || null;
+    let annualFeesEst = null;
+    if (feesTermly) {
+      const matchNum = feesTermly.replace(/,/g, '').match(/\d+/);
+      if (matchNum) {
+        const num = parseInt(matchNum[0], 10);
+        if (num > 500) {
+          annualFeesEst = `£${(num * 3).toLocaleString()} / year (est. 3 terms)`;
+        }
+      }
+    }
+    const scholarships = k.scholarshipsOffered || dates.scholarshipsOffered || dates.scholarships || p.scholarships || null;
+    const bursaryDeadline = dates.bursaryDeadline || dates.scholarshipDeadline || k.bursaryDeadline || null;
+
+    // Admissions Policy & Catchment
+    const admissionsPolicy = school.admissionsPolicy || dates.admissionsPolicy || null;
+    const catchmentInfo = dates.catchmentArea || dates.oversubscriptionCriteria || p.catchment || null;
+    const notes = p.notes || k.notes || dates.notes || school.notes || null;
+
+    // AI & Verification Metadata
+    const verificationStatus = school.verification_status || (school.official ? 'official_gov' : 'unverified');
+    const isLlmEnriched = school.verification_status === 'llm_enriched' || (Array.isArray(school.verification_tags) && school.verification_tags.includes('llm_verified'));
+    const confidenceScore = school.confidence_score || (isLlmEnriched ? 95 : (school.official ? 90 : 80));
+    const verifiedAt = school.verified_at ? new Date(school.verified_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
+    const sourceUrl = school.sourceUrl || null;
+    const verificationTags = Array.isArray(school.verification_tags) ? school.verification_tags : [];
 
     const userReports = school.userReports || {};
     const userOverrides = school.userCustomOverrides || {};
@@ -3060,12 +3132,12 @@ async function openSchoolDetail(id) {
       const isCustom = customVal !== null && customVal !== undefined && customVal !== '';
       const displayVal = isCustom ? customVal : (origValue !== null && origValue !== undefined && origValue !== '' ? origValue : 'N/A');
 
-      const confBadge = renderFieldConfidenceBadge(school.id, fieldName, confidenceStats);
+      const confBadge = typeof renderFieldConfidenceBadge === 'function' ? renderFieldConfidenceBadge(school.id, fieldName, confidenceStats) : '';
 
       return `
-        <div class="field-rating-row" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; width: 100%; margin-bottom: 0.35rem; font-size: 0.85rem; color: #475569;">
+        <div class="field-rating-row" style="display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; width: 100%; margin-bottom: 0.4rem; font-size: 0.85rem; color: #334155;">
           <div style="flex: 1; word-break: break-word;">
-            <strong>${fieldLabel}:</strong> ${displayVal} ${confBadge}
+            <span style="font-weight: 600; color: #475569;">${fieldLabel}:</span> <span style="font-weight: ${displayVal !== 'N/A' ? '700' : '400'}; color: ${displayVal !== 'N/A' ? '#0f172a' : '#94a3b8'};">${displayVal}</span> ${confBadge}
             ${isCustom ? `
               <span class="badge-custom-value" style="background:#fff7ed; color:#c2410c; border:1px solid #ffedd5; font-size:0.72rem; font-weight:700; padding:0.15rem 0.45rem; border-radius:999px; margin-left:0.35rem; display:inline-flex; align-items:center; gap:0.2rem;" title="Custom value updated in your personal record">
                 <i class="fa-solid fa-user-pen"></i> Custom Value Updated by You
@@ -3074,7 +3146,7 @@ async function openSchoolDetail(id) {
             ` : ''}
           </div>
 
-          <div style="display: flex; align-items: center; gap: 0.25rem;">
+          <div style="display: flex; align-items: center; gap: 0.25rem; flex-shrink: 0;">
             <button type="button" class="btn-field-thumb btn-thumb-up ${isUp ? 'active' : ''}" data-school-id="${school.id}" data-field-name="${fieldName}" data-label="${fieldLabel}" data-orig="${origValue || ''}" title="Mark field as accurate" style="padding: 0.18rem 0.4rem; font-size: 0.75rem; border-radius: 6px; border: 1px solid ${isUp ? '#16a34a' : '#cbd5e1'}; background: ${isUp ? '#dcfce7' : '#ffffff'}; color: ${isUp ? '#15803d' : '#64748b'}; cursor: pointer;">
               <i class="fa-solid fa-thumbs-up"></i>
             </button>
@@ -3086,137 +3158,287 @@ async function openSchoolDetail(id) {
       `;
     };
 
-    // Unified Admissions & Key Dates Card Block
+    // ----------------------------------------------------
+    // Build Unified Admissions & Examination Milestone Card
+    // ----------------------------------------------------
     const admissionsUnifiedHtml = `
-      <div class="detail-box" style="grid-column: 1 / -1; background: #f8fafc; border-color: #cbd5e1;">
-        <h4 style="color: #1e293b; font-size: 1.05rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.8rem;">
-          <i class="fa-solid fa-calendar-check" style="color: #2563eb;"></i> Admissions & Key Dates Data
-        </h4>
+      <div class="detail-box" style="grid-column: 1 / -1; background: #ffffff; border: 1px solid #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.6rem; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <h4 style="color: #1e293b; font-size: 1.1rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fa-solid fa-calendar-check" style="color: #4338ca;"></i> 11+ Admissions Intelligence &amp; Examination Profile
+          </h4>
+          <span style="font-size: 0.78rem; font-weight: 700; color: #4338ca; background: #eef2ff; border: 1px solid #c7d2fe; padding: 0.2rem 0.6rem; border-radius: 6px;">
+            <i class="fa-solid fa-graduation-cap"></i> ${examType}
+          </span>
+        </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
-          <!-- Registration & Overview -->
-          <div style="background: white; padding: 0.8rem; border-radius: 8px; border: 1px solid #e2e8f0;">
-            <strong style="color: #3b82f6; display: block; margin-bottom: 0.4rem; font-size: 0.9rem;">
-              <i class="fa-solid fa-file-pen"></i> Registration & Overview
+          <!-- Column 1: Registration & Key Deadlines -->
+          <div style="background: #f8fafc; padding: 0.9rem; border-radius: 8px; border: 1px solid #e2e8f0;">
+            <strong style="color: #2563eb; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; font-size: 0.92rem; border-bottom: 1px dashed #cbd5e1; padding-bottom: 0.35rem;">
+              <i class="fa-solid fa-file-pen"></i> Registration &amp; Overview
             </strong>
             <div style="display: flex; flex-direction: column; gap: 0.3rem;">
               ${renderWidget('entranceExamType', 'Exam Type / Board', examBoard ? `${examType} (${examBoard})` : examType)}
-              ${regStatus ? renderWidget('registrationStatus', 'Registration Status', regStatus) : ''}
-              ${regFee ? renderWidget('registrationFee', 'Registration Fee', regFee) : ''}
+              ${renderWidget('registrationStatus', 'Registration Status', regStatus || 'Active')}
               ${renderWidget('registrationOpen', 'Registration Opens', regOpen)}
               ${renderWidget('registrationDeadline', 'Registration Deadline', regDeadline)}
-              ${openEvents ? renderWidget('openDayEvening', 'Open Events', openEvents) : ''}
+              ${renderWidget('openDayEvening', 'Open Events / Tours', openEvents)}
             </div>
           </div>
 
-          <!-- Stage 1 Assessment -->
-          <div style="background: white; padding: 0.8rem; border-radius: 8px; border: 1px solid #e2e8f0;">
-            <strong style="color: #d97706; display: block; margin-bottom: 0.4rem; font-size: 0.9rem;">
+          <!-- Column 2: Stage 1 Assessment -->
+          <div style="background: #f8fafc; padding: 0.9rem; border-radius: 8px; border: 1px solid #e2e8f0;">
+            <strong style="color: #d97706; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; font-size: 0.92rem; border-bottom: 1px dashed #cbd5e1; padding-bottom: 0.35rem;">
               <i class="fa-solid fa-pen-nib"></i> 1st Stage Assessment
             </strong>
             <div style="display: flex; flex-direction: column; gap: 0.3rem;">
               ${renderWidget('firstExamDate', '1st Exam Date', firstExamDate)}
-              ${firstExamSubjects ? renderWidget('firstExamSubjects', 'Format / Subjects', firstExamSubjects) : ''}
-              ${firstStageResult ? renderWidget('firstStageResult', '1st Stage Result', firstStageResult) : ''}
+              ${renderWidget('stage_one_format_and_subjects', '1st Exam Format & Subjects', firstExamSubjects)}
+              ${renderWidget('firstStageResult', '1st Stage Results Release', firstStageResult)}
             </div>
           </div>
 
-          <!-- Stage 2 / Interview & Offers -->
-          <div style="background: white; padding: 0.8rem; border-radius: 8px; border: 1px solid #e2e8f0;">
-            <strong style="color: #059669; display: block; margin-bottom: 0.4rem; font-size: 0.9rem;">
-              <i class="fa-solid fa-award"></i> Stage 2, Interview & Offers
+          <!-- Column 3: Stage 2 Assessment, Interviews & Offers -->
+          <div style="background: #f8fafc; padding: 0.9rem; border-radius: 8px; border: 1px solid #e2e8f0;">
+            <strong style="color: #059669; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; font-size: 0.92rem; border-bottom: 1px dashed #cbd5e1; padding-bottom: 0.35rem;">
+              <i class="fa-solid fa-award"></i> Stage 2, Interview &amp; Offers
             </strong>
             <div style="display: flex; flex-direction: column; gap: 0.3rem;">
-              ${secondExamDate ? renderWidget('secondExamDate', '2nd Exam Date', secondExamDate) : ''}
-              ${secondExamSubjects ? renderWidget('secondExamSubjects', '2nd Exam Format', secondExamSubjects) : ''}
-              ${secondStageResult ? renderWidget('secondStageResult', '2nd Stage Result', secondStageResult) : ''}
-              ${renderWidget('interviewInfo', 'Interview / Activity', interviewInfo)}
-              ${renderWidget('offersInfo', 'Offers / Results', offersInfo)}
-              ${offerAcceptBy ? renderWidget('offerAcceptBy', 'Accept Offer By', offerAcceptBy) : ''}
+              ${renderWidget('second_stage_exam_required', '2nd Stage Required', secondStageRequired)}
+              ${renderWidget('secondExamDate', '2nd Exam Date', secondExamDate)}
+              ${renderWidget('stage_two_format_and_subjects', '2nd Exam Format', secondExamSubjects)}
+              ${renderWidget('secondStageResult', '2nd Stage Results', secondStageResult)}
+              ${renderWidget('interviewInfo', 'Interview / Group Activity', interviewInfo)}
+              ${renderWidget('offersInfo', 'Offers / Results Date', offersInfo)}
+              ${renderWidget('offerAcceptBy', 'Accept Offer By Deadline', offerAcceptBy)}
             </div>
           </div>
         </div>
-
-        ${scholarships || notes || school.admissionsPolicy ? `
-          <div style="margin-top: 0.8rem; background: white; padding: 0.8rem; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.85rem; color: #475569;">
-            ${scholarships ? renderWidget('scholarshipsOffered', 'Scholarships Offered', scholarships) : ''}
-            ${notes ? renderWidget('additionalNotes', 'Additional Notes', notes) : ''}
-            <div style="border-top: 1px dashed #e2e8f0; padding-top: 0.4rem; margin-top: 0.4rem;">
-              ${renderWidget('admissionsPolicy', 'Admissions Policy Summary', school.admissionsPolicy || 'Standard admissions policy.')}
-            </div>
-          </div>
-        ` : ''}
       </div>
     `;
 
-    detailContent.innerHTML = `
-      <div class="detail-header-hero">
-        <h2>${school.name}</h2>
-        <div style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.2rem;">
-          <i class="fa-solid fa-location-dot"></i> ${school.address || school.la}, ${school.postcode || ''} | URN: ${school.urn || 'N/A'}
+    // ----------------------------------------------------
+    // Build Financials, Tuition & Scholarships Card
+    // ----------------------------------------------------
+    const financialsHtml = `
+      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1;">
+        <h4 style="color: #059669; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
+          <i class="fa-solid fa-sterling-sign"></i> Tuition Fees, Financials &amp; Scholarships
+        </h4>
+        <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+          ${renderWidget('feesTermly', 'Termly Tuition Fees', feesTermly)}
+          ${annualFeesEst ? `
+            <div class="field-rating-row" style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #334155; margin-bottom: 0.4rem;">
+              <div><span style="font-weight: 600; color: #475569;">Annual Fee (Estimated):</span> <strong style="color: #059669;">${annualFeesEst}</strong></div>
+            </div>
+          ` : ''}
+          ${renderWidget('registrationFee', 'Registration Fee', regFee)}
+          ${renderWidget('scholarshipsOffered', 'Scholarships &amp; Bursaries', scholarships)}
+          ${bursaryDeadline ? renderWidget('bursaryDeadline', 'Bursary Application Deadline', bursaryDeadline) : ''}
         </div>
-        <div class="detail-tags-row" style="align-items: center;">
-          <span class="badge-ofsted"><i class="fa-solid fa-star"></i> ${formatOfsted(userOverrides.ofstedRating || school.ofstedRating)}</span>
-          <span class="badge-exam">${userOverrides.schoolType || school.schoolType}</span>
-          <span class="badge-exam">${userOverrides.gender || school.gender} intake</span>
+      </div>
+    `;
+
+    // ----------------------------------------------------
+    // Build Admissions Policy & Catchment Card
+    // ----------------------------------------------------
+    const policyHtml = `
+      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1;">
+        <h4 style="color: #7c3aed; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
+          <i class="fa-solid fa-shield-halved"></i> Admissions Policy &amp; Catchment
+        </h4>
+        <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+          ${renderWidget('admissionsPolicy', 'Admissions Policy Summary', admissionsPolicy || 'Standard 11+ entry policy.')}
+          ${catchmentInfo ? renderWidget('catchmentArea', 'Catchment Area / Oversubscription', catchmentInfo) : ''}
+          ${notes ? renderWidget('additionalNotes', 'Additional Admissions Notes', notes) : ''}
+        </div>
+      </div>
+    `;
+
+    // ----------------------------------------------------
+    // Build Academic Performance Card
+    // ----------------------------------------------------
+    const academicMetricsHtml = `
+      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1;">
+        <h4 style="color: #2563eb; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
+          <i class="fa-solid fa-chart-line"></i> Academic Metrics &amp; GCSE Performance
+        </h4>
+        <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+          ${renderWidget('pupilCount', 'Total Pupil Roll', school.pupilCount ? `${school.pupilCount.toLocaleString()} pupils` : 'N/A')}
+          ${renderWidget('ageRange', 'Age Range', school.ageRange || '11 to 18')}
+          ${renderWidget('gcseAttainment8', 'GCSE Attainment 8 Score', school.gcseAttainment8 !== null && school.gcseAttainment8 !== undefined && school.gcseAttainment8 !== '' ? school.gcseAttainment8 : 'N/A')}
+          ${renderWidget('gcseProgress8', 'GCSE Progress 8 Score', school.gcseProgress8 !== null && school.gcseProgress8 !== undefined && school.gcseProgress8 !== '' ? school.gcseProgress8 : 'N/A')}
+          ${renderWidget('ebaccAveragePointScore', 'EBacc Average Point Score', school.ebaccAveragePointScore !== null && school.ebaccAveragePointScore !== undefined && school.ebaccAveragePointScore !== '' ? school.ebaccAveragePointScore : 'N/A')}
+        </div>
+        <div style="margin-top: 0.8rem; border-top: 1px dashed #cbd5e1; padding-top: 0.6rem;">
+          <div style="font-size: 0.85rem; font-weight: 700; color: #334155; margin-bottom: 0.35rem; display: flex; align-items: center; justify-content: space-between;">
+            <span><i class="fa-solid fa-book-open" style="color: #6366f1;"></i> Offered GCSE Curriculum</span>
+            <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">${subjectsArray.length} Subjects</span>
+          </div>
+          <div class="subjects-tags" style="display: flex; flex-wrap: wrap; gap: 0.35rem;">${subjectsHtml}</div>
+        </div>
+      </div>
+    `;
+
+    // ----------------------------------------------------
+    // Build Multi-Source Provenance & AI Audit Footprint Card
+    // ----------------------------------------------------
+    const provenanceHtml = `
+      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1;">
+        <h4 style="color: #d97706; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
+          <i class="fa-solid fa-database"></i> Multi-Source Provenance &amp; Verification Footprint
+        </h4>
+        <div style="display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; color: #334155;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: 600; color: #475569;">Verification Status:</span>
+            <span style="font-weight: 700; color: ${isLlmEnriched ? '#6d28d9' : '#059669'}; background: ${isLlmEnriched ? '#ede9fe' : '#dcfce7'}; border: 1px solid ${isLlmEnriched ? '#ddd6fe' : '#bbf7d0'}; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.76rem;">
+              ${isLlmEnriched ? '<i class="fa-solid fa-wand-magic-sparkles"></i> AI Reconciled & Enriched' : (school.official ? '<i class="fa-solid fa-circle-check"></i> Official DfE Verified' : 'Community Reconciled')}
+            </span>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: 600; color: #475569;">Reconciliation Confidence:</span>
+            <span style="font-weight: 800; color: ${confidenceScore >= 90 ? '#059669' : '#d97706'}; display: inline-flex; align-items: center; gap: 0.3rem;">
+              ${confidenceScore}%
+              <span style="display: inline-block; width: 60px; height: 6px; background: #e2e8f0; border-radius: 999px; overflow: hidden; vertical-align: middle;">
+                <span style="display: block; width: ${confidenceScore}%; height: 100%; background: ${confidenceScore >= 90 ? '#10b981' : '#f59e0b'};"></span>
+              </span>
+            </span>
+          </div>
+
+          ${verifiedAt ? `
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: 600; color: #475569;">Last Intelligence Scan:</span>
+              <span style="font-weight: 600; color: #1e293b;">${verifiedAt}</span>
+            </div>
+          ` : ''}
+
+          <div style="margin-top: 0.35rem; border-top: 1px dashed #e2e8f0; padding-top: 0.45rem;">
+            <span style="font-weight: 600; color: #475569; display: block; margin-bottom: 0.3rem;">Reconciled Source Datasets:</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 0.35rem;">
+              ${school.urn ? `<span style="font-size: 0.74rem; background: #f1f5f9; color: #334155; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #e2e8f0;"><i class="fa-solid fa-landmark"></i> DfE Register (${school.urn})</span>` : ''}
+              ${Object.keys(p).length > 0 ? `<span style="font-size: 0.74rem; background: #f0fdf4; color: #166534; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #bbf7d0;"><i class="fa-solid fa-book-bookmark"></i> Pillai Admissions Dataset</span>` : ''}
+              ${Object.keys(k).length > 0 ? `<span style="font-size: 0.74rem; background: #eff6ff; color: #1e40af; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #bfdbfe;"><i class="fa-solid fa-list-check"></i> KPS 11+ Guide</span>` : ''}
+              ${isLlmEnriched ? `<span style="font-size: 0.74rem; background: #faf5ff; color: #6b21a8; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #e9d5ff;"><i class="fa-solid fa-robot"></i> LLM Live Crawler</span>` : ''}
+            </div>
+          </div>
+
+          ${sourceUrl ? `
+            <div style="margin-top: 0.35rem;">
+              <a href="${sourceUrl}" target="_blank" style="font-size: 0.78rem; color: #4338ca; font-weight: 700; text-decoration: underline; display: inline-flex; align-items: center; gap: 0.3rem;">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> View Verification Source Reference
+              </a>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+
+    // ----------------------------------------------------
+    // Build School Contact Card
+    // ----------------------------------------------------
+    const contactHtml = `
+      <div class="detail-box" style="grid-column: 1 / -1; background: #ffffff; border: 1px solid #cbd5e1;">
+        <h4 style="color: #0284c7; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
+          <i class="fa-solid fa-address-book"></i> School Contact &amp; Location Details
+        </h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.75rem;">
+          <div>
+            ${renderWidget('phone', 'Phone Number', school.phone)}
+            ${renderWidget('email', 'Email Address', school.email)}
+          </div>
+          <div>
+            ${renderWidget('website', 'Official Website', school.website)}
+            ${renderWidget('address', 'Postal Address', school.address ? `${school.address}, ${school.postcode || ''}` : school.la)}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // ----------------------------------------------------
+    // Assemble Full Modal Content
+    // ----------------------------------------------------
+    detailContent.innerHTML = `
+      <div class="detail-header-hero" style="border-bottom: 1px solid #e2e8f0; padding-bottom: 1.25rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h2 style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0 0 0.35rem 0; letter-spacing: -0.02em;">
+              ${school.name}
+            </h2>
+            <div style="color: #64748b; font-size: 0.92rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              <span><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> ${school.address || school.la}, ${school.postcode || ''}</span>
+              <span>•</span>
+              <span><strong>Region:</strong> ${school.region || school.la}</span>
+              <span>•</span>
+              <span><strong>URN:</strong> ${school.urn || 'N/A'}</span>
+            </div>
+          </div>
+
+          ${isLlmEnriched ? `
+            <div style="background: linear-gradient(135deg, #faf5ff 0%, #ede9fe 100%); border: 1px solid #ddd6fe; border-radius: 8px; padding: 0.45rem 0.85rem; display: flex; align-items: center; gap: 0.5rem;">
+              <i class="fa-solid fa-wand-magic-sparkles" style="color: #7c3aed; font-size: 1.1rem;"></i>
+              <div>
+                <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #6d28d9; letter-spacing: 0.05em;">AI Enriched Record</div>
+                <div style="font-size: 0.85rem; font-weight: 800; color: #4338ca;">${confidenceScore}% Confidence</div>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="detail-tags-row" style="display: flex; gap: 0.5rem; margin-top: 0.85rem; flex-wrap: wrap; align-items: center;">
+          <span class="badge-ofsted" style="font-size: 0.78rem;"><i class="fa-solid fa-star"></i> ${formatOfsted(userOverrides.ofstedRating || school.ofstedRating)}</span>
+          <span class="badge-exam" style="font-size: 0.78rem; background: #e0e7ff; color: #3730a3;"><i class="fa-solid fa-school"></i> ${userOverrides.schoolType || school.rawSchoolType || school.schoolType}</span>
+          <span class="badge-exam" style="font-size: 0.78rem; background: #f1f5f9; color: #334155;"><i class="fa-solid fa-venus-mars"></i> ${userOverrides.gender || school.gender} intake</span>
+          ${school.ageRange ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-user-group"></i> Age ${school.ageRange}</span>` : ''}
+          ${school.pupilCount ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-users"></i> ${school.pupilCount.toLocaleString()} pupils</span>` : ''}
 
           <!-- Toggleable Hot Pill -->
           <button type="button" class="btn" id="toggle-hot-btn" style="border:none; cursor:${currentPermissions.includes('admin:edit') ? 'pointer' : 'default'}; padding:0;" title="${currentPermissions.includes('admin:edit') ? 'Click to toggle Hot status' : 'Hot status'}">
             ${school.hot
-              ? `<span class="badge-hot"><i class="fa-solid fa-fire"></i> Hot ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
-              : `<span style="font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-fire"></i> Not Hot ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
+              ? `<span class="badge-hot" style="font-size:0.76rem;"><i class="fa-solid fa-fire"></i> Hot ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
+              : `<span style="font-size:0.76rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-fire"></i> Not Hot ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
             }
           </button>
 
           <!-- Toggleable Verified / Official Pill -->
           <button type="button" class="btn" id="toggle-official-btn" style="border:none; cursor:${currentPermissions.includes('admin:edit') ? 'pointer' : 'default'}; padding:0;" title="${currentPermissions.includes('admin:edit') ? 'Click to toggle Official DfE status' : 'Official status'}">
             ${school.official
-              ? `<span class="badge-official"><i class="fa-solid fa-circle-check"></i> Official DfE ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
-              : `<span style="font-size:0.75rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-circle-question"></i> Unofficial ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
+              ? `<span class="badge-official" style="font-size:0.76rem;"><i class="fa-solid fa-circle-check"></i> Official DfE ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
+              : `<span style="font-size:0.76rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-circle-question"></i> Unofficial ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
             }
           </button>
         </div>
       </div>
 
-      <p style="margin-bottom: 1.5rem; color: #334155; font-size: 0.95rem;">${school.description || 'No summary description provided.'}</p>
+      <p style="margin-bottom: 1.5rem; color: #334155; font-size: 0.95rem; line-height: 1.5; background: #f8fafc; padding: 0.9rem 1.1rem; border-radius: 8px; border: 1px solid #e2e8f0;">
+        ${school.description || 'Comprehensive admissions and curriculum profile verified across UK official school registers, independent examination syndicates, and AI crawler intelligence.'}
+      </p>
 
-      <div class="detail-sections-grid">
+      <div class="detail-sections-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem;">
         ${admissionsUnifiedHtml}
-
-        <div class="detail-box" style="grid-column: 1 / -1;">
-          <h4><i class="fa-solid fa-chart-line"></i> Academic Metrics & GCSE</h4>
-          <div style="display: flex; flex-direction: column; gap: 0.4rem;">
-            ${renderWidget('pupilCount', 'Pupil Count', school.pupilCount ? school.pupilCount.toLocaleString() : 'N/A')}
-            ${renderWidget('gcseAttainment8', 'GCSE Attainment 8', school.gcseAttainment8 !== null && school.gcseAttainment8 !== undefined ? school.gcseAttainment8 : 'N/A')}
-            ${renderWidget('gcseProgress8', 'Progress 8 Score', school.gcseProgress8 !== null && school.gcseProgress8 !== undefined ? school.gcseProgress8 : 'N/A')}
-            ${renderWidget('ebaccAveragePointScore', 'EBacc Average Point Score', school.ebaccAveragePointScore !== null && school.ebaccAveragePointScore !== undefined ? school.ebaccAveragePointScore : 'N/A')}
-          </div>
-          <div style="margin-top: 0.8rem; border-top: 1px dashed #cbd5e1; padding-top: 0.6rem;">
-            <strong>Offered GCSE Subjects (${subjectsArray.length}):</strong>
-            <div class="subjects-tags" style="margin-top: 0.4rem;">${subjectsHtml}</div>
-          </div>
-        </div>
-
-        <div class="detail-box" style="grid-column: 1 / -1;">
-          <h4><i class="fa-solid fa-address-book"></i> School Contact & Details</h4>
-          <div style="display: flex; flex-direction: column; gap: 0.4rem;">
-            ${renderWidget('phone', 'Phone Number', school.phone)}
-            ${renderWidget('email', 'Email Address', school.email)}
-            ${renderWidget('website', 'Official Website', school.website)}
-          </div>
-        </div>
+        ${financialsHtml}
+        ${policyHtml}
+        ${academicMetricsHtml}
+        ${provenanceHtml}
+        ${contactHtml}
       </div>
 
-      <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap:wrap; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 1rem;">
+      <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap:wrap; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 1.25rem;">
         <button type="button" class="btn ${userSelectedSchools.some(u => u.id === school.id) ? 'btn-primary' : 'btn-outline'}" id="detail-shortlist-btn" style="${userSelectedSchools.some(u => u.id === school.id) ? 'background:#059669; border-color:#059669;' : 'color:#059669; border-color:#6ee7b7;'}">
           <i class="fa-solid ${userSelectedSchools.some(u => u.id === school.id) ? 'fa-check' : 'fa-plus'}"></i> ${userSelectedSchools.some(u => u.id === school.id) ? 'Shortlisted' : 'Add to Shortlist'}
         </button>
-        ${school.website ? `<a href="${school.website}" target="_blank" class="btn btn-primary"><i class="fa-solid fa-globe"></i> Official Website</a>` : ''}
-        ${school.compareSchoolPerformanceUrl ? `<a href="${school.compareSchoolPerformanceUrl}" target="_blank" class="btn btn-outline" style="color:#059669; border-color:#6ee7b7;"><i class="fa-solid fa-chart-bar"></i> Compare Performance</a>` : ''}
-        ${school.phone ? `<a href="tel:${school.phone}" class="btn btn-outline"><i class="fa-solid fa-phone"></i> ${school.phone}</a>` : ''}
-        ${school.email ? `<a href="mailto:${school.email}" class="btn btn-outline"><i class="fa-solid fa-envelope"></i> Email School</a>` : ''}
+
+        ${school.website ? `<a href="${school.website}" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-globe"></i> Official Website</a>` : ''}
+        ${school.compareSchoolPerformanceUrl ? `<a href="${school.compareSchoolPerformanceUrl}" target="_blank" class="btn btn-outline" style="color:#059669; border-color:#6ee7b7; display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-chart-bar"></i> Compare Performance</a>` : ''}
+        ${school.phone ? `<a href="tel:${school.phone}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-phone"></i> ${school.phone}</a>` : ''}
+        ${school.email ? `<a href="mailto:${school.email}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-envelope"></i> Email School</a>` : ''}
+
         ${currentPermissions.includes('admin:portal') ? `
-          <button type="button" class="btn btn-primary" id="detail-merge-btn" style="background:#7c3aed; border-color:#7c3aed; margin-left:auto;">
+          <button type="button" class="btn btn-outline" id="detail-version-history-btn" style="color:#4f46e5; border-color:#c7d2fe; margin-left:auto; display: inline-flex; align-items: center; gap: 0.35rem;">
+            <i class="fa-solid fa-clock-rotate-left"></i> Version History
+          </button>
+          <button type="button" class="btn btn-primary" id="detail-merge-btn" style="background:#7c3aed; border-color:#7c3aed; display: inline-flex; align-items: center; gap: 0.35rem;">
             <i class="fa-solid fa-code-merge"></i> Merge Record
           </button>
         ` : ''}
@@ -3230,6 +3452,16 @@ async function openSchoolDetail(id) {
         e.preventDefault();
         addUserSchool(school);
         openSchoolDetail(school.id);
+      });
+    }
+
+    // Wire Version History button listener for admin:portal permission
+    const detailHistoryBtn = document.getElementById('detail-version-history-btn');
+    if (detailHistoryBtn && currentPermissions.includes('admin:portal')) {
+      detailHistoryBtn.addEventListener('click', () => {
+        if (typeof openSchoolVersionHistoryModal === 'function') {
+          openSchoolVersionHistoryModal(school.id, school.name);
+        }
       });
     }
 
@@ -3902,70 +4134,1018 @@ async function saveRecWeights(e) {
   }
 }
 
-// Load Admin Portal Settings (Rec weights & System Feature toggles & DB Instance)
+// Load Admin Portal Settings (Rec weights & System Feature toggles & DB Instance & LLM Settings)
 async function loadAdminSettings() {
   await loadRecWeights();
   await loadSystemSettings();
   await loadDatabaseInstanceSettings();
+  await loadLlmSettings();
 }
 
 async function loadSystemSettings() {
   await fetchSystemSettings();
-  updateSystemSettingsUI();
+  await loadLlmSettings();
 }
 
-function updateSystemSettingsUI() {
-  const p2Toggle = document.getElementById('setting-parent2-enabled');
-  const statusBadge = document.getElementById('p2-toggle-status-badge');
-  const isEnabled = Boolean(systemSettings.parentPortal2Enabled);
+// ----------------------------------------------------
+// LLM AI Automated School Intelligence & Engine Settings
+// ----------------------------------------------------
+let cachedDefaultLlmPrompt = '';
+let pendingClearedKeys = { gemini: false, openai: false };
+let isSettingsDirty = false;
 
-  if (p2Toggle) {
-    p2Toggle.checked = isEnabled;
-  }
-
-  if (statusBadge) {
-    if (isEnabled) {
-      statusBadge.textContent = 'Status: Enabled (Visible to Parents)';
-      statusBadge.style.color = '#166534';
-      statusBadge.style.background = '#dcfce7';
+function setAdminSettingsDirty(dirty = true) {
+  isSettingsDirty = dirty;
+  const dirtyBadges = document.querySelectorAll('.settings-dirty-indicator');
+  dirtyBadges.forEach(b => {
+    if (dirty) {
+      b.style.display = 'inline-flex';
+      b.innerHTML = '<i class="fa-solid fa-circle" style="font-size:0.5rem; color:#f59e0b;"></i> Unsaved Changes';
+      b.style.background = '#fef3c7';
+      b.style.color = '#92400e';
+      b.style.borderColor = '#fde68a';
     } else {
-      statusBadge.textContent = 'Status: Disabled (Hidden from Parents)';
-      statusBadge.style.color = '#dc2626';
-      statusBadge.style.background = '#fee2e2';
+      b.style.display = 'inline-flex';
+      b.innerHTML = '<i class="fa-solid fa-check" style="color:#059669;"></i> Saved';
+      b.style.background = '#dcfce7';
+      b.style.color = '#166534';
+      b.style.borderColor = '#bbf7d0';
     }
+  });
+}
+
+async function loadLlmSettings() {
+  try {
+    const res = await fetch('/api/admin/settings', {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+    if (!res.ok) return;
+
+    const data = await res.json();
+    const settings = data.settings || {};
+    cachedDefaultLlmPrompt = settings.defaultPromptTemplate || data.defaultPromptTemplate || '';
+
+    const provider = settings.llmProvider || 'gemini';
+    const geminiModel = settings.geminiModel || 'gemini-3.6-flash';
+    const openaiModel = settings.openaiModel || 'gpt-4o-mini';
+    const skipDays = typeof settings.scannerSkipDays === 'number' ? settings.scannerSkipDays : 10;
+
+    // Header Quick Stats
+    const statProvider = document.getElementById('stat-active-provider');
+    const statModel = document.getElementById('stat-active-model');
+    const statKey = document.getElementById('stat-api-key-status');
+    const statSkip = document.getElementById('stat-skip-days');
+
+    if (statProvider) statProvider.textContent = provider === 'chatgpt' ? 'OpenAI ChatGPT' : 'Google Gemini';
+    if (statModel) statModel.textContent = provider === 'chatgpt' ? openaiModel : geminiModel;
+    if (statKey) {
+      const activeHasKey = provider === 'chatgpt' ? settings.hasOpenaiKey : settings.hasGeminiKey;
+      const activeMaskedKey = provider === 'chatgpt' ? settings.openaiKeyMasked : settings.geminiKeyMasked;
+      statKey.textContent = activeHasKey ? `Saved (${activeMaskedKey || '••••'})` : 'Key Missing';
+      statKey.style.color = activeHasKey ? '#6ee7b7' : '#fca5a5';
+    }
+    if (statSkip) statSkip.textContent = skipDays === 0 ? 'Disabled (0d)' : `${skipDays} Days`;
+
+    // Provider Selector & Radio Cards
+    const providerSelect = document.getElementById('setting-llm-provider');
+    if (providerSelect) providerSelect.value = provider;
+
+    const cardGemini = document.getElementById('provider-card-gemini');
+    const cardChatgpt = document.getElementById('provider-card-chatgpt');
+    const rGemini = document.querySelector('input[name="llm-provider-radio"][value="gemini"]');
+    const rChatgpt = document.querySelector('input[name="llm-provider-radio"][value="chatgpt"]');
+
+    if (provider === 'gemini') {
+      if (cardGemini) cardGemini.classList.add('active');
+      if (cardChatgpt) cardChatgpt.classList.remove('active');
+      if (rGemini) rGemini.checked = true;
+      if (rChatgpt) rChatgpt.checked = false;
+    } else {
+      if (cardChatgpt) cardChatgpt.classList.add('active');
+      if (cardGemini) cardGemini.classList.remove('active');
+      if (rChatgpt) rChatgpt.checked = true;
+      if (rGemini) rGemini.checked = false;
+    }
+
+    const badge = document.getElementById('active-llm-provider-badge');
+    if (badge) {
+      if (provider === 'gemini') {
+        badge.innerHTML = `<i class="fa-brands fa-google"></i> Active: Google Gemini (${geminiModel})`;
+        badge.style.color = '#6d28d9';
+        badge.style.background = '#f5f3ff';
+        badge.style.borderColor = '#ddd6fe';
+      } else {
+        badge.innerHTML = `<i class="fa-solid fa-bolt"></i> Active: OpenAI ChatGPT (${openaiModel})`;
+        badge.style.color = '#0369a1';
+        badge.style.background = '#f0f9ff';
+        badge.style.borderColor = '#bae6fd';
+      }
+    }
+
+    // Model Dropdowns
+    const geminiGroup = document.getElementById('llm-model-gemini-group');
+    const chatgptGroup = document.getElementById('llm-model-chatgpt-group');
+    const geminiModelSelect = document.getElementById('setting-gemini-model');
+    const openaiModelSelect = document.getElementById('setting-openai-model');
+
+    if (geminiGroup) geminiGroup.style.display = provider === 'gemini' ? 'block' : 'none';
+    if (chatgptGroup) chatgptGroup.style.display = provider === 'chatgpt' ? 'block' : 'none';
+    if (geminiModelSelect && settings.geminiModel) geminiModelSelect.value = settings.geminiModel;
+    if (openaiModelSelect && settings.openaiModel) openaiModelSelect.value = settings.openaiModel;
+
+    // API Key Credentials
+    const geminiKeyInput = document.getElementById('setting-gemini-api-key');
+    const openaiKeyInput = document.getElementById('setting-openai-api-key');
+    const badgeGeminiKey = document.getElementById('badge-gemini-key-status');
+    const badgeOpenaiKey = document.getElementById('badge-openai-key-status');
+
+    if (badgeGeminiKey) {
+      if (settings.hasGeminiKey) {
+        badgeGeminiKey.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#059669;"></i> Saved (${settings.geminiKeyMasked || '••••'})`;
+        badgeGeminiKey.style.color = '#059669';
+        badgeGeminiKey.style.background = '#dcfce7';
+      } else {
+        badgeGeminiKey.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#dc2626;"></i> Not Configured`;
+        badgeGeminiKey.style.color = '#dc2626';
+        badgeGeminiKey.style.background = '#fee2e2';
+      }
+    }
+
+    if (badgeOpenaiKey) {
+      if (settings.hasOpenaiKey) {
+        badgeOpenaiKey.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#059669;"></i> Saved (${settings.openaiKeyMasked || '••••'})`;
+        badgeOpenaiKey.style.color = '#059669';
+        badgeOpenaiKey.style.background = '#dcfce7';
+      } else {
+        badgeOpenaiKey.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color:#dc2626;"></i> Not Configured`;
+        badgeOpenaiKey.style.color = '#dc2626';
+        badgeOpenaiKey.style.background = '#fee2e2';
+      }
+    }
+
+    if (geminiKeyInput) {
+      geminiKeyInput.value = '';
+      geminiKeyInput.placeholder = settings.hasGeminiKey ? `Saved: ${settings.geminiKeyMasked} (Enter new key to replace)` : 'Enter Gemini API key (e.g. AIzaSy... or AQ.Ab8R...)';
+    }
+    if (openaiKeyInput) {
+      openaiKeyInput.value = '';
+      openaiKeyInput.placeholder = settings.hasOpenaiKey ? `Saved: ${settings.openaiKeyMasked} (Enter new key to replace)` : 'Enter OpenAI API key (e.g. sk-proj-...)';
+    }
+
+    // Skip Days & Sleep Delay
+    const skipInput = document.getElementById('setting-scanner-skip-days');
+    if (skipInput) skipInput.value = skipDays;
+
+    const delayInput = document.getElementById('setting-scanner-delay-seconds');
+    if (delayInput) delayInput.value = typeof settings.scannerDelaySeconds === 'number' ? settings.scannerDelaySeconds : 20;
+
+    // Prompt Template Editor
+    const promptTextarea = document.getElementById('setting-llm-prompt-template');
+    if (promptTextarea) {
+      promptTextarea.value = settings.llmPromptTemplate || cachedDefaultLlmPrompt;
+    }
+
+    // Recommendation Weights
+    if (settings.recWeights) {
+      const w = settings.recWeights;
+      if (document.getElementById('weight-location')) document.getElementById('weight-location').value = w.location ?? 35;
+      if (document.getElementById('weight-exam')) document.getElementById('weight-exam').value = w.examType ?? 25;
+      if (document.getElementById('weight-academic')) document.getElementById('weight-academic').value = w.academicPerformance ?? 20;
+      if (document.getElementById('weight-ofsted')) document.getElementById('weight-ofsted').value = w.ofstedRating ?? 10;
+      if (document.getElementById('weight-type')) document.getElementById('weight-type').value = w.schoolType ?? 10;
+
+      if (document.getElementById('weight-val-location')) document.getElementById('weight-val-location').textContent = `${w.location ?? 35}%`;
+      if (document.getElementById('weight-val-exam')) document.getElementById('weight-val-exam').textContent = `${w.examType ?? 25}%`;
+      if (document.getElementById('weight-val-academic')) document.getElementById('weight-val-academic').textContent = `${w.academicPerformance ?? 20}%`;
+      if (document.getElementById('weight-val-ofsted')) document.getElementById('weight-val-ofsted').textContent = `${w.ofstedRating ?? 10}%`;
+      if (document.getElementById('weight-val-type')) document.getElementById('weight-val-type').textContent = `${w.schoolType ?? 10}%`;
+      updateTotalWeightsPill();
+    }
+
+    pendingClearedKeys = { gemini: false, openai: false };
+    setAdminSettingsDirty(false);
+
+    // Attach Interactive Settings Event Listeners
+    initSettingsStudioListeners();
+  } catch (err) {
+    console.error('Error loading LLM settings:', err);
   }
 }
 
-async function saveSystemSettingsHandler() {
-  const p2Toggle = document.getElementById('setting-parent2-enabled');
-  const isEnabled = p2Toggle ? p2Toggle.checked : false;
+let settingsListenersInitialized = false;
+function initSettingsStudioListeners() {
+  if (settingsListenersInitialized) return;
+  settingsListenersInitialized = true;
+
+  // Provider Card Radios
+  const cardGemini = document.getElementById('provider-card-gemini');
+  const cardChatgpt = document.getElementById('provider-card-chatgpt');
+  const providerSelect = document.getElementById('setting-llm-provider');
+  const geminiGroup = document.getElementById('llm-model-gemini-group');
+  const chatgptGroup = document.getElementById('llm-model-chatgpt-group');
+  const badge = document.getElementById('active-llm-provider-badge');
+
+  function switchProvider(newProvider) {
+    if (providerSelect) providerSelect.value = newProvider;
+
+    const rGemini = document.querySelector('input[name="llm-provider-radio"][value="gemini"]');
+    const rChatgpt = document.querySelector('input[name="llm-provider-radio"][value="chatgpt"]');
+
+    if (newProvider === 'gemini') {
+      if (cardGemini) cardGemini.classList.add('active');
+      if (cardChatgpt) cardChatgpt.classList.remove('active');
+      if (rGemini) rGemini.checked = true;
+      if (rChatgpt) rChatgpt.checked = false;
+    } else {
+      if (cardChatgpt) cardChatgpt.classList.add('active');
+      if (cardGemini) cardGemini.classList.remove('active');
+      if (rChatgpt) rChatgpt.checked = true;
+      if (rGemini) rGemini.checked = false;
+    }
+
+    if (geminiGroup) geminiGroup.style.display = newProvider === 'gemini' ? 'block' : 'none';
+    if (chatgptGroup) chatgptGroup.style.display = newProvider === 'chatgpt' ? 'block' : 'none';
+
+    const statProvider = document.getElementById('stat-active-provider');
+    const statModel = document.getElementById('stat-active-model');
+    const geminiModel = document.getElementById('setting-gemini-model')?.value || 'gemini-3.6-flash';
+    const openaiModel = document.getElementById('setting-openai-model')?.value || 'gpt-4o-mini';
+
+    if (statProvider) statProvider.textContent = newProvider === 'chatgpt' ? 'OpenAI ChatGPT' : 'Google Gemini';
+    if (statModel) statModel.textContent = newProvider === 'chatgpt' ? openaiModel : geminiModel;
+
+    if (badge) {
+      if (newProvider === 'gemini') {
+        badge.innerHTML = `<i class="fa-brands fa-google"></i> Active: Google Gemini (${geminiModel})`;
+        badge.style.color = '#6d28d9';
+        badge.style.background = '#f5f3ff';
+        badge.style.borderColor = '#ddd6fe';
+      } else {
+        badge.innerHTML = `<i class="fa-solid fa-bolt"></i> Active: OpenAI ChatGPT (${openaiModel})`;
+        badge.style.color = '#0369a1';
+        badge.style.background = '#f0f9ff';
+        badge.style.borderColor = '#bae6fd';
+      }
+    }
+    setAdminSettingsDirty(true);
+  }
+
+  if (cardGemini) {
+    cardGemini.addEventListener('click', (e) => {
+      switchProvider('gemini');
+    });
+  }
+  if (cardChatgpt) {
+    cardChatgpt.addEventListener('click', (e) => {
+      switchProvider('chatgpt');
+    });
+  }
+
+  document.querySelectorAll('input[name="llm-provider-radio"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        switchProvider(e.target.value);
+      }
+    });
+  });
+
+  // Model selection changes
+  const geminiModelSelect = document.getElementById('setting-gemini-model');
+  if (geminiModelSelect) {
+    geminiModelSelect.addEventListener('change', () => {
+      const activeProvider = document.querySelector('input[name="llm-provider-radio"]:checked')?.value || providerSelect?.value || 'gemini';
+      const statModel = document.getElementById('stat-active-model');
+      if (activeProvider === 'gemini') {
+        if (statModel) statModel.textContent = geminiModelSelect.value;
+        if (badge) {
+          badge.innerHTML = `<i class="fa-brands fa-google"></i> Active: Google Gemini (${geminiModelSelect.value})`;
+        }
+      }
+      setAdminSettingsDirty(true);
+    });
+  }
+
+  const openaiModelSelect = document.getElementById('setting-openai-model');
+  if (openaiModelSelect) {
+    openaiModelSelect.addEventListener('change', () => {
+      const activeProvider = document.querySelector('input[name="llm-provider-radio"]:checked')?.value || providerSelect?.value || 'gemini';
+      const statModel = document.getElementById('stat-active-model');
+      if (activeProvider === 'chatgpt') {
+        if (statModel) statModel.textContent = openaiModelSelect.value;
+        if (badge) {
+          badge.innerHTML = `<i class="fa-solid fa-bolt"></i> Active: OpenAI ChatGPT (${openaiModelSelect.value})`;
+        }
+      }
+      setAdminSettingsDirty(true);
+    });
+  }
+
+  // Key inputs dirty tracking
+  const gKeyInput = document.getElementById('setting-gemini-api-key');
+  if (gKeyInput) {
+    gKeyInput.addEventListener('input', () => {
+      setAdminSettingsDirty(true);
+    });
+  }
+  const oKeyInput = document.getElementById('setting-openai-api-key');
+  if (oKeyInput) {
+    oKeyInput.addEventListener('input', () => {
+      setAdminSettingsDirty(true);
+    });
+  }
+
+  // Template editor dirty tracking
+  const tplInput = document.getElementById('setting-llm-prompt-template');
+  if (tplInput) {
+    tplInput.addEventListener('input', () => {
+      setAdminSettingsDirty(true);
+    });
+  }
+
+  // Skip days & sleep delay dirty tracking
+  const skipDaysInput = document.getElementById('setting-scanner-skip-days');
+  if (skipDaysInput) {
+    skipDaysInput.addEventListener('input', () => {
+      setAdminSettingsDirty(true);
+    });
+  }
+  const delaySecInput = document.getElementById('setting-scanner-delay-seconds');
+  if (delaySecInput) {
+    delaySecInput.addEventListener('input', () => {
+      setAdminSettingsDirty(true);
+    });
+  }
+
+  // Recommendation sliders dirty tracking
+  ['weight-location', 'weight-exam', 'weight-academic', 'weight-ofsted', 'weight-type'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', () => {
+        setAdminSettingsDirty(true);
+      });
+    }
+  });
+
+  // Toggle Password Key Visibility
+  document.querySelectorAll('.btn-toggle-key-visibility').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetId = btn.getAttribute('data-target');
+      const input = document.getElementById(targetId);
+      if (!input) return;
+      const isPassword = input.type === 'password';
+      input.type = isPassword ? 'text' : 'password';
+      btn.innerHTML = isPassword ? `<i class="fa-solid fa-eye-slash"></i>` : `<i class="fa-solid fa-eye"></i>`;
+    });
+  });
+
+  // Clear Key Buttons
+  document.querySelectorAll('.btn-clear-key').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetId = btn.getAttribute('data-target');
+      const input = document.getElementById(targetId);
+      if (!input) return;
+      input.value = '';
+      input.placeholder = 'Key cleared. Click Save to confirm removal.';
+      if (targetId.includes('gemini')) pendingClearedKeys.gemini = true;
+      if (targetId.includes('openai')) pendingClearedKeys.openai = true;
+      setAdminSettingsDirty(true);
+      showToast('API Key marked for removal. Click Save All Settings to persist.', 'info');
+    });
+  });
+
+  // Placeholder Chip Insertion
+  document.querySelectorAll('.btn-insert-placeholder').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tag = btn.getAttribute('data-tag');
+      const textarea = document.getElementById('setting-llm-prompt-template');
+      if (!textarea || !tag) return;
+
+      const start = textarea.selectionStart || 0;
+      const end = textarea.selectionEnd || 0;
+      const text = textarea.value;
+      textarea.value = text.substring(0, start) + tag + text.substring(end);
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd = start + tag.length;
+      setAdminSettingsDirty(true);
+      showToast(`Inserted ${tag} into template`, 'info');
+    });
+  });
+
+  // Reset Template
+  const btnReset = document.getElementById('btn-reset-llm-prompt');
+  if (btnReset) {
+    btnReset.addEventListener('click', () => {
+      const textarea = document.getElementById('setting-llm-prompt-template');
+      if (textarea && cachedDefaultLlmPrompt) {
+        textarea.value = cachedDefaultLlmPrompt;
+        setAdminSettingsDirty(true);
+        showToast('Admissions Intelligence prompt template restored to default schema!', 'success');
+      }
+    });
+  }
+
+  // Validate Template Schema
+  const btnValidate = document.getElementById('btn-validate-llm-prompt');
+  if (btnValidate) {
+    btnValidate.addEventListener('click', () => {
+      const textarea = document.getElementById('setting-llm-prompt-template');
+      const val = textarea ? textarea.value : '';
+      const requiredTags = ['{{school_name}}', 'admissionsOverview', 'entranceExamDates', 'feesTermly', 'confidenceScore'];
+      const missing = requiredTags.filter(t => !val.includes(t));
+      if (missing.length === 0) {
+        showToast('✅ Template Schema Valid: All key parameter placeholders and JSON response fields found!', 'success');
+      } else {
+        showToast(`⚠️ Missing recommended schema tags: ${missing.join(', ')}`, 'warning');
+      }
+    });
+  }
+
+  // Live Connection Test
+  const btnTestConn = document.getElementById('btn-test-llm-connection');
+  if (btnTestConn) {
+    btnTestConn.addEventListener('click', testLlmConnectionHandler);
+  }
+
+  // Save Settings
+  const btnSaveAll = document.getElementById('btn-save-all-settings');
+  const btnSaveLlm = document.getElementById('btn-save-llm-settings');
+  if (btnSaveAll) btnSaveAll.addEventListener('click', saveLlmSettingsHandler);
+  if (btnSaveLlm) btnSaveLlm.addEventListener('click', saveLlmSettingsHandler);
+}
+
+async function testLlmConnectionHandler() {
+  const btnTest = document.getElementById('btn-test-llm-connection');
+  const resultSpan = document.getElementById('test-connection-result');
+  const provider = document.querySelector('input[name="llm-provider-radio"]:checked')?.value || document.getElementById('setting-llm-provider')?.value || 'gemini';
+  const geminiModel = document.getElementById('setting-gemini-model')?.value || 'gemini-3.6-flash';
+  const openaiModel = document.getElementById('setting-openai-model')?.value || 'gpt-4o-mini';
+  const geminiApiKey = document.getElementById('setting-gemini-api-key')?.value || '';
+  const openaiApiKey = document.getElementById('setting-openai-api-key')?.value || '';
+
+  const model = provider === 'chatgpt' ? openaiModel : geminiModel;
+  const apiKey = provider === 'chatgpt' ? openaiApiKey : geminiApiKey;
+
+  if (btnTest) {
+    btnTest.disabled = true;
+    btnTest.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Testing ${provider.toUpperCase()} Connection...`;
+  }
+  if (resultSpan) {
+    resultSpan.textContent = 'Pinging provider API...';
+    resultSpan.style.color = '#64748b';
+  }
 
   try {
-    const res = await fetch('/api/system-settings', {
+    const res = await fetch('/api/admin/llm-test-connection', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
       },
-      body: JSON.stringify({ parentPortal2Enabled: isEnabled })
+      body: JSON.stringify({
+        provider,
+        model,
+        apiKey: apiKey.trim() || undefined
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (resultSpan) {
+        resultSpan.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #059669;"></i> <strong>Verified!</strong> HTTP ${data.status} (${data.latencyMs}ms)`;
+        resultSpan.style.color = '#059669';
+      }
+      showToast(`Connection to ${provider.toUpperCase()} (${model}) succeeded in ${data.latencyMs}ms!`, 'success');
+      await loadLlmSettings();
+    } else {
+      if (resultSpan) {
+        resultSpan.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: #dc2626;"></i> <strong>Failed:</strong> ${data.error || 'Connection error'}`;
+        resultSpan.style.color = '#dc2626';
+      }
+      showToast(`Connection failed: ${data.error || 'Check API credentials'}`, 'error');
+    }
+  } catch (err) {
+    if (resultSpan) {
+      resultSpan.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: #dc2626;"></i> Network Error`;
+      resultSpan.style.color = '#dc2626';
+    }
+    showToast('Failed to reach server for connection test', 'error');
+  } finally {
+    if (btnTest) {
+      btnTest.disabled = false;
+      btnTest.innerHTML = `<i class="fa-solid fa-satellite-dish"></i> Test Active LLM Connection Live`;
+    }
+  }
+}
+
+async function saveLlmSettingsHandler() {
+  const provider = document.querySelector('input[name="llm-provider-radio"]:checked')?.value || document.getElementById('setting-llm-provider')?.value || 'gemini';
+  const geminiModel = document.getElementById('setting-gemini-model')?.value || 'gemini-3.6-flash';
+  const openaiModel = document.getElementById('setting-openai-model')?.value || 'gpt-4o-mini';
+  const geminiApiKey = document.getElementById('setting-gemini-api-key')?.value || '';
+  const openaiApiKey = document.getElementById('setting-openai-api-key')?.value || '';
+  const promptTemplate = document.getElementById('setting-llm-prompt-template')?.value || '';
+  const skipDays = parseInt(document.getElementById('setting-scanner-skip-days')?.value || '10', 10);
+  const delaySec = parseInt(document.getElementById('setting-scanner-delay-seconds')?.value || '20', 10);
+
+  const recWeights = {
+    location: parseInt(document.getElementById('weight-location')?.value, 10) || 0,
+    examType: parseInt(document.getElementById('weight-exam')?.value, 10) || 0,
+    academicPerformance: parseInt(document.getElementById('weight-academic')?.value, 10) || 0,
+    ofstedRating: parseInt(document.getElementById('weight-ofsted')?.value, 10) || 0,
+    schoolType: parseInt(document.getElementById('weight-type')?.value, 10) || 0
+  };
+
+  const payload = {
+    llmProvider: provider,
+    geminiModel,
+    openaiModel,
+    scannerSkipDays: isNaN(skipDays) ? 10 : Math.max(0, Math.min(100, skipDays)),
+    scannerDelaySeconds: isNaN(delaySec) ? 20 : Math.max(0, Math.min(300, delaySec)),
+    llmPromptTemplate: promptTemplate,
+    recWeights
+  };
+
+  if (pendingClearedKeys.gemini) {
+    payload.clearGeminiKey = true;
+  } else if (geminiApiKey.trim() && !geminiApiKey.includes('••••')) {
+    payload.geminiApiKey = geminiApiKey.trim();
+  }
+
+  if (pendingClearedKeys.openai) {
+    payload.clearOpenaiKey = true;
+  } else if (openaiApiKey.trim() && !openaiApiKey.includes('••••')) {
+    payload.openaiApiKey = openaiApiKey.trim();
+  }
+
+  const saveBtns = [document.getElementById('btn-save-llm-settings'), document.getElementById('btn-save-all-settings')].filter(Boolean);
+  saveBtns.forEach(btn => {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Saving...`;
+  });
+
+  try {
+    const res = await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      pendingClearedKeys = { gemini: false, openai: false };
+      showToast('All Admin Settings & AI Engine configuration saved successfully!', 'success');
+      await loadLlmSettings();
+    } else {
+      showToast(`Failed to save settings: ${data.error || 'Unknown error'}`, 'error');
+    }
+  } catch (err) {
+    showToast('Error saving settings', 'error');
+  } finally {
+    saveBtns.forEach(btn => {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fa-solid fa-floppy-disk"></i> Save All Settings`;
+    });
+  }
+}
+
+async function previewLlmPromptHandler() {
+  const promptTemplate = document.getElementById('setting-llm-prompt-template')?.value || '';
+  const schoolId = document.getElementById('llm-test-school-picker')?.value;
+  const provider = document.querySelector('input[name="llm-provider-radio"]:checked')?.value || document.getElementById('setting-llm-provider')?.value || 'gemini';
+
+  try {
+    const res = await fetch('/api/admin/llm-render-prompt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ promptTemplate, schoolId, provider })
     });
 
     if (res.ok) {
       const data = await res.json();
-      if (data.settings) {
-        systemSettings = { ...systemSettings, ...data.settings };
-      } else {
-        systemSettings.parentPortal2Enabled = isEnabled;
+      const resultBox = document.getElementById('llm-test-result-box');
+      const resultPre = document.getElementById('llm-test-result-json');
+      if (resultBox && resultPre) {
+        resultBox.style.display = 'block';
+        resultPre.textContent = `=== PROMPT PREVIEW FOR: ${data.schoolName} ===\n\n${data.renderedPrompt}`;
       }
-      updateSystemSettingsUI();
-      applyPermissionsUI();
-      showToast(`Parent Portal 2.0 is now ${isEnabled ? 'enabled' : 'hidden'}!`, 'success');
-    } else {
-      showToast('Failed to save portal settings', 'error');
+      if (data.queryUrls?.active) {
+        updatePublicSearchUrlUI(provider, data.queryUrls.active);
+      }
+      showToast(`Rendered prompt preview for ${data.schoolName}!`, 'info');
     }
   } catch (err) {
-    console.error('Error saving system settings:', err);
-    showToast('Error saving portal settings', 'error');
+    showToast('Error rendering prompt preview', 'error');
+  }
+}
+
+async function testLlmCrawlSingleHandler() {
+  const schoolId = document.getElementById('llm-test-school-picker')?.value;
+  if (!schoolId) {
+    showToast('Please select a school to test AI crawl', 'warning');
+    return;
+  }
+
+  const provider = document.querySelector('input[name="llm-provider-radio"]:checked')?.value || document.getElementById('setting-llm-provider')?.value || 'gemini';
+  const geminiModel = document.getElementById('setting-gemini-model')?.value || 'gemini-3.6-flash';
+  const openaiModel = document.getElementById('setting-openai-model')?.value || 'gpt-4o-mini';
+  const geminiApiKey = document.getElementById('setting-gemini-api-key')?.value || '';
+  const openaiApiKey = document.getElementById('setting-openai-api-key')?.value || '';
+  const promptTemplate = document.getElementById('setting-llm-prompt-template')?.value || '';
+
+  const testBtn = document.getElementById('btn-test-llm-crawl-single');
+  const resultBox = document.getElementById('llm-test-result-box');
+  const resultPre = document.getElementById('llm-test-result-json');
+
+  if (testBtn) {
+    testBtn.disabled = true;
+    testBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Querying ${provider.toUpperCase()} AI...`;
+  }
+
+  try {
+    const res = await fetch('/api/admin/llm-crawl-single', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({
+        schoolId,
+        provider,
+        model: provider === 'chatgpt' ? openaiModel : geminiModel,
+        apiKey: provider === 'chatgpt' ? (openaiApiKey || undefined) : (geminiApiKey || undefined),
+        promptTemplate
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      if (resultBox && resultPre) {
+        resultBox.style.display = 'block';
+        resultPre.textContent = JSON.stringify(data.crawlResult?.data || data.updatedSchool, null, 2);
+      }
+      showToast(data.message || 'AI crawl completed and record updated successfully!', 'success');
+      await loadSchools();
+          } else {
+      if (resultBox && resultPre) {
+        resultBox.style.display = 'block';
+        resultPre.textContent = `Error: ${data.error || 'Failed'}\nMessage: ${data.message || 'LLM crawl failed'}`;
+      }
+      showToast(data.message || 'AI crawl failed', 'error');
+    }
+  } catch (err) {
+    showToast('Error connecting to AI crawl service', 'error');
+  } finally {
+    if (testBtn) {
+      testBtn.disabled = false;
+      testBtn.innerHTML = `<i class="fa-solid fa-bolt"></i> Test Live AI Crawl on School`;
+    }
+  }
+}
+
+// ----------------------------------------------------
+// Type a School & Live Search LLM Handlers
+// ----------------------------------------------------
+let lastLiveSearchResult = null;
+
+async function runLiveLlmSearchHandler() {
+  const queryInput = document.getElementById('llm-live-school-query');
+  const schoolName = queryInput ? queryInput.value.trim() : '';
+  if (!schoolName) {
+    showToast('Please type a school name or postcode to live search', 'warning');
+    if (queryInput) queryInput.focus();
+    return;
+  }
+
+  const provider = document.querySelector('input[name="llm-provider-radio"]:checked')?.value || document.getElementById('setting-llm-provider')?.value || 'gemini';
+  const geminiModel = document.getElementById('setting-gemini-model')?.value || 'gemini-3.6-flash';
+  const openaiModel = document.getElementById('setting-openai-model')?.value || 'gpt-4o-mini';
+  const geminiApiKey = document.getElementById('setting-gemini-api-key')?.value || '';
+  const openaiApiKey = document.getElementById('setting-openai-api-key')?.value || '';
+  const promptTemplate = document.getElementById('setting-llm-prompt-template')?.value || '';
+
+  const searchBtn = document.getElementById('btn-run-live-llm-search');
+  const loadingBox = document.getElementById('llm-live-search-loading');
+  const loadingText = document.getElementById('llm-live-search-loading-text');
+  const resultsCard = document.getElementById('llm-live-search-results');
+
+  if (searchBtn) {
+    searchBtn.disabled = true;
+    searchBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Live Querying...`;
+  }
+  if (loadingBox) {
+    loadingBox.style.display = 'block';
+    if (loadingText) {
+      loadingText.textContent = `Live querying ${provider === 'chatgpt' ? 'OpenAI ChatGPT' : 'Google Gemini'} for "${schoolName}"...`;
+    }
+  }
+  if (resultsCard) {
+    resultsCard.style.display = 'none';
+  }
+
+  try {
+    const res = await fetch('/api/admin/llm-live-search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({
+        schoolName,
+        provider,
+        model: provider === 'chatgpt' ? openaiModel : geminiModel,
+        apiKey: provider === 'chatgpt' ? (openaiApiKey || undefined) : (geminiApiKey || undefined),
+        promptTemplate
+      })
+    });
+
+    const data = await res.json();
+    if (loadingBox) loadingBox.style.display = 'none';
+
+    lastLiveSearchResult = data;
+    renderLiveLlmSearchResult(data);
+
+    if (res.ok && data.success && data.data) {
+      showToast(`Live AI search retrieved verified data for ${data.data.name || schoolName}!`, 'success');
+    } else {
+      showToast(data.message || data.error || 'Live search error received from LLM API.', 'warning');
+    }
+  } catch (err) {
+    if (loadingBox) loadingBox.style.display = 'none';
+    showToast('Error connecting to live AI search service', 'error');
+  } finally {
+    if (searchBtn) {
+      searchBtn.disabled = false;
+      searchBtn.innerHTML = `<i class="fa-solid fa-bolt"></i> Live Search LLM`;
+    }
+  }
+}
+
+function renderLiveLlmSearchResult(result) {
+  const container = document.getElementById('llm-live-search-results');
+  if (!container || !result) return;
+
+  const data = result.data || {};
+  const school = result.querySchool || {};
+  const isGemini = (result.provider || 'gemini') === 'gemini';
+  const isSuccess = result.success && result.data;
+
+  // School name & confidence badge
+  const nameEl = document.getElementById('llm-result-school-name');
+  if (nameEl) nameEl.textContent = data.name || school.name || 'Target School';
+
+  const confBadge = document.getElementById('llm-result-confidence-badge');
+  if (confBadge) {
+    if (isSuccess) {
+      const score = data.confidenceScore || 95;
+      confBadge.textContent = `${score}% Confidence Score`;
+      confBadge.style.background = score >= 90 ? '#dcfce7' : (score >= 70 ? '#fef3c7' : '#fee2e2');
+      confBadge.style.color = score >= 90 ? '#166534' : (score >= 70 ? '#92400e' : '#991b1b');
+      confBadge.style.display = 'inline-block';
+    } else {
+      confBadge.textContent = `API Error / Action Required`;
+      confBadge.style.background = '#fee2e2';
+      confBadge.style.color = '#991b1b';
+      confBadge.style.display = 'inline-block';
+    }
+  }
+
+  const provBadge = document.getElementById('llm-result-provider-badge');
+  if (provBadge) {
+    provBadge.textContent = isGemini ? `Google Gemini (${result.model || 'API'})` : `OpenAI ChatGPT (${result.model || 'API'})`;
+    provBadge.style.background = isGemini ? '#f5f3ff' : '#f0f9ff';
+    provBadge.style.color = isGemini ? '#6d28d9' : '#0369a1';
+  }
+
+  const exactReq = result.exactRequest || result.crawlResult?.exactRequest || {};
+  const exactResp = result.exactResponse || result.crawlResult?.exactResponse || {};
+
+  const regionVal = exactReq.schoolInput?.region || school.region || school.la || 'Greater London / UK';
+  const webVal = exactReq.schoolInput?.website || data.website || school.website || 'Not available';
+
+  const metaSubtitle = document.getElementById('llm-result-meta-subtitle');
+  if (metaSubtitle) {
+    metaSubtitle.textContent = `Region: ${regionVal} • Website: ${webVal}`;
+  }
+
+  const sourceLink = document.getElementById('llm-result-source-link');
+  if (sourceLink) {
+    const targetUrl = data.sourceUrl || data.website || (isGemini ? 'https://gemini.google.com/app' : 'https://chatgpt.com/');
+    sourceLink.href = targetUrl;
+  }
+
+  // Milestones Grid
+  const milestonesGrid = document.getElementById('llm-result-milestones-grid');
+  if (milestonesGrid) {
+    milestonesGrid.innerHTML = '';
+    const dates = data.entranceExamDates || {};
+    const milestoneLabels = [
+      { key: 'registrationOpen', label: 'Registration Open', icon: 'fa-door-open', color: '#2563eb' },
+      { key: 'registrationDeadline', label: 'Registration Deadline', icon: 'fa-calendar-xmark', color: '#dc2626' },
+      { key: 'examDate', label: '11+ Exam Date', icon: 'fa-file-pen', color: '#d97706' },
+      { key: 'examDate2', label: 'Stage 2 Exam', icon: 'fa-file-signature', color: '#7c3aed' },
+      { key: 'resultDate', label: 'Results Date', icon: 'fa-square-poll-vertical', color: '#0284c7' },
+      { key: 'interviewDates', label: 'Interview Window', icon: 'fa-comments', color: '#4f46e5' },
+      { key: 'offerDate', label: 'Offers Sent', icon: 'fa-envelope-open-text', color: '#059669' },
+      { key: 'acceptanceDeadline', label: 'Acceptance Deadline', icon: 'fa-circle-check', color: '#166534' }
+    ];
+
+    let count = 0;
+    milestoneLabels.forEach(m => {
+      const val = dates[m.key];
+      if (val && val !== 'null' && val !== 'N/A') {
+        count++;
+        const card = document.createElement('div');
+        card.style.cssText = 'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.65rem 0.75rem;';
+        card.innerHTML = `
+          <div style="font-size: 0.74rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 0.2rem; display: flex; align-items: center; gap: 0.35rem;">
+            <i class="fa-solid ${m.icon}" style="color: ${m.color};"></i> ${m.label}
+          </div>
+          <div style="font-size: 0.88rem; font-weight: 800; color: #1e293b;">${val}</div>
+        `;
+        milestonesGrid.appendChild(card);
+      }
+    });
+
+    if (count === 0) {
+      milestonesGrid.innerHTML = `<div style="color: #64748b; font-size: 0.82rem; grid-column: 1 / -1;">No specific 11+ milestone dates were returned by the LLM.</div>`;
+    }
+  }
+
+  // Metadata Grid
+  const detailsGrid = document.getElementById('llm-result-details-grid');
+  if (detailsGrid) {
+    detailsGrid.innerHTML = '';
+    const items = [
+      { label: 'Entrance Exam Board', val: data.entranceExamType, icon: 'fa-award', color: '#4f46e5' },
+      { label: 'Gender Policy', val: data.gender, icon: 'fa-venus-mars', color: '#0284c7' },
+      { label: 'Termly Tuition Fees', val: data.feesTermly, icon: 'fa-sterling-sign', color: '#059669' },
+      { label: 'Admissions Email', val: data.email, icon: 'fa-envelope', color: '#d97706' },
+      { label: 'Telephone', val: data.phone, icon: 'fa-phone', color: '#64748b' },
+      { label: 'Address & Postcode', val: `${data.address || ''} ${data.postcode ? `(${data.postcode})` : ''}`.trim(), icon: 'fa-location-dot', color: '#dc2626' },
+      { label: 'Official Website', val: data.website, icon: 'fa-globe', color: '#2563eb', isLink: true }
+    ];
+
+    items.forEach(it => {
+      if (it.val && it.val !== 'null' && it.val !== 'N/A') {
+        const box = document.createElement('div');
+        box.style.cssText = 'background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.65rem 0.75rem;';
+        box.innerHTML = `
+          <div style="font-size: 0.74rem; font-weight: 700; color: #64748b; margin-bottom: 0.2rem; display: flex; align-items: center; gap: 0.35rem;">
+            <i class="fa-solid ${it.icon}" style="color: ${it.color};"></i> ${it.label}
+          </div>
+          <div style="font-size: 0.85rem; font-weight: 600; color: #1e293b; overflow: hidden; text-overflow: ellipsis;">
+            ${it.isLink ? `<a href="${it.val}" target="_blank" style="color: #2563eb; text-decoration: underline;">${it.val}</a>` : it.val}
+          </div>
+        `;
+        detailsGrid.appendChild(box);
+      }
+    });
+  }
+
+  // Determine Exact Prompt Text with 100% Reliability
+  let promptText = exactReq.promptText || exactReq.prompt || result.crawlResult?.exactRequest?.promptText;
+  if (!promptText && exactReq.payload?.contents?.[0]?.parts?.[0]?.text) {
+    promptText = exactReq.payload.contents[0].parts[0].text;
+  }
+  if (!promptText && exactReq.payload?.messages) {
+    const userMsg = exactReq.payload.messages.find(m => m.role === 'user');
+    if (userMsg) promptText = userMsg.content;
+  }
+  if (!promptText) {
+    const promptTpl = document.getElementById('setting-llm-prompt-template')?.value || cachedDefaultLlmPrompt;
+    const targetSchoolName = exactReq.schoolInput?.schoolName || school.name || data.name || 'Target School';
+    const targetRegion = regionVal;
+    const targetWebsite = webVal;
+    
+    promptText = (promptTpl || cachedDefaultLlmPrompt || '')
+      .replace(/\{\{school_name\}\}/g, targetSchoolName)
+      .replace(/\{\{region\}\}/g, targetRegion)
+      .replace(/\{\{website\}\}/g, targetWebsite)
+      .replace(/\{\{urn\}\}/g, school.urn && school.urn !== 'N/A' ? school.urn : 'N/A')
+      .replace(/\{\{postcode\}\}/g, school.postcode || data.postcode || '')
+      .replace(/\{\{school_type\}\}/g, school.schoolType || data.schoolType || 'Independent');
+  }
+
+  // Populate PANE 2: Exact Request Sent
+  const reqSchoolEl = document.getElementById('llm-req-school-name');
+  if (reqSchoolEl) reqSchoolEl.textContent = exactReq.schoolInput?.schoolName || school.name || data.name || '-';
+
+  const reqRegionEl = document.getElementById('llm-req-region');
+  if (reqRegionEl) reqRegionEl.textContent = regionVal;
+
+  const reqWebsiteEl = document.getElementById('llm-req-website');
+  if (reqWebsiteEl) reqWebsiteEl.textContent = webVal;
+
+  const reqEndpointEl = document.getElementById('llm-req-endpoint');
+  if (reqEndpointEl) reqEndpointEl.textContent = `${exactReq.method || 'GET'} → ${exactReq.endpoint || result.publicSearchUrl || '-'}`;
+
+  const reqPromptEl = document.getElementById('llm-exact-request-prompt');
+  if (reqPromptEl) {
+    reqPromptEl.textContent = promptText;
+  }
+
+  const reqFullJsonEl = document.getElementById('llm-exact-request-full-json');
+  if (reqFullJsonEl) {
+    const displayReqObj = {
+      ...exactReq,
+      promptText: promptText
+    };
+    reqFullJsonEl.textContent = JSON.stringify(displayReqObj, null, 2);
+  }
+
+  // Populate PANE 3: Exact Response Received
+  const respStatusEl = document.getElementById('llm-resp-status');
+  if (respStatusEl) respStatusEl.textContent = `${exactResp.status || 200} OK`;
+
+  const respProvEl = document.getElementById('llm-resp-provider');
+  if (respProvEl) respProvEl.textContent = isGemini ? `Google Gemini (${result.model || 'API'})` : `OpenAI ChatGPT (${result.model || 'API'})`;
+
+  const respSourceLink = document.getElementById('llm-resp-source-url');
+  if (respSourceLink) {
+    const targetSource = exactResp.sourceUrl || data.sourceUrl || data.website || (isGemini ? 'https://generativelanguage.googleapis.com' : 'https://api.openai.com');
+    respSourceLink.href = targetSource;
+    respSourceLink.textContent = targetSource;
+  }
+
+  const respRawEl = document.getElementById('llm-exact-response-raw');
+  if (respRawEl) {
+    respRawEl.textContent = exactResp.rawText || JSON.stringify(exactResp.parsedJson || data, null, 2);
+  }
+
+  // Apply button
+  const applyBtn = document.getElementById('btn-apply-live-search-school');
+  if (applyBtn) {
+    if (isSuccess && result.matchedDbSchool?.id) {
+      applyBtn.style.display = 'inline-flex';
+      applyBtn.innerHTML = `<i class="fa-solid fa-check"></i> Apply to "${result.matchedDbSchool.name}"`;
+    } else {
+      applyBtn.style.display = 'none';
+    }
+  }
+
+  // If success, default to tab 1 (Extracted). If error, default to tab 3 (Raw API Response)
+  const targetPane = isSuccess ? 'pane-llm-extracted' : 'pane-llm-response';
+  const defaultTabBtn = document.querySelector(`.btn-llm-tab[data-target="${targetPane}"]`);
+  if (defaultTabBtn) defaultTabBtn.click();
+
+  container.style.display = 'block';
+}
+
+async function applyLiveSearchResultHandler() {
+  if (!lastLiveSearchResult || !lastLiveSearchResult.matchedDbSchool?.id) {
+    showToast('No matched school record to update in database', 'warning');
+    return;
+  }
+
+  const schoolId = lastLiveSearchResult.matchedDbSchool.id;
+  const applyBtn = document.getElementById('btn-apply-live-search-school');
+  if (applyBtn) {
+    applyBtn.disabled = true;
+    applyBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Applying...`;
+  }
+
+  try {
+    const res = await fetch('/api/admin/llm-crawl-single', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({
+        schoolId,
+        provider: lastLiveSearchResult.provider,
+        model: lastLiveSearchResult.model,
+        mockResponse: lastLiveSearchResult.data
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      showToast(data.message || 'School record successfully updated with verified live AI intelligence!', 'success');
+      await loadSchools();
+            if (applyBtn) {
+        applyBtn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Applied Successfully`;
+        applyBtn.style.background = '#047857';
+      }
+    } else {
+      showToast(data.message || data.error || 'Failed to apply verified data', 'error');
+      if (applyBtn) {
+        applyBtn.disabled = false;
+        applyBtn.innerHTML = `<i class="fa-solid fa-check"></i> Retry Apply`;
+      }
+    }
+  } catch (err) {
+    showToast('Error applying verified data to database', 'error');
+    if (applyBtn) {
+      applyBtn.disabled = false;
+      applyBtn.innerHTML = `<i class="fa-solid fa-check"></i> Retry Apply`;
+    }
   }
 }
 
@@ -5923,10 +7103,10 @@ function setupParent2Typeaheads() {
         return;
       }
       try {
-        const res = await fetch(`/api/schools?search=${encodeURIComponent(q)}&schoolType=Independent`);
-        const data = await res.json();
-        const matches = data.schools || [];
-
+        const matches = (window._allSchoolsList || []).filter(s =>
+          (s.schoolType === 'Independent' || s.schoolType === 'Independent / Public') &&
+          ((s.name || '').toLowerCase().includes(q) || (s.la || '').toLowerCase().includes(q))
+        );
         if (matches.length === 0) {
           indepBox.innerHTML = '<div style="padding: 0.6rem 0.9rem; color: #94a3b8; font-size: 0.85rem;">No independent schools found</div>';
         } else {
@@ -5958,275 +7138,1422 @@ function setupParent2Typeaheads() {
   }
 }
 
-// ====================================================
-// Admin Date Anomaly Review & Timeline Quality Module
-// ====================================================
+let scannerPollInterval = null;
 
-let cachedDateAnomaliesData = null;
-
-async function loadAdminDateAnomalies() {
-  const container = document.getElementById('admin-date-anomalies-container');
-  if (!container) return;
-
-  container.innerHTML = `<div style="text-align: center; color: #64748b; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Analyzing admissions timelines and detecting anomalies...</div>`;
-
+async function checkAndPollScannerStatus() {
   try {
-    const res = await fetch('/api/admin/date-anomalies', {
+    const res = await fetch('/api/admin/scanner/status', {
       headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
     });
-
-    if (!res.ok) {
-      container.innerHTML = `
-        <div style="color: #ef4444; padding: 2rem; text-align: center; background: #fef2f2; border-radius: 12px; border: 1px solid #fee2e2;">
-          <i class="fa-solid fa-circle-exclamation" style="font-size: 2rem; margin-bottom: 0.5rem; display: block;"></i>
-          <strong>Failed to load date anomalies (${res.status} ${res.statusText})</strong>
-          <p style="margin-top: 0.4rem; font-size: 0.85rem; color: #991b1b;">Please verify your administrator session permissions and retry.</p>
-          <button class="btn btn-outline" onclick="loadAdminDateAnomalies()" style="margin-top: 0.75rem; font-size: 0.8rem; background: white;">
-            <i class="fa-solid fa-rotate"></i> Retry Anomaly Scan
-          </button>
-        </div>
-      `;
-      return;
+    if (res.ok) {
+      const data = await res.json();
+      if (data.state && data.state.isRunning) {
+        startScannerPolling();
+      }
     }
+  } catch (e) {
+    // Ignore polling error
+  }
+}
 
-    cachedDateAnomaliesData = await res.json();
-    updateDateAnomalyKPIs(cachedDateAnomaliesData.stats);
-    renderAdminDateAnomalies(cachedDateAnomaliesData);
-  } catch (err) {
-    console.error('Error loading date anomalies:', err);
-    container.innerHTML = `
-      <div style="color: #ef4444; padding: 2rem; text-align: center; background: #fef2f2; border-radius: 12px; border: 1px solid #fee2e2;">
-        <i class="fa-solid fa-triangle-exclamation" style="font-size: 2rem; margin-bottom: 0.5rem; display: block;"></i>
-        <strong>Error connecting to date anomaly service</strong>
-        <p style="margin-top: 0.4rem; font-size: 0.85rem; color: #991b1b;">${err.message || err}</p>
-        <button class="btn btn-outline" onclick="loadAdminDateAnomalies()" style="margin-top: 0.75rem; font-size: 0.8rem; background: white;">
-          <i class="fa-solid fa-rotate"></i> Retry
-        </button>
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+let enrichmentFeedData = [];
+let enrichmentFeedFilterText = '';
+let enrichmentFeedFilterStatus = 'ALL';
+let lastFeedFingerprint = '';
+let expandedFullDataSchoolIds = new Set();
+
+function toggleSchoolFullData(schoolId) {
+  const panel = document.getElementById(`full-data-${schoolId}`);
+  const chevron = document.getElementById(`chevron-${schoolId}`);
+  const btnText = document.getElementById(`btn-text-full-data-${schoolId}`);
+  if (!panel) return;
+
+  if (expandedFullDataSchoolIds.has(schoolId)) {
+    expandedFullDataSchoolIds.delete(schoolId);
+    panel.style.display = 'none';
+    if (chevron) chevron.style.transform = 'rotate(0deg)';
+    if (btnText) btnText.textContent = 'View All School Data';
+  } else {
+    expandedFullDataSchoolIds.add(schoolId);
+    panel.style.display = 'block';
+    if (chevron) chevron.style.transform = 'rotate(180deg)';
+    if (btnText) btnText.textContent = 'Hide School Data';
+  }
+}
+
+function renderSchoolFieldBox(fieldName, val, diff, isUrl = false) {
+  const isChanged = Boolean(diff);
+  let badgeHtml = '';
+  let valHtml = '';
+
+  if (isChanged) {
+    const oldVal = diff.oldVal;
+    const newVal = diff.newVal !== undefined ? diff.newVal : val;
+    badgeHtml = `<span class="badge-field-changed"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Updated</span>`;
+    valHtml = `
+      <div style="display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.35rem;">
+        <span class="old-val-strikethrough">${oldVal ? escapeHtml(oldVal) : '<em style="color:#94a3b8;">Empty</em>'}</span>
+        <i class="fa-solid fa-arrow-right-long" style="font-size: 0.68rem; color: #059669;"></i>
+        <strong style="color: #065f46;">${newVal ? escapeHtml(newVal) : '<em style="color:#94a3b8;">Not set</em>'}</strong>
       </div>
     `;
-  }
-}
-
-function updateDateAnomalyKPIs(stats) {
-  if (!stats) return;
-  const kpiSchools = document.getElementById('kpi-total-date-schools');
-  if (kpiSchools) kpiSchools.textContent = stats.totalSchoolsWithDates || 0;
-
-  const kpiAnomalies = document.getElementById('kpi-total-anomalies');
-  if (kpiAnomalies) kpiAnomalies.textContent = stats.totalAnomalies || 0;
-
-  const kpiChrono = document.getElementById('kpi-chrono-inversions');
-  if (kpiChrono) kpiChrono.textContent = stats.chronoInversions || 0;
-
-  const kpiAvg = document.getElementById('kpi-avg-date-score');
-  if (kpiAvg) kpiAvg.textContent = `${stats.avgQualityScore || 0}%`;
-
-  // Update badge counter on side-tab
-  const badge = document.getElementById('date-anomalies-badge-count');
-  if (badge) {
-    if (stats.totalAnomalies > 0) {
-      badge.textContent = stats.totalAnomalies;
-      badge.style.display = 'inline-block';
+  } else {
+    badgeHtml = `<span class="badge-field-unchanged"><i class="fa-solid fa-check"></i> Unchanged</span>`;
+    if (isUrl && val) {
+      valHtml = `<a href="${escapeHtml(val)}" target="_blank" rel="noopener noreferrer" style="color: #4f46e5; text-decoration: underline; font-weight: 600;">${escapeHtml(val)} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.68rem;"></i></a>`;
     } else {
-      badge.style.display = 'none';
+      valHtml = val ? `<span style="color: #334155; font-weight: 500;">${escapeHtml(val)}</span>` : `<span style="color: #94a3b8; font-style: italic;">Not specified</span>`;
     }
   }
+
+  return `
+    <div class="school-data-field-box ${isChanged ? 'is-changed' : 'is-unchanged'}">
+      <div class="school-data-field-header">
+        <span class="school-data-field-name">${escapeHtml(fieldName)}</span>
+        ${badgeHtml}
+      </div>
+      <div class="school-data-field-val">
+        ${valHtml}
+      </div>
+    </div>
+  `;
 }
 
-function renderAdminDateAnomalies(data) {
-  const container = document.getElementById('admin-date-anomalies-container');
-  if (!container || !data) return;
+function renderInlineFullSchoolData(item) {
+  const school = item.fullSchoolData || {};
+  const diffs = item.diffs || [];
 
-  const searchVal = (document.getElementById('filter-anomaly-search')?.value || '').trim().toLowerCase();
-  const typeFilter = document.getElementById('filter-anomaly-type')?.value || 'ANOMALIES_ONLY';
-
-  let items = [];
-
-  if (typeFilter === 'ALL_SCHOOLS') {
-    items = data.allSchools || [];
-  } else if (typeFilter === 'ANOMALIES_ONLY') {
-    items = data.anomalies || [];
-  } else if (typeFilter === 'LOW_CONFIDENCE') {
-    items = (data.allSchools || []).filter(s => s.qualityScore < 80 || s.confidenceLevel === 'Low');
-  } else {
-    items = (data.allSchools || []).filter(s => s.anomalies && s.anomalies.some(a => a.type === typeFilter));
+  // Parse 11+ dates
+  let datesObj = {};
+  if (school.entranceExamDates) {
+    try {
+      datesObj = typeof school.entranceExamDates === 'string' ? JSON.parse(school.entranceExamDates) : school.entranceExamDates;
+    } catch (e) {}
   }
 
-  // Filter by search query
-  if (searchVal) {
-    items = items.filter(s =>
-      (s.schoolName || '').toLowerCase().includes(searchVal) ||
-      (s.la || '').toLowerCase().includes(searchVal) ||
-      (s.schoolType || '').toLowerCase().includes(searchVal)
-    );
+  const datesDiff = diffs.find(d => d.field === 'entranceExamDates');
+  const findDateDiff = (key) => datesDiff?.changedDates?.find(c => c.key === key);
+  const findFieldDiff = (field) => diffs.find(d => d.field === field);
+
+  // Column 1: 11+ Admissions Timeline Milestones
+  const dateMilestones = [
+    { key: 'registrationOpen', aliases: ['registrationOpen'], label: 'Registration Opens' },
+    { key: 'registrationDeadline', aliases: ['registrationDeadline'], label: 'Registration Deadline' },
+    { key: 'stage_one_examDate', aliases: ['stage_one_examDate', 'examDate', 'stage1ExamDate'], label: 'Stage 1 Exam Date' },
+    { key: 'stage_one_format_and_subjects', aliases: ['stage_one_format_and_subjects', 'stage1Format'], label: 'Stage 1 Format & Subjects' },
+    { key: 'stage_one_resultDate', aliases: ['stage_one_resultDate', 'resultDate', 'stage1ResultDate'], label: 'Stage 1 Result Date' },
+    { key: 'second_stage_exam_required', aliases: ['second_stage_exam_required', 'stage2Required'], label: '2nd Stage Required?' },
+    { key: 'stage_two_examDate', aliases: ['stage_two_examDate', 'examDate2', 'secondExamDate'], label: 'Stage 2 Exam Date' },
+    { key: 'stage_two_format_and_subjects', aliases: ['stage_two_format_and_subjects', 'stage2Format'], label: 'Stage 2 Format & Subjects' },
+    { key: 'interviewDates', aliases: ['interviewDates', 'interviewDate'], label: 'Admissions Interviews' },
+    { key: 'offerDate', aliases: ['offerDate', 'offersDate'], label: 'Offers Posted' },
+    { key: 'acceptanceDeadline', aliases: ['acceptanceDeadline'], label: 'Acceptance Deadline' }
+  ];
+
+  let datesColHtml = '';
+  for (const m of dateMilestones) {
+    let dVal = null;
+    for (const a of m.aliases) {
+      if (datesObj[a]) { dVal = datesObj[a]; break; }
+    }
+    const dDiff = findDateDiff(m.key) || findDateDiff(m.aliases[1]) || findDateDiff(m.aliases[2]);
+    datesColHtml += renderSchoolFieldBox(m.label, dVal, dDiff ? { oldVal: dDiff.oldVal, newVal: dDiff.newVal } : null);
   }
 
-  if (items.length === 0) {
+  // Column 2: Core Academic & School Profile
+  const profileFields = [
+    { field: 'schoolType', label: 'School Type' },
+    { field: 'gender', label: 'Gender Policy' },
+    { field: 'entranceExamType', label: 'Entrance Exam Board / Format' },
+    { field: 'feesTermly', label: 'Termly Tuition Fees' },
+    { field: 'website', label: 'Official Website', isUrl: true },
+    { field: 'sourceUrl', label: 'Verified Intelligence Source', isUrl: true },
+    { field: 'phase', label: 'Phase / Level' },
+    { field: 'ageRange', label: 'Age Range' },
+    { field: 'ofstedRating', label: 'Ofsted Rating' }
+  ];
+
+  let profileColHtml = '';
+  for (const f of profileFields) {
+    const fDiff = findFieldDiff(f.field);
+    profileColHtml += renderSchoolFieldBox(f.label, school[f.field] || null, fDiff, f.isUrl);
+  }
+
+  // Column 3: Contact & Regional Location
+  const contactFields = [
+    { field: 'phone', label: 'Admissions Telephone' },
+    { field: 'email', label: 'Admissions Email' },
+    { field: 'la', label: 'Local Authority (LA)' },
+    { field: 'region', label: 'Region / County' },
+    { field: 'address', label: 'Street Address' },
+    { field: 'postcode', label: 'Postcode' }
+  ];
+
+  let contactColHtml = '';
+  for (const c of contactFields) {
+    const cDiff = findFieldDiff(c.field);
+    contactColHtml += renderSchoolFieldBox(c.label, school[c.field] || null, cDiff);
+  }
+
+  return `
+    <div class="full-school-data-panel" id="full-data-${item.schoolId}" style="display: ${expandedFullDataSchoolIds.has(item.schoolId) ? 'block' : 'none'};">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid #e2e8f0;">
+        <div style="font-weight: 700; font-size: 0.88rem; color: #1e1b4b; display: flex; align-items: center; gap: 0.4rem;">
+          <i class="fa-solid fa-database" style="color: #7c3aed;"></i>
+          Full School Attribute Inspection &amp; AI Delta Visual Ledger
+        </div>
+        <div style="font-size: 0.74rem; color: #64748b; display: flex; gap: 0.75rem;">
+          <span><span class="badge-field-changed" style="padding: 0.1rem 0.35rem;"><i class="fa-solid fa-sparkles"></i> AI Updated</span> = Modified in this scan</span>
+          <span><span class="badge-field-unchanged" style="padding: 0.1rem 0.35rem;"><i class="fa-solid fa-check"></i> Unchanged</span> = Retained baseline</span>
+        </div>
+      </div>
+
+      <div class="school-data-grid">
+        <!-- 1. Admissions Milestones -->
+        <div>
+          <div class="school-data-col-title">
+            <i class="fa-regular fa-calendar-check" style="color: #7c3aed;"></i> 11+ Admissions Timeline
+          </div>
+          ${datesColHtml}
+        </div>
+
+        <!-- 2. Profile & Format -->
+        <div>
+          <div class="school-data-col-title">
+            <i class="fa-solid fa-graduation-cap" style="color: #4f46e5;"></i> Academic &amp; School Profile
+          </div>
+          ${profileColHtml}
+        </div>
+
+        <!-- 3. Contact & Location -->
+        <div>
+          <div class="school-data-col-title">
+            <i class="fa-solid fa-location-dot" style="color: #059669;"></i> Contact &amp; Location
+          </div>
+          ${contactColHtml}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function updateRawLLMInspector(interaction) {
+  if (!interaction) return;
+  const statusPill = document.getElementById('raw-llm-status-pill');
+  const reqPre = document.getElementById('raw-llm-request-code');
+  const resPre = document.getElementById('raw-llm-response-code');
+
+  const schoolName = interaction.schoolName || 'School';
+  const provider = (interaction.provider || 'gemini').toUpperCase();
+  const model = interaction.model || 'gemini-3.6-flash';
+  const timeStr = interaction.timestamp ? new Date(interaction.timestamp).toLocaleTimeString('en-GB') : 'Just now';
+
+  if (statusPill) {
+    statusPill.style.background = '#1e1b4b';
+    statusPill.style.color = '#c7d2fe';
+    statusPill.style.borderColor = '#6366f1';
+    statusPill.innerHTML = `<i class="fa-solid fa-bolt" style="color:#a5b4fc;"></i> ${escapeHtml(schoolName)} • ${provider} (${model}) • ${timeStr}`;
+  }
+
+  if (reqPre) {
+    let reqText = '';
+    const req = interaction.exactRequest || interaction.llmVerification?.exactRequest || interaction.payload;
+    if (typeof req === 'string' && req.trim().length > 0) {
+      reqText = req;
+    } else if (req && typeof req === 'object') {
+      if (req.payload) {
+        reqText = typeof req.payload === 'string' ? req.payload : JSON.stringify(req.payload, null, 2);
+      } else if (req.promptText) {
+        reqText = req.promptText;
+      } else if (req.rawRequestBody) {
+        reqText = req.rawRequestBody;
+      } else {
+        reqText = JSON.stringify(req, null, 2);
+      }
+    } else {
+      reqText = `// Outbound HTTP request payload for "${schoolName}"`;
+    }
+    reqPre.textContent = reqText;
+  }
+
+  if (resPre) {
+    let resText = '';
+    const res = interaction.exactResponse || interaction.llmVerification?.exactResponse;
+    if (typeof res === 'string' && res.trim().length > 0) {
+      resText = res;
+    } else if (res && typeof res === 'object') {
+      if (typeof res.rawText === 'string' && res.rawText.trim().length > 0) {
+        resText = res.rawText;
+      } else if (typeof res.candidateText === 'string' && res.candidateText.trim().length > 0) {
+        resText = res.candidateText;
+      } else if (typeof res.bodyText === 'string' && res.bodyText.trim().length > 0) {
+        resText = res.bodyText;
+      } else if (res.parsedJson) {
+        resText = typeof res.parsedJson === 'string' ? res.parsedJson : JSON.stringify(res.parsedJson, null, 2);
+      } else if (res.data) {
+        resText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data, null, 2);
+      } else {
+        resText = JSON.stringify(res, null, 2);
+      }
+    } else if (interaction.isFetching) {
+      resText = `// Awaiting live HTTP response from external ${provider} API (${model}) for "${schoolName}"...`;
+    } else {
+      resText = `// No raw response received from external ${provider} API for "${schoolName}"`;
+    }
+    resPre.textContent = resText;
+  }
+}
+
+window.copyRawLLMText = function(elementId, btn) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  const text = el.textContent || '';
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = `<i class="fa-solid fa-check" style="color: #4ade80;"></i> Copied!`;
+    setTimeout(() => {
+      btn.innerHTML = orig;
+    }, 2000);
+  }).catch(() => {
+    showToast('Could not copy text.', 'error');
+  });
+};
+
+let typeaheadDebounceTimer = null;
+
+function setupScannerSchoolTypeahead() {
+  const modeSelect = document.getElementById('scanner-scan-mode');
+  const batchOpts = document.getElementById('scanner-batch-options');
+  const singleOpts = document.getElementById('scanner-single-options');
+  const typeaheadInput = document.getElementById('scanner-school-typeahead-input');
+  const dropdown = document.getElementById('scanner-school-typeahead-dropdown');
+  const hiddenId = document.getElementById('scanner-selected-school-id');
+  const clearBtn = document.getElementById('btn-clear-school-typeahead');
+  const startBtn = document.getElementById('btn-start-web-scanner');
+
+  if (modeSelect && !modeSelect._bound) {
+    modeSelect._bound = true;
+    modeSelect.addEventListener('change', (e) => {
+      const mode = e.target.value;
+      if (mode === 'SINGLE') {
+        if (batchOpts) batchOpts.style.display = 'none';
+        if (singleOpts) singleOpts.style.display = 'block';
+        if (startBtn) startBtn.innerHTML = `<i class="fa-solid fa-bullseye"></i> Start AI Scan for Selected School`;
+        if (typeaheadInput) typeaheadInput.focus();
+      } else {
+        if (batchOpts) batchOpts.style.display = 'flex';
+        if (singleOpts) singleOpts.style.display = 'none';
+        if (startBtn) startBtn.innerHTML = `<i class="fa-solid fa-play"></i> Start AI Verification Scan`;
+      }
+    });
+  }
+
+  if (typeaheadInput && !typeaheadInput._bound) {
+    typeaheadInput._bound = true;
+
+    typeaheadInput.addEventListener('input', (e) => {
+      const query = e.target.value.trim();
+      if (hiddenId) hiddenId.value = '';
+      if (clearBtn) clearBtn.style.display = query ? 'block' : 'none';
+
+      if (typeaheadDebounceTimer) clearTimeout(typeaheadDebounceTimer);
+      if (!query || query.length < 2) {
+        if (dropdown) {
+          dropdown.style.display = 'none';
+          dropdown.innerHTML = '';
+        }
+        return;
+      }
+
+      typeaheadDebounceTimer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/schools?search=${encodeURIComponent(query)}&limit=12`, {
+            headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+          });
+          if (!res.ok) return;
+          const data = await res.json();
+          const list = data.schools || (Array.isArray(data) ? data : []);
+
+          if (!dropdown) return;
+          if (list.length === 0) {
+            dropdown.innerHTML = `<div style="padding: 0.6rem 0.8rem; font-size: 0.78rem; color: #94a3b8;">No matching schools found</div>`;
+            dropdown.style.display = 'block';
+            return;
+          }
+
+          let itemsHtml = '';
+          for (const s of list) {
+            itemsHtml += `
+              <div class="scanner-typeahead-row" onclick="selectScannerSchool('${escapeHtml(s.id)}', '${escapeHtml(s.name)}', '${escapeHtml(s.region || s.la || '')}')" style="padding: 0.5rem 0.75rem; cursor: pointer; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; transition: background 0.15s ease;">
+                <div>
+                  <div style="font-weight: 600; font-size: 0.82rem; color: #1e293b;">${escapeHtml(s.name)}</div>
+                  <div style="font-size: 0.72rem; color: #64748b;">${escapeHtml(s.schoolType || 'School')} • ${escapeHtml(s.region || s.la || s.postcode || '')}</div>
+                </div>
+                ${s.verification_status === 'llm_enriched' || s.verification_status === 'auto_verified' ? '<span style="font-size: 0.68rem; background: #f3e8ff; color: #7c3aed; padding: 0.1rem 0.4rem; border-radius: 4px; font-weight: 600;">Enriched</span>' : ''}
+              </div>
+            `;
+          }
+          dropdown.innerHTML = itemsHtml;
+          dropdown.style.display = 'block';
+        } catch (e) {
+          console.warn('Error fetching school typeahead suggestions:', e);
+        }
+      }, 250);
+    });
+
+    // Close dropdown on outside click
+    document.addEventListener('click', (e) => {
+      if (dropdown && !dropdown.contains(e.target) && e.target !== typeaheadInput) {
+        dropdown.style.display = 'none';
+      }
+    });
+  }
+
+  if (clearBtn && !clearBtn._bound) {
+    clearBtn._bound = true;
+    clearBtn.addEventListener('click', () => {
+      if (typeaheadInput) typeaheadInput.value = '';
+      if (hiddenId) hiddenId.value = '';
+      if (dropdown) {
+        dropdown.style.display = 'none';
+        dropdown.innerHTML = '';
+      }
+      clearBtn.style.display = 'none';
+      if (typeaheadInput) typeaheadInput.focus();
+    });
+  }
+}
+
+window.selectScannerSchool = function(id, name, region) {
+  const typeaheadInput = document.getElementById('scanner-school-typeahead-input');
+  const hiddenId = document.getElementById('scanner-selected-school-id');
+  const dropdown = document.getElementById('scanner-school-typeahead-dropdown');
+  const clearBtn = document.getElementById('btn-clear-school-typeahead');
+
+  if (hiddenId) hiddenId.value = id;
+  if (typeaheadInput) typeaheadInput.value = name;
+  if (dropdown) {
+    dropdown.style.display = 'none';
+    dropdown.innerHTML = '';
+  }
+  if (clearBtn) clearBtn.style.display = 'block';
+};
+
+async function initDataEnrichmentTab() {
+  const startBtn = document.getElementById('btn-start-web-scanner');
+  if (startBtn && !startBtn._enrichmentBound) {
+    startBtn._enrichmentBound = true;
+    startBtn.addEventListener('click', startWebVerificationScan);
+  }
+
+  const stopBtn = document.getElementById('btn-stop-web-scanner');
+  if (stopBtn && !stopBtn._enrichmentBound) {
+    stopBtn._enrichmentBound = true;
+    stopBtn.addEventListener('click', stopWebVerificationScan);
+  }
+
+  const clearBtn = document.getElementById('btn-clear-enrichment-feed');
+  if (clearBtn && !clearBtn._bound) {
+    clearBtn._bound = true;
+    clearBtn.addEventListener('click', clearEnrichmentFeed);
+  }
+
+  const refreshBtn = document.getElementById('btn-refresh-enrichment-feed');
+  if (refreshBtn && !refreshBtn._bound) {
+    refreshBtn._bound = true;
+    refreshBtn.addEventListener('click', refreshEnrichmentStatus);
+  }
+
+  const filterInput = document.getElementById('filter-enrichment-feed');
+  if (filterInput && !filterInput._bound) {
+    filterInput._bound = true;
+    filterInput.addEventListener('input', (e) => {
+      enrichmentFeedFilterText = e.target.value.trim().toLowerCase();
+      renderEnrichmentFeed(enrichmentFeedData, true);
+    });
+  }
+
+  const filterStatus = document.getElementById('filter-enrichment-status');
+  if (filterStatus && !filterStatus._bound) {
+    filterStatus._bound = true;
+    filterStatus.addEventListener('change', (e) => {
+      enrichmentFeedFilterStatus = e.target.value;
+      renderEnrichmentFeed(enrichmentFeedData, true);
+    });
+  }
+
+  const modalCloseBtn = document.getElementById('modal-close-school-version-history');
+  const modalCloseBtn2 = document.getElementById('btn-close-school-version-history');
+  if (modalCloseBtn && !modalCloseBtn._bound) {
+    modalCloseBtn._bound = true;
+    modalCloseBtn.addEventListener('click', closeSchoolVersionHistoryModal);
+  }
+  if (modalCloseBtn2 && !modalCloseBtn2._bound) {
+    modalCloseBtn2._bound = true;
+    modalCloseBtn2.addEventListener('click', closeSchoolVersionHistoryModal);
+  }
+
+  const toggleRawBtn = document.getElementById('btn-toggle-raw-llm-panel');
+  const rawBody = document.getElementById('raw-llm-panel-body');
+  const toggleText = document.getElementById('btn-text-toggle-raw-llm');
+  if (toggleRawBtn && rawBody && !toggleRawBtn._bound) {
+    toggleRawBtn._bound = true;
+    toggleRawBtn.addEventListener('click', () => {
+      const isHidden = rawBody.style.display === 'none';
+      rawBody.style.display = isHidden ? 'block' : 'none';
+      if (toggleText) toggleText.textContent = isHidden ? 'Hide Raw Messages' : 'Show Raw Messages';
+    });
+  }
+
+  setupScannerSchoolTypeahead();
+  await refreshEnrichmentStatus();
+}
+
+async function refreshEnrichmentStatus() {
+  try {
+    const res = await fetch('/api/admin/scanner/status', {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const st = data.state;
+    if (!st) return;
+
+    try {
+      const settingsRes = await fetch('/api/admin/settings', {
+        headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+      });
+      if (settingsRes.ok) {
+        const sdata = await settingsRes.json();
+        const settings = sdata.settings || {};
+        const provider = (settings.llmProvider || 'gemini').toUpperCase();
+        const model = provider === 'CHATGPT' ? (settings.openaiModel || 'gpt-4o-mini') : (settings.geminiModel || 'gemini-3.6-flash');
+        const badge = document.getElementById('enrichment-model-badge');
+        if (badge) badge.textContent = `${provider} • ${model}`;
+      }
+    } catch (e) {}
+
+    const totalBadge = document.getElementById('enrichment-total-enriched-badge');
+    if (totalBadge) totalBadge.textContent = `${st.stats?.verifiedCount || 0} Enriched`;
+
+    const activeCallout = document.getElementById('enrichment-active-school-callout');
+    const activeName = document.getElementById('enrichment-active-school-name');
+    if (st.isRunning && st.currentSchool) {
+      if (activeCallout) activeCallout.style.display = 'flex';
+      if (activeName) activeName.textContent = st.currentSchool;
+    } else {
+      if (activeCallout) activeCallout.style.display = 'none';
+    }
+
+    if (st.latestRawInteraction) {
+      updateRawLLMInspector(st.latestRawInteraction);
+    }
+
+    if (st.recentResults && Array.isArray(st.recentResults)) {
+      enrichmentFeedData = st.recentResults;
+      renderEnrichmentFeed(enrichmentFeedData);
+      if (enrichmentFeedData.length > 0 && !st.latestRawInteraction && (enrichmentFeedData[0].exactRequest || enrichmentFeedData[0].exactResponse)) {
+        updateRawLLMInspector(enrichmentFeedData[0]);
+      }
+    }
+  } catch (err) {
+    console.warn('Error refreshing enrichment status:', err);
+  }
+}
+
+async function clearEnrichmentFeed() {
+  try {
+    const res = await fetch('/api/admin/scanner/clear-feed', {
+      method: 'POST',
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+    if (res.ok) {
+      enrichmentFeedData = [];
+      lastFeedFingerprint = '';
+      renderEnrichmentFeed([], true);
+      showToast('Enrichment live feed cleared.', 'info');
+    }
+  } catch (e) {
+    showToast('Failed to clear enrichment feed.', 'error');
+  }
+}
+
+function renderEnrichmentFeed(items = [], forceRender = false) {
+  const container = document.getElementById('enrichment-feed-list');
+  const streamBadge = document.getElementById('enrichment-stream-badge');
+  if (!container) return;
+
+  if (!items || items.length === 0) {
+    if (streamBadge) streamBadge.textContent = '0 items';
+    if (lastFeedFingerprint !== 'EMPTY' || forceRender) {
+      lastFeedFingerprint = 'EMPTY';
+      container.innerHTML = `
+        <div id="enrichment-feed-empty" style="text-align: center; padding: 3rem 1rem; color: #94a3b8;">
+          <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 2.2rem; margin-bottom: 0.75rem; color: #cbd5e1;"></i>
+          <div style="font-weight: 700; font-size: 0.95rem; color: #475569;">No active enrichment feed yet</div>
+          <div style="font-size: 0.8rem; margin-top: 0.25rem;">Start an AI Verification Scan above to stream live LLM results, visual DB updates, and rollback controls.</div>
+        </div>
+      `;
+    }
+    return;
+  }
+
+  const filtered = items.filter(item => {
+    if (enrichmentFeedFilterText) {
+      const q = enrichmentFeedFilterText;
+      const matchName = (item.schoolName || '').toLowerCase().includes(q);
+      const matchRegion = (item.region || '').toLowerCase().includes(q);
+      const matchStatus = (item.status || '').toLowerCase().includes(q);
+      if (!matchName && !matchRegion && !matchStatus) return false;
+    }
+
+    if (enrichmentFeedFilterStatus === 'ENRICHED') {
+      return item.status === 'llm_enriched' || item.status === 'auto_verified' || (item.tags && item.tags.includes('llm_enriched'));
+    } else if (enrichmentFeedFilterStatus === 'WITH_DIFFS') {
+      return item.diffs && item.diffs.length > 0;
+    } else if (enrichmentFeedFilterStatus === 'SKIPPED') {
+      return item.skipped === true || (item.tags && item.tags.some(t => t.startsWith('skip_cache')));
+    } else if (enrichmentFeedFilterStatus === 'ANOMALIES') {
+      return item.anomaliesCount > 0 || item.status === 'has_anomalies';
+    }
+    return true;
+  });
+
+  if (streamBadge) streamBadge.textContent = `${filtered.length} item${filtered.length === 1 ? '' : 's'}`;
+
+  // Check fingerprint to eliminate jumpy re-renders when data hasn't changed
+  const currentFingerprint = `${enrichmentFeedFilterText}:${enrichmentFeedFilterStatus}:${filtered.map(i => `${i.schoolId}_${i.verifiedAt || ''}_${i.status || ''}_${(i.diffs || []).length}`).join('|')}`;
+  if (currentFingerprint === lastFeedFingerprint && !forceRender && container.children.length > 0) {
+    return;
+  }
+  lastFeedFingerprint = currentFingerprint;
+
+  if (filtered.length === 0) {
     container.innerHTML = `
-      <div style="text-align: center; padding: 3rem 1.5rem; background: #f0fdf4; border-radius: 12px; border: 1px solid #bbf7d0;">
-        <i class="fa-solid fa-circle-check" style="font-size: 2.5rem; color: #22c55e; margin-bottom: 0.75rem; display: block;"></i>
-        <h4 style="color: #166534; font-size: 1.15rem; margin-bottom: 0.35rem;">All Admissions Timelines Verified &amp; Clean</h4>
-        <p style="color: #15803d; font-size: 0.88rem; max-width: 600px; margin: 0 auto;">
-          No chronological date inversions, outdated cycle references, or source conflicts were detected matching your filters.
-        </p>
-        <button class="btn btn-outline" onclick="document.getElementById('filter-anomaly-type').value='ALL_SCHOOLS'; renderAdminDateAnomalies(cachedDateAnomaliesData);" style="margin-top: 1rem; font-size: 0.82rem; background: white;">
-          <i class="fa-solid fa-list-check"></i> View All Schools with Timelines (${(data.allSchools || []).length})
-        </button>
+      <div style="text-align: center; padding: 2.5rem 1rem; color: #94a3b8;">
+        <i class="fa-solid fa-filter" style="font-size: 1.8rem; margin-bottom: 0.5rem; color: #cbd5e1;"></i>
+        <div style="font-weight: 600; font-size: 0.9rem; color: #475569;">No feed items match active filter</div>
       </div>
     `;
     return;
   }
 
-  let html = `<div style="display: flex; flex-direction: column; gap: 1.25rem;">`;
+  let html = '';
+  for (const item of filtered) {
+    const isEnriched = (item.status === 'llm_enriched' || (item.tags && item.tags.includes('llm_enriched'))) && item.status !== 'llm_error';
+    const isAutoVerified = item.status === 'auto_verified';
+    const isSkipped = item.skipped === true || (item.tags && item.tags.some(t => t.startsWith('skip_cache')));
+    const hasAnomalies = (item.anomaliesCount > 0) || item.status === 'has_anomalies';
+    const isLlmError = item.status === 'llm_error' || (item.tags && item.tags.includes('llm_error'));
 
-  for (const item of items) {
-    const p = item.proposedDates || {};
-    const c = item.currentDates || {};
-    const hasAnomalies = item.anomaliesCount > 0;
+    let cardStatusClass = 'status-inspected';
+    let statusPill = `<span style="background: #f1f5f9; color: #475569; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid #cbd5e1;"><i class="fa-solid fa-clock"></i> Inspected</span>`;
 
-    const chronoCount = (item.anomalies || []).filter(a => a.type === 'CHRONO_INVERSION').length;
-    const outdatedCount = (item.anomalies || []).filter(a => a.type === 'OUTDATED_CYCLE').length;
-    const conflictCount = (item.anomalies || []).filter(a => a.type === 'SOURCE_CONFLICT').length;
+    if (isLlmError) {
+      cardStatusClass = 'status-has-anomalies';
+      statusPill = `<span style="background: #fef2f2; color: #b91c1c; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid #fecaca;"><i class="fa-solid fa-circle-xmark"></i> LLM Error</span>`;
+    } else if (isSkipped) {
+      cardStatusClass = 'status-skipped';
+      statusPill = `<span style="background: #f1f5f9; color: #475569; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid #cbd5e1;"><i class="fa-solid fa-forward-step"></i> Skipped</span>`;
+    } else if (hasAnomalies) {
+      cardStatusClass = 'status-has-anomalies';
+      statusPill = `<span style="background: #fff7ed; color: #c2410c; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid #fed7aa;"><i class="fa-solid fa-triangle-exclamation"></i> Flagged Anomaly</span>`;
+    } else if (isEnriched) {
+      cardStatusClass = 'status-llm-enriched';
+      statusPill = `<span style="background: #f3e8ff; color: #7c3aed; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid #d8b4fe;"><i class="fa-solid fa-wand-magic-sparkles"></i> llm_enriched</span>`;
+    } else if (isAutoVerified) {
+      cardStatusClass = 'status-auto-verified';
+      statusPill = `<span style="background: #ecfdf5; color: #065f46; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid #a7f3d0;"><i class="fa-solid fa-circle-check"></i> Auto-Verified</span>`;
+    }
+
+    const confScore = item.qualityScore || (isLlmError ? 30 : 95);
+    const timeFormatted = item.verifiedAt ? new Date(item.verifiedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Just now';
+
+    let deltaHtml = '';
+    if (item.diffs && item.diffs.length > 0) {
+      let rowsHtml = '';
+      for (const diff of item.diffs) {
+        if (diff.type === 'dates' && diff.changedDates && diff.changedDates.length > 0) {
+          for (const cd of diff.changedDates) {
+            rowsHtml += `
+              <tr>
+                <td style="font-weight: 600; color: #334155; width: 220px;">
+                  <i class="fa-regular fa-calendar" style="color: #7c3aed; margin-right: 0.3rem;"></i> ${escapeHtml(cd.label || cd.key)}
+                </td>
+                <td style="width: 35%;">
+                  ${cd.oldVal ? `<span class="delta-old-val">${escapeHtml(cd.oldVal)}</span>` : '<span style="color: #94a3b8; font-style: italic;">Not set</span>'}
+                </td>
+                <td>
+                  <span class="delta-new-val" style="color: #065f46;">${escapeHtml(cd.newVal)}</span>
+                  <span class="delta-badge-add" style="margin-left: 0.4rem;">${cd.oldVal ? 'Updated' : 'Added'}</span>
+                </td>
+              </tr>
+            `;
+          }
+        } else {
+          rowsHtml += `
+            <tr>
+              <td style="font-weight: 600; color: #334155; width: 220px;">
+                <i class="fa-solid fa-pen-nib" style="color: #4f46e5; margin-right: 0.3rem;"></i> ${escapeHtml(diff.label || diff.field)}
+              </td>
+              <td style="width: 35%;">
+                ${diff.oldVal ? `<span class="delta-old-val">${escapeHtml(diff.oldVal)}</span>` : '<span style="color: #94a3b8; font-style: italic;">Not set</span>'}
+              </td>
+              <td>
+                <span class="delta-new-val" style="color: #065f46;">${escapeHtml(diff.newVal)}</span>
+                <span class="delta-badge-add" style="margin-left: 0.4rem;">${diff.oldVal ? 'Updated' : 'Added'}</span>
+              </td>
+            </tr>
+          `;
+        }
+      }
+
+      deltaHtml = `
+        <div style="margin-top: 0.75rem;">
+          <div style="font-size: 0.76rem; font-weight: 700; color: #475569; display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.35rem;">
+            <i class="fa-solid fa-code-compare" style="color: #7c3aed;"></i> Database Updates Committed (${item.diffs.length} fields):
+          </div>
+          <table class="delta-table">
+            <thead>
+              <tr>
+                <th>Field Attribute</th>
+                <th>Previous DB Value</th>
+                <th>New Verified AI Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (isLlmError) {
+      deltaHtml = `
+        <div style="margin-top: 0.6rem; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.78rem; color: #991b1b; display: flex; align-items: center; gap: 0.5rem;">
+          <i class="fa-solid fa-triangle-exclamation" style="color: #dc2626;"></i>
+          <span><strong>LLM Query Notice:</strong> External LLM returned an error or unparseable response. Database record was preserved with no changes made.</span>
+        </div>
+      `;
+    } else if (isSkipped) {
+      deltaHtml = `
+        <div style="margin-top: 0.6rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.78rem; color: #64748b; display: flex; align-items: center; gap: 0.5rem;">
+          <i class="fa-solid fa-circle-info" style="color: #3b82f6;"></i>
+          <span>${escapeHtml(item.skipReason || 'School scan skipped: verified clean within active cache window.')}</span>
+        </div>
+      `;
+    } else {
+      deltaHtml = `
+        <div style="margin-top: 0.6rem; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.78rem; color: #166534; display: flex; align-items: center; gap: 0.5rem;">
+          <i class="fa-solid fa-circle-check" style="color: #16a34a;"></i>
+          <span>Verified accurately against LLM intelligence. Record already aligned with no conflicting updates required.</span>
+        </div>
+      `;
+    }
+
+    const isExpanded = expandedFullDataSchoolIds.has(item.schoolId);
+    const inlineFullDataHtml = renderInlineFullSchoolData(item);
 
     html += `
-      <div class="date-anomaly-card" data-school-id="${item.schoolId}">
-        <div class="date-anomaly-header">
+      <div class="enrichment-feed-item ${cardStatusClass}" id="feed-item-${item.schoolId}">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem;">
           <div>
-            <div class="date-anomaly-title">
-              <i class="fa-solid fa-school" style="color: #4f46e5;"></i>
-              <span>${item.schoolName}</span>
-              <span style="font-size: 0.8rem; font-weight: 600; color: #64748b;">(${item.schoolType} — ${item.la || item.region})</span>
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              <h4 style="margin: 0; font-size: 1rem; font-weight: 700; color: #0f172a;">${escapeHtml(item.schoolName)}</h4>
+              ${statusPill}
+              <span style="font-size: 0.72rem; background: #f1f5f9; color: #475569; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 600;">${escapeHtml(item.schoolType || 'School')}</span>
+              ${item.region ? `<span style="font-size: 0.72rem; color: #64748b;"><i class="fa-solid fa-location-dot"></i> ${escapeHtml(item.region)}</span>` : ''}
             </div>
-            <div style="margin-top: 0.4rem; display: flex; gap: 0.4rem; flex-wrap: wrap;">
-              ${!hasAnomalies ? `<span class="anomaly-tag-pill" style="background:#ecfdf5; color:#059669; border:1px solid #bbf7d0;"><i class="fa-solid fa-circle-check"></i> Timeline Verified Clean</span>` : ''}
-              ${chronoCount > 0 ? `<span class="anomaly-tag-pill anomaly-tag-chrono"><i class="fa-solid fa-arrow-down-up-across-line"></i> ${chronoCount} Chrono Inversion${chronoCount > 1 ? 's' : ''}</span>` : ''}
-              ${outdatedCount > 0 ? `<span class="anomaly-tag-pill anomaly-tag-outdated"><i class="fa-solid fa-clock-rotate-left"></i> ${outdatedCount} Outdated Cycle</span>` : ''}
-              ${conflictCount > 0 ? `<span class="anomaly-tag-pill anomaly-tag-conflict"><i class="fa-solid fa-code-compare"></i> ${conflictCount} Source Conflict</span>` : ''}
-              <span class="anomaly-tag-pill" style="background: ${item.qualityScore >= 80 ? '#ecfdf5' : (item.qualityScore >= 60 ? '#fef3c7' : '#fee2e2')}; color: ${item.qualityScore >= 80 ? '#059669' : (item.qualityScore >= 60 ? '#d97706' : '#dc2626')}; border: 1px solid currentColor;">
-                Quality Score: ${item.qualityScore}% (${item.confidenceLevel})
-              </span>
+            <div style="font-size: 0.76rem; color: #64748b; margin-top: 0.25rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+              <span><i class="fa-solid fa-robot" style="color: #7c3aed;"></i> Model: <strong>${escapeHtml(item.model || 'gemini-3.6-flash')}</strong></span>
+              <span><i class="fa-solid fa-gauge-high" style="color: #059669;"></i> Confidence: <strong>${confScore}%</strong></span>
+              <span><i class="fa-regular fa-clock"></i> ${timeFormatted}</span>
             </div>
           </div>
-          <div>
-            ${currentPermissions.includes('admin:edit') && hasAnomalies ? `
-              <button type="button" class="btn btn-primary btn-apply-single-date-fix" data-school-id="${item.schoolId}" style="background: #059669; border-color: #059669; font-size: 0.82rem; padding: 0.4rem 0.85rem; display: inline-flex; align-items: center; gap: 0.4rem;">
-                <i class="fa-solid fa-check"></i> Apply Proposed Fix
+
+          <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn btn-outline" onclick="toggleSchoolFullData('${item.schoolId}')" style="font-size: 0.75rem; padding: 0.25rem 0.65rem; color: #4338ca; border-color: #c7d2fe; background: #eef2ff;" title="Toggle complete school data and visual diffs">
+              <i class="fa-solid fa-table-list"></i> <span id="btn-text-full-data-${item.schoolId}">${isExpanded ? 'Hide School Data' : 'View All School Data'}</span>
+              <i class="fa-solid fa-chevron-down toggle-chevron" id="chevron-${item.schoolId}" style="margin-left: 0.35rem; transition: transform 0.2s ease; transform: ${isExpanded ? 'rotate(180deg)' : 'rotate(0deg)'};"></i>
+            </button>
+            ${item.auditLogId ? `
+              <button type="button" class="btn btn-outline" onclick="executeSchoolVersionRollback('${item.schoolId}', ${item.auditLogId})" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; color: #dc2626; border-color: #fca5a5; background: #fff5f5;" title="Revert database updates made in this audit step">
+                <i class="fa-solid fa-rotate-left"></i> Rollback
               </button>
             ` : ''}
+            <button type="button" class="btn btn-outline" onclick="openSchoolVersionHistoryModal('${item.schoolId}', '${escapeHtml(item.schoolName)}')" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; color: #4f46e5; border-color: #c7d2fe; background: white;" title="View complete version & audit history ledger">
+              <i class="fa-solid fa-clock-rotate-left"></i> History
+            </button>
           </div>
         </div>
 
-        <!-- Issue Descriptions -->
-        ${hasAnomalies ? `
-          <div class="anomaly-issues-list">
-            <div style="font-weight: 700; margin-bottom: 0.3rem; display: flex; align-items: center; gap: 0.4rem;">
-              <i class="fa-solid fa-circle-exclamation"></i> Detected Timeline Anomaly:
-            </div>
-            <ul style="margin: 0; padding-left: 1.25rem;">
-              ${item.anomalies.map(a => `<li>${a.message}</li>`).join('')}
-            </ul>
-          </div>
-        ` : ''}
-
-        <!-- Side-by-Side Comparison -->
-        <div class="timeline-comparison-grid">
-          
-          <!-- Current Timeline -->
-          <div class="timeline-column">
-            <div class="timeline-col-header" style="color: ${hasAnomalies ? '#dc2626' : '#334155'};">
-              <span><i class="fa-solid ${hasAnomalies ? 'fa-xmark' : 'fa-database'}"></i> Current Database Data</span>
-              <span style="font-size: 0.72rem; background: ${hasAnomalies ? '#fee2e2' : '#f1f5f9'}; color: ${hasAnomalies ? '#b91c1c' : '#475569'}; padding: 0.1rem 0.4rem; border-radius: 4px;">
-                ${hasAnomalies ? 'Contains Issues' : 'Active Timeline'}
-              </span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">1. Registration Opens:</span>
-              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('registrationOpen')) ? 'val-error' : ''}">${c.registrationOpen || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">2. Registration Closes:</span>
-              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('registrationDeadline')) ? 'val-error' : ''}">${c.registrationDeadline || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">3. 1st Stage Exam Date:</span>
-              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('examDate')) ? 'val-error' : ''}">${c.examDate || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">4. 1st Stage Results:</span>
-              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('resultsDate')) ? 'val-error' : ''}">${c.resultsDate || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">5. 2nd Stage Exam:</span>
-              <span class="timeline-step-val ${(item.anomalies || []).some(a => a.affected && a.affected.includes('secondExamDate')) ? 'val-error' : ''}">${c.secondExamDate || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">6. Interviews:</span>
-              <span class="timeline-step-val">${c.interviewInfo || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">7. Offers / Outcome:</span>
-              <span class="timeline-step-val">${c.offersAcceptance || 'N/A'}</span>
-            </div>
-          </div>
-
-          <!-- Proposed Timeline -->
-          <div class="timeline-column" style="background: #f0fdf4; border-color: #bbf7d0;">
-            <div class="timeline-col-header" style="color: #059669;">
-              <span><i class="fa-solid fa-check"></i> Proposed 2026/2027 Timeline</span>
-              <span style="font-size: 0.72rem; background: #d1fae5; color: #047857; padding: 0.1rem 0.4rem; border-radius: 4px;">Chronological Standard</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">1. Registration Opens:</span>
-              <span class="timeline-step-val val-proposed">${p.registrationOpen || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">2. Registration Closes:</span>
-              <span class="timeline-step-val val-proposed">${p.registrationDeadline || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">3. 1st Stage Exam Date:</span>
-              <span class="timeline-step-val val-proposed">${p.examDate || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">4. 1st Stage Results:</span>
-              <span class="timeline-step-val val-proposed">${p.resultsDate || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">5. 2nd Stage Exam:</span>
-              <span class="timeline-step-val val-proposed">${p.secondExamDate || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">6. Interviews:</span>
-              <span class="timeline-step-val val-proposed">${p.interviewInfo || 'N/A'}</span>
-            </div>
-            <div class="timeline-step-row">
-              <span class="timeline-step-name">7. Offers / Outcome:</span>
-              <span class="timeline-step-val val-proposed">${p.offersAcceptance || 'N/A'}</span>
-            </div>
-          </div>
-
-        </div>
+        ${deltaHtml}
+        ${inlineFullDataHtml}
       </div>
     `;
   }
 
-  html += `</div>`;
   container.innerHTML = html;
-
-  // Bind single fix buttons
-  container.querySelectorAll('.btn-apply-single-date-fix').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const sId = btn.getAttribute('data-school-id');
-      const item = items.find(it => it.schoolId === sId);
-      if (!item) return;
-
-      await applyAdminDateFix(sId, item.proposedDates);
-    });
-  });
 }
 
-async function applyAdminDateFix(schoolId, proposedDates) {
-  if (!confirm('Apply the proposed 2026/2027 chronological date fix for this school?')) return;
+// Modal: Open Complete Version History for a School
+async function openSchoolVersionHistoryModal(schoolId, schoolName) {
+  const modal = document.getElementById('modal-school-version-history');
+  const titleName = document.getElementById('modal-history-school-name');
+  const container = document.getElementById('school-version-history-container');
+  if (!modal || !container) return;
+
+  if (titleName) titleName.textContent = schoolName || 'School';
+  container.innerHTML = `
+    <div style="text-align: center; padding: 2rem; color: #64748b;">
+      <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; color: #7c3aed;"></i>
+      <div style="margin-top: 0.5rem; font-size: 0.85rem;">Retrieving complete version audit ledger...</div>
+    </div>
+  `;
+  modal.style.display = 'flex';
+
+  try {
+    const res = await fetch(`/api/admin/enrichment/audit-history/${schoolId}`, {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+
+    if (!res.ok) {
+      container.innerHTML = `<div style="color: #dc2626; padding: 1rem;">Failed to load audit history.</div>`;
+      return;
+    }
+
+    const data = await res.json();
+    const history = data.history || [];
+
+    if (history.length === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 2.5rem 1rem; color: #94a3b8;">
+          <i class="fa-solid fa-clipboard-check" style="font-size: 2rem; color: #cbd5e1; margin-bottom: 0.5rem;"></i>
+          <div style="font-weight: 600; color: #475569;">No prior audit modification records for this school</div>
+          <div style="font-size: 0.8rem; margin-top: 0.25rem;">Record is in its original baseline state.</div>
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    for (const log of history) {
+      const isRolledBack = Boolean(log.rolledBackAt);
+      const appliedDate = log.appliedAt ? new Date(log.appliedAt).toLocaleString('en-GB') : 'Unknown';
+      const prev = log.previousState || {};
+
+      let diffRows = '';
+      if (prev.entranceExamDates) {
+        let datesObj = typeof prev.entranceExamDates === 'string' ? JSON.parse(prev.entranceExamDates) : prev.entranceExamDates;
+        diffRows += `<div><strong>11+ Dates:</strong> ${escapeHtml(JSON.stringify(datesObj))}</div>`;
+      }
+      if (prev.website) diffRows += `<div><strong>Website:</strong> ${escapeHtml(prev.website)}</div>`;
+      if (prev.entranceExamType) diffRows += `<div><strong>Exam Type:</strong> ${escapeHtml(prev.entranceExamType)}</div>`;
+      if (prev.gender) diffRows += `<div><strong>Gender:</strong> ${escapeHtml(prev.gender)}</div>`;
+      if (prev.phone) diffRows += `<div><strong>Phone:</strong> ${escapeHtml(prev.phone)}</div>`;
+      if (prev.email) diffRows += `<div><strong>Email:</strong> ${escapeHtml(prev.email)}</div>`;
+
+      html += `
+        <div style="background: white; border: 1px solid ${isRolledBack ? '#e2e8f0' : '#d8b4fe'}; border-radius: 8px; padding: 0.9rem 1.1rem; margin-bottom: 0.75rem; opacity: ${isRolledBack ? '0.65' : '1'};">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.4rem;">
+            <div>
+              <span style="font-weight: 700; font-size: 0.85rem; color: #1e1b4b;">Action: ${escapeHtml(log.actionType)}</span>
+              <span style="font-size: 0.75rem; color: #64748b; margin-left: 0.5rem;"><i class="fa-regular fa-clock"></i> ${appliedDate} by <strong>${escapeHtml(log.appliedBy || 'Admin')}</strong></span>
+              ${isRolledBack ? '<span style="background: #f1f5f9; color: #64748b; font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.4rem;">[Rolled Back]</span>' : ''}
+            </div>
+            <div>
+              ${!isRolledBack ? `
+                <button type="button" class="btn btn-outline" onclick="executeSchoolVersionRollback('${schoolId}', ${log.id})" style="font-size: 0.75rem; padding: 0.2rem 0.6rem; color: #7c3aed; border-color: #d8b4fe; background: #faf5ff;">
+                  <i class="fa-solid fa-rotate-left"></i> Restore this Version
+                </button>
+              ` : ''}
+            </div>
+          </div>
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.78rem; line-height: 1.5; color: #334155;">
+            <div style="font-weight: 600; color: #64748b; margin-bottom: 0.2rem;">Snapshot State to Restore:</div>
+            ${diffRows || '<span style="color: #94a3b8;">Original attributes preserved</span>'}
+          </div>
+        </div>
+      `;
+    }
+
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = `<div style="color: #dc2626; padding: 1rem;">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function closeSchoolVersionHistoryModal() {
+  const modal = document.getElementById('modal-school-version-history');
+  if (modal) modal.style.display = 'none';
+}
+
+// Execute Manual Rollback for a Specific School Version
+async function executeSchoolVersionRollback(schoolId, auditLogId) {
+  if (!confirm(`Are you sure you want to rollback this school record to version #${auditLogId}?`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/admin/enrichment/rollback-school', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ schoolId, auditLogId })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(data.message || 'School version successfully rolled back!', 'success');
+      closeSchoolVersionHistoryModal();
+      await refreshEnrichmentStatus();
+          } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed to rollback version.', 'error');
+    }
+  } catch (err) {
+    showToast('Error connecting to rollback service.', 'error');
+  }
+}
+
+function startScannerPolling() {
+  if (scannerPollInterval) clearInterval(scannerPollInterval);
+
+  const startBtn = document.getElementById('btn-start-web-scanner');
+  const progressBox = document.getElementById('scanner-progress-box');
+  const statusText = document.getElementById('scanner-status-text');
+  const progressCount = document.getElementById('scanner-progress-count');
+  const progressBar = document.getElementById('scanner-progress-bar');
+
+  if (startBtn) {
+    startBtn.disabled = true;
+    startBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Crawling in background...`;
+  }
+  if (progressBox) progressBox.style.display = 'block';
+
+  scannerPollInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/admin/scanner/status', {
+        headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const st = data.state;
+      if (!st) return;
+
+      const total = st.totalQueued || 1;
+      const current = st.scannedCount || 0;
+      const pct = Math.min(100, Math.round((current / total) * 100));
+
+      if (progressCount) progressCount.textContent = `${current} / ${total}`;
+      if (progressBar) progressBar.style.width = `${pct}%`;
+
+      const activeCallout = document.getElementById('enrichment-active-school-callout');
+      const activeName = document.getElementById('enrichment-active-school-name');
+      const totalEnrichedBadge = document.getElementById('enrichment-total-enriched-badge');
+      if (totalEnrichedBadge) totalEnrichedBadge.textContent = `${st.stats?.verifiedCount || 0} Enriched`;
+
+      if (st.isRunning) {
+        if (activeCallout) activeCallout.style.display = 'flex';
+        if (activeName) activeName.textContent = st.isDelaying ? `Pacing delay (${st.delayRemainingSeconds}s)...` : (st.currentSchool || 'Processing schools...');
+        if (statusText) {
+          if (st.isDelaying && st.delayRemainingSeconds > 0) {
+            statusText.innerHTML = `
+              <i class="fa-solid fa-hourglass-half fa-spin" style="color:#f59e0b;"></i> 
+              Pacing API limit: Next query in <strong>${st.delayRemainingSeconds}s</strong> &bull; 
+              <span style="color:#059669; font-weight:700;"><i class="fa-solid fa-circle-check"></i> ${st.stats.verifiedCount} enriched</span>, 
+              <span style="color:#dc2626; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> ${st.stats.anomaliesCount} anomalies</span>
+            `;
+          } else {
+            statusText.innerHTML = `
+              <i class="fa-solid fa-spider fa-bounce" style="color:#7c3aed;"></i> 
+              Auditing <strong>${st.currentSchool || 'schools'}</strong> (${pct}%) &bull; 
+              <span style="color:#059669; font-weight:700;"><i class="fa-solid fa-circle-check"></i> ${st.stats.verifiedCount} clean/enriched</span>, 
+              <span style="color:#dc2626; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> ${st.stats.anomaliesCount} anomalies</span>
+            `;
+          }
+        }
+      } else {
+        clearInterval(scannerPollInterval);
+        scannerPollInterval = null;
+
+        if (activeCallout) activeCallout.style.display = 'none';
+
+        if (startBtn) {
+          const scanMode = document.getElementById('scanner-scan-mode')?.value || 'BATCH';
+          startBtn.disabled = false;
+          startBtn.innerHTML = scanMode === 'SINGLE' 
+            ? `<i class="fa-solid fa-bullseye"></i> Start AI Scan for Selected School`
+            : `<i class="fa-solid fa-play"></i> Start AI Verification Scan`;
+        }
+
+        if (progressBar) progressBar.style.width = '100%';
+        if (statusText) {
+          statusText.innerHTML = `
+            <i class="fa-solid fa-circle-check" style="color:#059669;"></i> 
+            Completed web audit across <strong>${st.scannedCount}</strong> schools 
+            (${st.stats.verifiedCount} auto-verified / enriched, ${st.stats.anomaliesCount} anomalies, ${st.stats.missingWebsitesCount} missing websites, ${st.stats.dataMissingCount} data missing).
+          `;
+        }
+
+        showToast(`AI Enrichment scan complete: ${st.scannedCount} schools audited (${st.stats.verifiedCount} enriched)!`, 'success');
+              }
+
+      if (st.latestRawInteraction) {
+        updateRawLLMInspector(st.latestRawInteraction);
+      }
+
+      if (st.recentResults && Array.isArray(st.recentResults)) {
+        enrichmentFeedData = st.recentResults;
+        renderEnrichmentFeed(enrichmentFeedData);
+        if (enrichmentFeedData.length > 0 && !st.latestRawInteraction && (enrichmentFeedData[0].exactRequest || enrichmentFeedData[0].exactResponse)) {
+          updateRawLLMInspector(enrichmentFeedData[0]);
+        }
+      }
+    } catch (pollErr) {
+      console.warn('Error polling scanner status:', pollErr);
+    }
+  }, 800);
+}
+
+async function startWebVerificationScan() {
+  const scanMode = document.getElementById('scanner-scan-mode')?.value || 'BATCH';
+  const forceRerun = document.getElementById('scanner-force-rerun')?.checked || false;
+  const startBtn = document.getElementById('btn-start-web-scanner');
+  const progressBox = document.getElementById('scanner-progress-box');
+  const statusText = document.getElementById('scanner-status-text');
+  const progressCount = document.getElementById('scanner-progress-count');
+  const progressBar = document.getElementById('scanner-progress-bar');
+
+  let postBody = {};
+
+  if (scanMode === 'SINGLE') {
+    const schoolId = document.getElementById('scanner-selected-school-id')?.value;
+    const schoolName = document.getElementById('scanner-school-typeahead-input')?.value || 'Selected School';
+
+    if (!schoolId) {
+      showToast('Please type and select a specific school from the dropdown suggestions first.', 'warning');
+      const input = document.getElementById('scanner-school-typeahead-input');
+      if (input) input.focus();
+      return;
+    }
+
+    postBody = {
+      schoolId,
+      concurrency: 1,
+      forceRerun,
+      force: forceRerun
+    };
+
+    if (startBtn) {
+      startBtn.disabled = true;
+      startBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Auditing ${escapeHtml(schoolName)}...`;
+    }
+    if (progressBox) progressBox.style.display = 'block';
+    if (statusText) statusText.innerHTML = `<i class="fa-solid fa-bullseye fa-bounce" style="color:#7c3aed;"></i> Querying LLM intelligence for <strong>${escapeHtml(schoolName)}</strong>...`;
+    if (progressCount) progressCount.textContent = `0 / 1`;
+    if (progressBar) progressBar.style.width = '20%';
+  } else {
+    let priorityCategory = document.getElementById('scanner-priority-category')?.value || 'LONDON_INDEPENDENT';
+    if (priorityCategory === 'CURRENT_TAB') {
+      priorityCategory = 'LONDON_INDEPENDENT';
+    }
+
+    const limit = parseInt(document.getElementById('scanner-batch-limit')?.value || '25', 10);
+    postBody = {
+      priorityCategory,
+      limit,
+      concurrency: 1,
+      forceRerun,
+      force: forceRerun
+    };
+
+    if (startBtn) {
+      startBtn.disabled = true;
+      startBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Launching background scan...`;
+    }
+    if (progressBox) progressBox.style.display = 'block';
+    if (statusText) statusText.innerHTML = `<i class="fa-solid fa-spider fa-bounce" style="color:#7c3aed;"></i> Initializing background AI verification for ${limit} schools (${priorityCategory})...`;
+    if (progressCount) progressCount.textContent = `0 / ${limit}`;
+    if (progressBar) progressBar.style.width = '5%';
+  }
+
+  try {
+    const res = await fetch('/api/admin/scanner/start-batch-scan', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify(postBody)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(data.message || 'AI verification scan started!', 'info');
+      startScannerPolling();
+    } else {
+      showToast('Failed to start scanner.', 'error');
+      if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.innerHTML = scanMode === 'SINGLE'
+          ? `<i class="fa-solid fa-bullseye"></i> Start AI Scan for Selected School`
+          : `<i class="fa-solid fa-play"></i> Start AI Verification Scan`;
+      }
+    }
+  } catch (err) {
+    showToast('Error connecting to scanner service.', 'error');
+    if (startBtn) {
+      startBtn.disabled = false;
+      startBtn.innerHTML = scanMode === 'SINGLE'
+        ? `<i class="fa-solid fa-bullseye"></i> Start AI Scan for Selected School`
+        : `<i class="fa-solid fa-play"></i> Start AI Verification Scan`;
+    }
+  }
+}
+
+async function stopWebVerificationScan() {
+  try {
+    const res = await fetch('/api/admin/scanner/stop', {
+      method: 'POST',
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+    if (res.ok) {
+      showToast('Background crawler stopped.', 'info');
+      if (scannerPollInterval) {
+        clearInterval(scannerPollInterval);
+        scannerPollInterval = null;
+      }
+      const startBtn = document.getElementById('btn-start-web-scanner');
+      if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.innerHTML = `<i class="fa-solid fa-play"></i> Start AI Verification Scan`;
+      }
+      const statusText = document.getElementById('scanner-status-text');
+      if (statusText) statusText.innerHTML = `<span style="color:#d97706;"><i class="fa-solid fa-circle-pause"></i> Background crawler was stopped by admin.</span>`;
+          }
+  } catch (e) {
+    showToast('Failed to stop scanner.', 'error');
+  }
+}
+
+function renderFieldRecommendationChips(containerId, inputId, options) {
+  const container = document.getElementById(containerId);
+  const input = document.getElementById(inputId);
+  if (!container || !input) return;
+
+  const validOptions = [];
+  const seen = new Set();
+
+  for (const opt of options) {
+    if (!opt || !opt.value) continue;
+    const val = String(opt.value).trim();
+    if (!val || val === 'N/A' || val.toLowerCase() === 'none' || seen.has(val)) continue;
+    seen.add(val);
+    validOptions.push({
+      label: opt.label,
+      type: opt.type, // 'proposed', 'crawler', 'user', 'current'
+      value: val
+    });
+  }
+
+  if (validOptions.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  let html = '';
+  for (const opt of validOptions) {
+    let badgeStyle = 'background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;';
+    let icon = 'fa-tag';
+    if (opt.type === 'proposed') {
+      badgeStyle = 'background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0;';
+      icon = 'fa-wand-magic-sparkles';
+    } else if (opt.type === 'crawler') {
+      badgeStyle = 'background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe;';
+      icon = 'fa-globe';
+    } else if (opt.type === 'user') {
+      badgeStyle = 'background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa;';
+      icon = 'fa-users';
+    }
+
+    const isCurrentVal = (input.value || '').trim() === opt.value;
+    if (isCurrentVal) {
+      badgeStyle += ' font-weight: 700; outline: 2px solid #4f46e5; outline-offset: 1px;';
+    }
+
+    const escapedVal = opt.value.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    html += `
+      <button type="button" class="rec-chip-btn" onclick="selectFixModalChip('${inputId}', '${escapedVal}', this)" style="${badgeStyle} cursor: pointer; border-radius: 6px; font-size: 0.73rem; padding: 0.22rem 0.55rem; display: inline-flex; align-items: center; gap: 0.35rem; transition: all 0.15s ease;" title="Adopt ${opt.label}">
+        <i class="fa-solid ${icon}" style="font-size: 0.7rem;"></i>
+        <span><strong>${opt.label}:</strong> ${opt.value}</span>
+      </button>
+    `;
+  }
+
+  container.innerHTML = html;
+}
+
+window.selectFixModalChip = function(inputId, val, btnEl) {
+  const input = document.getElementById(inputId);
+  if (input) {
+    input.value = val;
+    input.dispatchEvent(new Event('input'));
+  }
+  if (btnEl && btnEl.parentElement) {
+    btnEl.parentElement.querySelectorAll('.rec-chip-btn').forEach(b => {
+      b.style.outline = 'none';
+      b.style.fontWeight = 'normal';
+    });
+    btnEl.style.outline = '2px solid #4f46e5';
+    btnEl.style.outlineOffset = '1px';
+    btnEl.style.fontWeight = '700';
+  }
+};
+
+function openApplyVerifiedFixModal(item) {
+  const modal = document.getElementById('apply-verified-fix-modal');
+  if (!modal || !item) return;
+
+  const titleEl = document.getElementById('apply-fix-modal-title');
+  const subtitleEl = document.getElementById('apply-fix-modal-subtitle');
+  const schoolIdInput = document.getElementById('fix-modal-school-id');
+
+  if (titleEl) {
+    titleEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #059669;"></i> Review &amp; Apply Verified Fixes — ${item.schoolName}`;
+  }
+  if (subtitleEl) {
+    subtitleEl.textContent = `${item.schoolType || 'School'} • ${item.la || item.region || ''} (Click any recommended data correction chip to adopt)`;
+  }
+  if (schoolIdInput) {
+    schoolIdInput.value = item.schoolId;
+  }
+
+  const p = item.proposedDates || {};
+  const c = item.currentDates || {};
+  const vr = item.verificationReport || {};
+  const vd = vr.details || {};
+  const uc = item.userCorrections || {};
+
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val || '';
+  };
+
+  // 1. Set initial default values
+  setVal('fix-modal-reg-open', p.registrationOpen || c.registrationOpen || '');
+  setVal('fix-modal-reg-close', p.registrationDeadline || c.registrationDeadline || '');
+  setVal('fix-modal-exam1', p.examDate || c.examDate || '');
+  setVal('fix-modal-results1', p.resultsDate || c.resultsDate || '');
+  setVal('fix-modal-exam2', p.secondExamDate || c.secondExamDate || '');
+  setVal('fix-modal-interview', p.interviewInfo || c.interviewInfo || '');
+  setVal('fix-modal-offers', p.offersAcceptance || c.offersAcceptance || '');
+
+  setVal('fix-modal-exam-type', item.entranceExamType || 'Standard / Non-Selective');
+  setVal('fix-modal-gender', item.gender || 'Mixed');
+  setVal('fix-modal-phone', item.phone || '');
+  setVal('fix-modal-email', item.email || '');
+  setVal('fix-modal-website', item.website || '');
+  setVal('fix-modal-postcode', item.postcode || '');
+  setVal('fix-modal-address', item.address || '');
+
+  // 2. Render Recommended Options & Data Corrections Chips for Each Field
+  const dateMilestones = vd.datesCheck?.detectedMilestones || {};
+  const webExam = vd.examTypeCheck?.detectedValue || vd.examTypeCheck?.detectedType;
+  const webGender = vd.genderCheck?.detectedValue || vd.genderCheck?.detectedGender;
+  const webPhones = vd.contactCheck?.webValues || vr.extracted?.phones || [];
+  const webEmails = vd.contactCheck?.webValues || vr.extracted?.emails || [];
+  const webPostcodes = vd.contactCheck?.webValues || vr.extracted?.postcodes || [];
+
+  renderFieldRecommendationChips('chips-fix-modal-reg-open', 'fix-modal-reg-open', [
+    { label: 'Proposed 2026/27', value: p.registrationOpen, type: 'proposed' },
+    { label: 'Web Detected', value: dateMilestones.registrationOpen, type: 'crawler' },
+    ...(uc.registrationOpen || []).map(v => ({ label: 'Community Report', value: v, type: 'user' })),
+    { label: 'Current DB', value: c.registrationOpen, type: 'current' }
+  ]);
+
+  renderFieldRecommendationChips('chips-fix-modal-reg-close', 'fix-modal-reg-close', [
+    { label: 'Proposed 2026/27', value: p.registrationDeadline, type: 'proposed' },
+    { label: 'Web Detected', value: dateMilestones.registrationDeadline, type: 'crawler' },
+    ...(uc.registrationDeadline || []).map(v => ({ label: 'Community Report', value: v, type: 'user' })),
+    { label: 'Current DB', value: c.registrationDeadline, type: 'current' }
+  ]);
+
+  renderFieldRecommendationChips('chips-fix-modal-exam1', 'fix-modal-exam1', [
+    { label: 'Proposed 2026/27', value: p.examDate, type: 'proposed' },
+    { label: 'Web Detected', value: dateMilestones.examDate, type: 'crawler' },
+    ...(uc.examDate || []).map(v => ({ label: 'Community Report', value: v, type: 'user' })),
+    { label: 'Current DB', value: c.examDate, type: 'current' }
+  ]);
+
+  renderFieldRecommendationChips('chips-fix-modal-results1', 'fix-modal-results1', [
+    { label: 'Proposed 2026/27', value: p.resultsDate, type: 'proposed' },
+    { label: 'Web Detected', value: dateMilestones.resultsDate, type: 'crawler' },
+    ...(uc.resultsDate || []).map(v => ({ label: 'Community Report', value: v, type: 'user' })),
+    { label: 'Current DB', value: c.resultsDate, type: 'current' }
+  ]);
+
+  renderFieldRecommendationChips('chips-fix-modal-exam2', 'fix-modal-exam2', [
+    { label: 'Proposed 2026/27', value: p.secondExamDate, type: 'proposed' },
+    { label: 'Web Detected', value: dateMilestones.secondExamDate, type: 'crawler' },
+    { label: 'Current DB', value: c.secondExamDate, type: 'current' }
+  ]);
+
+  renderFieldRecommendationChips('chips-fix-modal-interview', 'fix-modal-interview', [
+    { label: 'Proposed 2026/27', value: p.interviewInfo, type: 'proposed' },
+    { label: 'Web Detected', value: dateMilestones.interviewInfo, type: 'crawler' },
+    { label: 'Current DB', value: c.interviewInfo, type: 'current' }
+  ]);
+
+  renderFieldRecommendationChips('chips-fix-modal-offers', 'fix-modal-offers', [
+    { label: 'Proposed 2026/27', value: p.offersAcceptance, type: 'proposed' },
+    { label: 'Web Detected', value: dateMilestones.offersAcceptance, type: 'crawler' },
+    { label: 'Current DB', value: c.offersAcceptance, type: 'current' }
+  ]);
+
+  renderFieldRecommendationChips('chips-fix-modal-exam-type', 'fix-modal-exam-type', [
+    { label: 'Web Policy', value: webExam, type: 'crawler' },
+    ...(uc.entranceExamType || []).map(v => ({ label: 'Community Report', value: v, type: 'user' })),
+    { label: 'Current DB', value: item.entranceExamType, type: 'current' },
+    { label: 'Standard', value: 'GL Assessment', type: 'proposed' },
+    { label: 'Independent Pre-Test', value: 'ISEB Common Pre-Test', type: 'proposed' },
+    { label: 'Consortium', value: 'London 11+ Consortium', type: 'proposed' },
+    { label: 'Comprehensive', value: 'Non-Selective / Banding', type: 'proposed' }
+  ]);
+
+  renderFieldRecommendationChips('chips-fix-modal-gender', 'fix-modal-gender', [
+    { label: 'Web Verified', value: webGender, type: 'crawler' },
+    ...(uc.gender || []).map(v => ({ label: 'Community Report', value: v, type: 'user' })),
+    { label: 'Current DB', value: item.gender, type: 'current' },
+    { label: 'Co-ed Option', value: 'Mixed', type: 'proposed' },
+    { label: 'Girls Option', value: 'Girls', type: 'proposed' },
+    { label: 'Boys Option', value: 'Boys', type: 'proposed' }
+  ]);
+
+  const phoneOpts = [];
+  if (Array.isArray(webPhones)) {
+    for (const ph of webPhones) phoneOpts.push({ label: 'Web Crawled', value: ph, type: 'crawler' });
+  } else if (typeof webPhones === 'string') {
+    phoneOpts.push({ label: 'Web Crawled', value: webPhones, type: 'crawler' });
+  }
+  for (const ph of (uc.phone || [])) phoneOpts.push({ label: 'Community Report', value: ph, type: 'user' });
+  phoneOpts.push({ label: 'Current DB', value: item.phone, type: 'current' });
+  renderFieldRecommendationChips('chips-fix-modal-phone', 'fix-modal-phone', phoneOpts);
+
+  const emailOpts = [];
+  if (Array.isArray(webEmails)) {
+    for (const em of webEmails) emailOpts.push({ label: 'Web Crawled', value: em, type: 'crawler' });
+  } else if (typeof webEmails === 'string') {
+    emailOpts.push({ label: 'Web Crawled', value: webEmails, type: 'crawler' });
+  }
+  for (const em of (uc.email || [])) emailOpts.push({ label: 'Community Report', value: em, type: 'user' });
+  emailOpts.push({ label: 'Current DB', value: item.email, type: 'current' });
+  renderFieldRecommendationChips('chips-fix-modal-email', 'fix-modal-email', emailOpts);
+
+  renderFieldRecommendationChips('chips-fix-modal-website', 'fix-modal-website', [
+    { label: 'Web Verified', value: vd.domainCheck?.finalUrl, type: 'crawler' },
+    ...(uc.website || []).map(v => ({ label: 'Community Report', value: v, type: 'user' })),
+    { label: 'Current DB', value: item.website, type: 'current' }
+  ]);
+
+  const pcOpts = [];
+  if (Array.isArray(webPostcodes)) {
+    for (const pc of webPostcodes) pcOpts.push({ label: 'Web Detected', value: pc, type: 'crawler' });
+  } else if (typeof webPostcodes === 'string') {
+    pcOpts.push({ label: 'Web Detected', value: webPostcodes, type: 'crawler' });
+  }
+  for (const pc of (uc.postcode || [])) pcOpts.push({ label: 'Community Report', value: pc, type: 'user' });
+  pcOpts.push({ label: 'Current DB', value: item.postcode, type: 'current' });
+  renderFieldRecommendationChips('chips-fix-modal-postcode', 'fix-modal-postcode', pcOpts);
+
+  renderFieldRecommendationChips('chips-fix-modal-address', 'fix-modal-address', [
+    ...(uc.address || []).map(v => ({ label: 'Community Report', value: v, type: 'user' })),
+    { label: 'Current DB', value: item.address, type: 'current' }
+  ]);
+
+  // 3. Show / Hide Corrections Banner
+  const banner = document.getElementById('fix-modal-corrections-banner');
+  const bannerText = document.getElementById('fix-modal-corrections-text');
+  const userReportsCount = Object.values(uc).reduce((acc, arr) => acc + arr.length, 0);
+
+  if (banner) {
+    if (userReportsCount > 0 || (webPhones.length > 0) || webExam || webGender) {
+      banner.style.display = 'flex';
+      if (bannerText) {
+        bannerText.innerHTML = `
+          <strong>${userReportsCount > 0 ? `${userReportsCount} Community Data Correction(s)` : 'Web Crawler Discoveries'} available:</strong>
+          Select any highlighted recommendation badge below to adopt that value.
+        `;
+      }
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
+  // 4. Wire "Use All Recommended Values" button
+  const btnApplyAllChips = document.getElementById('btn-apply-all-rec-chips');
+  if (btnApplyAllChips) {
+    btnApplyAllChips.onclick = () => {
+      // Pick first proposed / crawler / user chip in each container
+      modal.querySelectorAll('.rec-chips-container').forEach(container => {
+        const firstChip = container.querySelector('.rec-chip-btn');
+        if (firstChip) firstChip.click();
+      });
+      showToast('Adopted all recommended verified data values!', 'info');
+    };
+  }
+
+  modal.style.display = 'flex';
+}
+
+function closeApplyVerifiedFixModal() {
+  const modal = document.getElementById('apply-verified-fix-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function handleConfirmApplyVerifiedFix() {
+  const sId = document.getElementById('fix-modal-school-id')?.value;
+  if (!sId) return;
+
+  const btn = document.getElementById('btn-confirm-apply-fix');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Applying Fixes...`;
+  }
+
+  const getVal = (id) => (document.getElementById(id)?.value || '').trim();
+
+  const proposedDates = {
+    registrationOpen: getVal('fix-modal-reg-open'),
+    registrationDeadline: getVal('fix-modal-reg-close'),
+    examDate: getVal('fix-modal-exam1'),
+    resultsDate: getVal('fix-modal-results1'),
+    secondExamDate: getVal('fix-modal-exam2') || null,
+    interviewInfo: getVal('fix-modal-interview') || null,
+    offersAcceptance: getVal('fix-modal-offers')
+  };
+
+  const fixes = {
+    entranceExamDates: proposedDates,
+    entranceExamType: getVal('fix-modal-exam-type'),
+    gender: getVal('fix-modal-gender'),
+    phone: getVal('fix-modal-phone'),
+    email: getVal('fix-modal-email'),
+    website: getVal('fix-modal-website'),
+    postcode: getVal('fix-modal-postcode'),
+    address: getVal('fix-modal-address')
+  };
 
   try {
     const res = await fetch('/api/admin/apply-date-fix', {
@@ -6235,73 +8562,26 @@ async function applyAdminDateFix(schoolId, proposedDates) {
         'Content-Type': 'application/json',
         ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
       },
-      body: JSON.stringify({ schoolId, proposedDates })
+      body: JSON.stringify({ schoolId: sId, proposedDates, fixes })
     });
 
     if (res.ok) {
-      showToast('Date timeline corrected and verified!', 'success');
+      const data = await res.json();
+      showToast(data.message || 'Verified details applied successfully!', 'success');
+      closeApplyVerifiedFixModal();
       await loadSchools();
-      await loadAdminDateAnomalies();
-    } else {
-      showToast('Failed to apply date fix.', 'error');
+          } else {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'Failed to apply verified fixes', 'error');
     }
-  } catch (err) {
-    showToast('Error applying date fix.', 'error');
-  }
-}
-
-async function applyAllAdminDateFixes() {
-  if (!cachedDateAnomaliesData || cachedDateAnomaliesData.anomalies.length === 0) {
-    showToast('No date anomalies to fix.', 'info');
-    return;
-  }
-
-  const count = cachedDateAnomaliesData.anomalies.length;
-  if (!confirm(`Are you sure you want to apply recommended chronological 2026/2027 date fixes across all ${count} anomalous schools?`)) return;
-
-  try {
-    const res = await fetch('/api/admin/apply-all-date-fixes', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
-      },
-      body: JSON.stringify({})
-    });
-
-    if (res.ok) {
-      const result = await res.json();
-      showToast(`Successfully applied recommended date fixes across ${result.count} schools!`, 'success');
-      await loadSchools();
-      await loadAdminDateAnomalies();
-    } else {
-      showToast('Failed to apply all date fixes.', 'error');
+  } catch (e) {
+    console.error('Error applying verified fix:', e);
+    showToast('Error applying verified fixes', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fa-solid fa-check"></i> Confirm &amp; Apply Verified Fixes`;
     }
-  } catch (err) {
-    showToast('Error applying bulk date fixes.', 'error');
-  }
-}
-
-async function syncDateQualityConfidence() {
-  try {
-    const res = await fetch('/api/admin/sync-date-confidence', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
-      },
-      body: JSON.stringify({})
-    });
-
-    if (res.ok) {
-      const result = await res.json();
-      showToast(`Synchronized date quality confidence scores across ${result.count} schools!`, 'success');
-      await loadAdminDateAnomalies();
-    } else {
-      showToast('Failed to synchronize date confidence.', 'error');
-    }
-  } catch (err) {
-    showToast('Error synchronizing date confidence.', 'error');
   }
 }
 
@@ -6631,8 +8911,7 @@ async function commitSelectedEnrichment(itemsToCommit) {
       renderEnrichmentPreviewCards();
 
       await loadSchools();
-      await loadAdminDateAnomalies();
-
+      
       if ((cachedEnrichmentPreviewData.proposedChanges || []).length === 0) {
         closeEnrichmentPreviewModal();
       }
@@ -6648,9 +8927,3 @@ async function commitSelectedEnrichment(itemsToCommit) {
 async function runAdminFullEnrichment() {
   await openEnrichmentPreviewModal();
 }
-
-
-
-
-
-

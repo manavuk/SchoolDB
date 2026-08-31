@@ -2303,6 +2303,100 @@ body {
   border: 1px solid #ede9fe;
 }
 
+.anomaly-tag-autoverified {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.anomaly-tag-missingweb {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+  font-weight: 800;
+}
+
+.anomaly-tag-datamissing {
+  background: #fff7ed;
+  color: #ea580c;
+  border: 1px solid #fed7aa;
+}
+
+.anomaly-tag-contact {
+  background: #fdf4ff;
+  color: #c026d3;
+  border: 1px solid #f5d0fe;
+}
+
+.anomaly-tag-examtype {
+  background: #eef2ff;
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+}
+
+.anomaly-tag-gender {
+  background: #ecfeff;
+  color: #0891b2;
+  border: 1px solid #a5f3fc;
+}
+
+.anomaly-tag-domain {
+  background: #fdf2f8;
+  color: #be185d;
+  border: 1px solid #fbcfe8;
+}
+
+.anomaly-cat-nav {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 0.75rem;
+}
+
+.anomaly-cat-tab {
+  background: white;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  transition: all 0.15s ease;
+}
+
+.anomaly-cat-tab:hover {
+  background: #f8fafc;
+  color: #1e293b;
+  border-color: #94a3b8;
+}
+
+.anomaly-cat-tab.active {
+  background: #1e293b;
+  color: white;
+  border-color: #1e293b;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+
+.anomaly-cat-tab.active .badge-count {
+  background: rgba(255,255,255,0.25);
+  color: white;
+}
+
+.anomaly-cat-tab .badge-count {
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+
 .anomaly-issues-list {
   background: #fef2f2;
   border-left: 4px solid #ef4444;
@@ -2494,3 +2588,279 @@ body {
   border-radius: 6px;
   border: 1px solid rgba(0, 0, 0, 0.05);
 }
+
+/* ================= Data Enrichment Live Feed & DB Delta Styles ================= */
+.live-pulsing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  display: inline-block;
+  box-shadow: 0 0 0 rgba(16, 185, 129, 0.4);
+  animation: pulseLiveDot 1.8s infinite;
+}
+
+@keyframes pulseLiveDot {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.enrichment-feed-item {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 0.9rem;
+  transition: all 0.25s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  animation: feedItemAppear 0.4s ease-out;
+}
+
+@keyframes feedItemAppear {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.enrichment-feed-item:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.enrichment-feed-item.status-llm-enriched {
+  border-left: 4px solid #7c3aed;
+}
+
+.enrichment-feed-item.status-auto-verified {
+  border-left: 4px solid #059669;
+}
+
+.enrichment-feed-item.status-skipped {
+  border-left: 4px solid #94a3b8;
+  background: #f8fafc;
+}
+
+.enrichment-feed-item.status-has-anomalies {
+  border-left: 4px solid #ea580c;
+}
+
+.delta-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin-top: 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.8rem;
+}
+
+.delta-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.76rem;
+}
+
+.delta-table td {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+}
+
+.delta-table tr:last-child td {
+  border-bottom: none;
+}
+
+.delta-badge-add {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.72rem;
+}
+
+.delta-badge-change {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.72rem;
+}
+
+.delta-old-val {
+  color: #94a3b8;
+  text-decoration: line-through;
+  font-size: 0.78rem;
+}
+
+.delta-new-val {
+  color: #0f172a;
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+/* Inline Full School Data Viewer & Visual Queue Highlighting */
+.full-school-data-panel {
+  margin-top: 0.85rem;
+  background: #ffffff;
+  border: 1px solid #e0e7ff;
+  border-radius: 10px;
+  padding: 1.1rem;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.05);
+  animation: feedItemAppear 0.3s ease-out;
+}
+
+.school-data-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.school-data-col-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4338ca;
+  margin-bottom: 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px dashed #e0e7ff;
+}
+
+.school-data-field-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.school-data-field-box.is-changed {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.08);
+}
+
+.school-data-field-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.school-data-field-name {
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.badge-field-changed {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.badge-field-unchanged {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+  font-size: 0.66rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.school-data-field-val {
+  font-size: 0.8rem;
+  color: #1e293b;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.old-val-strikethrough {
+  color: #94a3b8;
+  text-decoration: line-through;
+  font-size: 0.75rem;
+}
+
+/* ============================================================ */
+/* EXECUTIVE AI ADMISSIONS SETTINGS & PROMPT STUDIO STYLES     */
+/* ============================================================ */
+
+.provider-radio-card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.provider-radio-card:hover {
+  border-color: #a855f7 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.08);
+}
+
+.provider-radio-card.active {
+  border-color: #7c3aed !important;
+  background: #faf5ff !important;
+  box-shadow: 0 0 0 1px #7c3aed, 0 4px 12px rgba(124, 58, 237, 0.12);
+}
+
+.chip-btn {
+  background: #ffffff;
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.chip-btn:hover {
+  background: #4f46e5;
+  color: #ffffff;
+  border-color: #4338ca;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
+}
+
+.chip-btn:active {
+  transform: translateY(0);
+}
+
+.btn-toggle-key-visibility:hover {
+  color: #4f46e5 !important;
+}
+
+.btn-clear-key:hover {
+  background: #fef2f2 !important;
+  border-color: #ef4444 !important;
+}
+
+

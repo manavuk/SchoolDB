@@ -70,12 +70,13 @@
    - Interactive verification actions: Scan single school, batch scan queue by priority, apply proposed fixes, manual override.
 5. **Merge & De-Duplicate** (`#admin-subpane-merge`): Duplicate record candidate matching and merging.
 6. **Import & Export** (`#admin-subpane-import-export`): CSV verification preview, DfE ingestion.
-7. **Settings** (`#admin-subpane-settings`): Database instance switcher (Prod vs Test), recommendation weights, crawler parameters.
+7. **Settings** (`#admin-subpane-settings`): Database instance switcher (Prod vs Test), Parent Portal 2.0 feature flag, Automated Web Scanner skip window (`scannerSkipDays`: default 10 days, 0 = scan every time, max 100 days), recommendation weights.
 
 ---
 
 ## 5. Verification & Scanner Priority Pipeline
-1. **Queue Priority**:
+1. **Queue Priority & Cache / Skip Window**:
+   - Configurable `scannerSkipDays` (0–100 days, default 10 days). If a school was verified within the last *n* days, batch crawler automatically skips it unless *n = 0*.
    - Priority 1: London Area Independent Schools (`region = 'Greater London'` & `schoolType = 'Independent'`)
    - Priority 2: Other Independent Schools (`schoolType = 'Independent'`)
    - Priority 3: Selective Grammar Schools (`schoolType = 'Grammar'`)
@@ -85,7 +86,7 @@
    - `auto_verified`: School website active, identity matches, contact valid, and 11+ dates valid and aligned with web/consortium. Boosts confidence score to High (95%+).
    - `missing_website`: School has no website URL recorded or URL is unreachable (DNS/404/SSL fail). Flagged in dedicated "Missing Websites" review bucket.
    - `auto_verification_data_missing`: School website reachable, but no 11+ admissions schedule / dates found on pages.
-   - `contact_mismatch`: Mismatch found in phone, email, address, or postcode against official web footprint.
+   - `contact_mismatch`: Mismatch found in phone or email (contact contains phone and email only; postcodes are part of address).
    - `domain_mismatch`: Website exists but title / contents suggest domain squatter, unrelated entity, or wrong school name.
    - `exam_type_mismatch`: Entrance exam format/board (e.g., GL Assessment, ISEB, London Consortium, CSSE, Non-Selective) differs from web admissions policy.
    - `gender_mismatch`: Gender policy (Boys, Girls, Mixed/Co-ed) differs from verified school website.
@@ -95,6 +96,15 @@
 
 ---
 
-## 6. Testing & Operational Commands
+## 6. Background Web Crawler & Scanner Endpoints
+- `POST /api/admin/scanner/start-batch-scan` & `POST /api/admin/scanner/batch-scan`: Asynchronously spawns non-blocking concurrent worker pool (4 parallel threads, 3.5s timeout) to audit prioritized batch with `skipDays` support.
+- `GET /api/admin/scanner/status`: Real-time polling endpoint returning progress (`scannedCount`, `totalQueued`, `currentSchool`, `stats`, `recentResults`).
+- `POST /api/admin/scanner/stop`: Signals cancellation to running background worker.
+- `POST /api/admin/scanner/verify-school/:id`: Live on-demand single school audit.
+- `POST /api/admin/scanner/apply-fixes` & `apply-all-fixes`: Single & bulk verified data patch application.
+
+---
+
+## 7. Testing & Operational Commands
 - Start dev server: `npm start` (or `node server.js`)
-- Run verification tests: `node scripts/test_date_anomalies_engine.js`, `node scripts/test_scanner_verifier.js`
+- Run verification tests: `node scripts/test_scanner_verifier.js`, `node scripts/test_background_scanner.js`, `node scripts/test_date_anomalies_engine.js`

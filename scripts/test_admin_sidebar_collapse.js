@@ -12,9 +12,8 @@ assert(html.includes('id="admin-side-nav"'), 'index.html must have admin-side-na
 assert(html.includes('id="admin-side-content"'), 'index.html must have admin-side-content ID');
 assert(html.includes('id="admin-sidebar-toggle-btn"'), 'index.html must have admin-sidebar-toggle-btn');
 assert(html.includes('id="admin-side-nav-title"'), 'index.html must have admin-side-nav-title');
-assert(html.includes('title="Directory View"'), 'Side tabs must have tooltip titles for collapsed icon mode');
-assert(html.includes('title="Bulk Edit"'), 'Bulk edit tab must have title');
-assert(html.includes('title="Date Anomaly Review"'), 'Date anomaly tab must have title');
+assert(html.includes('title="Data Enrichment"'), 'Data Enrichment tab must have title');
+assert(html.includes('title="Merge & De-Duplicate"'), 'Merge & De-Duplicate tab must have title');
 console.log('✓ All DOM components and tooltip attributes verified in index.html.');
 
 // 2. Check CSS Rules

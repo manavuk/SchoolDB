@@ -3,6 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const db = require('./db');
+const scannerVerifier = require('./scripts/scanner_verifier');
+
+let llmCrawler = null;
+try {
+  llmCrawler = require('./scripts/llm_crawler');
+} catch (e) {}
 
 // Load environment variables from .env if present
 try {
@@ -1296,57 +1302,917 @@ app.post('/api/admin/apply-field-report', requirePermission('admin:edit'), (req,
 });
 
 // ----------------------------------------------------
-// Date Anomaly & Timeline Quality Review Endpoints
+// LLM AI Crawler & Prompt Management Endpoints
 // ----------------------------------------------------
 
-// GET /api/admin/date-anomalies - Retrieve all detected date timeline anomalies and proposed fixes
-app.get('/api/admin/date-anomalies', requirePermission('admin:portal'), (req, res) => {
+// ----------------------------------------------------
+// Unified Admin Settings & Engine Management Endpoints
+// ----------------------------------------------------
+
+// GET /api/admin/settings - Consolidated Admin configuration & credentials status
+app.get('/api/admin/settings', requirePermission('admin:portal'), (req, res) => {
   try {
-    const result = db.getAllDateAnomalies();
-    res.json(result);
+    const settings = db.getAdminSettings();
+    res.json({
+      success: true,
+      settings,
+      publicSearchUrls: {
+        gemini: llmCrawler?.GEMINI_PUBLIC_SEARCH_URL || 'https://gemini.google.com/app',
+        chatgpt: llmCrawler?.CHATGPT_PUBLIC_SEARCH_URL || 'https://chatgpt.com/'
+      }
+    });
   } catch (err) {
-    console.error('Error fetching date anomalies:', err);
-    res.status(500).json({ error: 'Failed to analyze date anomalies' });
+    console.error('Error fetching admin settings:', err);
+    res.status(500).json({ error: 'Failed to fetch admin settings' });
   }
 });
 
-// POST /api/admin/apply-date-fix - Apply proposed clean dates for a single school
-app.post('/api/admin/apply-date-fix', requirePermission('admin:edit'), (req, res) => {
+// POST /api/admin/settings - Save consolidated Admin configuration
+app.post('/api/admin/settings', requirePermission('admin:edit'), (req, res) => {
   try {
-    const { schoolId, proposedDates } = req.body;
-    if (!schoolId || !proposedDates) {
-      return res.status(400).json({ error: 'schoolId and proposedDates are required' });
+    const payload = req.body || {};
+    const saved = db.saveAdminSettings(payload);
+    res.json({
+      success: true,
+      message: 'All Admin & AI Engine settings saved successfully.',
+      settings: saved,
+      publicSearchUrls: {
+        gemini: llmCrawler?.GEMINI_PUBLIC_SEARCH_URL || 'https://gemini.google.com/app',
+        chatgpt: llmCrawler?.CHATGPT_PUBLIC_SEARCH_URL || 'https://chatgpt.com/'
+      }
+    });
+  } catch (err) {
+    console.error('Error saving admin settings:', err);
+    res.status(500).json({ error: 'Failed to save admin settings' });
+  }
+});
+
+// Backward-compatible LLM settings routes
+// GET /api/admin/llm-settings - Get LLM configuration & prompt template
+app.get('/api/admin/llm-settings', requirePermission('admin:portal'), (req, res) => {
+  try {
+    const settings = db.getAdminSettings();
+    res.json({
+      success: true,
+      settings: {
+        llmProvider: settings.llmProvider,
+        geminiApiKey: settings.geminiKeyMasked,
+        geminiModel: settings.geminiModel,
+        openaiApiKey: settings.openaiKeyMasked,
+        openaiModel: settings.openaiModel,
+        hasGeminiKey: settings.hasGeminiKey,
+        hasOpenaiKey: settings.hasOpenaiKey,
+        scannerSkipDays: settings.scannerSkipDays,
+        llmPromptTemplate: settings.llmPromptTemplate
+      },
+      publicSearchUrls: {
+        gemini: llmCrawler?.GEMINI_PUBLIC_SEARCH_URL || 'https://gemini.google.com/app',
+        chatgpt: llmCrawler?.CHATGPT_PUBLIC_SEARCH_URL || 'https://chatgpt.com/'
+      },
+      defaultPromptTemplate: settings.defaultPromptTemplate
+    });
+  } catch (err) {
+    console.error('Error fetching LLM settings:', err);
+    res.status(500).json({ error: 'Failed to fetch LLM settings' });
+  }
+});
+
+// POST /api/admin/llm-settings - Update LLM configuration & prompt template
+app.post('/api/admin/llm-settings', requirePermission('admin:edit'), (req, res) => {
+  try {
+    const payload = req.body || {};
+    const saved = db.saveAdminSettings(payload);
+    res.json({
+      success: true,
+      message: 'LLM & AI enrichment engine settings saved successfully.',
+      settings: {
+        llmProvider: saved.llmProvider,
+        geminiModel: saved.geminiModel,
+        openaiModel: saved.openaiModel,
+        hasGeminiKey: saved.hasGeminiKey,
+        hasOpenaiKey: saved.hasOpenaiKey,
+        geminiApiKey: saved.geminiKeyMasked,
+        openaiApiKey: saved.openaiKeyMasked,
+        scannerSkipDays: saved.scannerSkipDays,
+        llmPromptTemplate: saved.llmPromptTemplate
+      },
+      publicSearchUrls: {
+        gemini: llmCrawler?.GEMINI_PUBLIC_SEARCH_URL || 'https://gemini.google.com/app',
+        chatgpt: llmCrawler?.CHATGPT_PUBLIC_SEARCH_URL || 'https://chatgpt.com/'
+      }
+    });
+  } catch (err) {
+    console.error('Error saving LLM settings:', err);
+    res.status(500).json({ error: 'Failed to save LLM settings' });
+  }
+});
+
+// POST /api/admin/llm-test-connection - Live connection and credential verification
+app.post('/api/admin/llm-test-connection', requirePermission('admin:portal'), async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { provider = 'gemini', model, apiKey } = req.body || {};
+    const settings = db.getSystemSettings();
+    const effectiveProvider = (provider || settings.llmProvider || 'gemini').toLowerCase();
+    const effectiveModel = model || (effectiveProvider === 'chatgpt' ? (settings.openaiModel || 'gpt-4o-mini') : (settings.geminiModel || 'gemini-3.6-flash'));
+
+    let keyToUse = apiKey && typeof apiKey === 'string' && !apiKey.includes('••••') && apiKey.trim().length > 0
+      ? apiKey.trim()
+      : (effectiveProvider === 'chatgpt' ? (settings.openaiApiKey || process.env.OPENAI_API_KEY || '') : (settings.geminiApiKey || process.env.GEMINI_API_KEY || ''));
+
+    keyToUse = String(keyToUse || '').trim();
+
+    if (!keyToUse) {
+      return res.status(400).json({
+        success: false,
+        status: 400,
+        provider: effectiveProvider,
+        model: effectiveModel,
+        error: `No API key provided or configured for ${effectiveProvider === 'chatgpt' ? 'OpenAI ChatGPT' : 'Google Gemini'}. Please enter a valid API key.`,
+        latencyMs: Date.now() - startTime
+      });
     }
-    const updated = db.applyDateAnomalyFix(schoolId, proposedDates, req.user?.name || 'Admin Reviewer');
-    if (!updated) {
+
+    const testPrompt = `Respond with ONLY a JSON object: {"status": "ok", "provider": "${effectiveProvider}", "message": "Connection verified"}`;
+
+    let rawRes = null;
+    if (effectiveProvider === 'chatgpt') {
+      rawRes = await llmCrawler.makeJsonPost(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${keyToUse}`
+        },
+        {
+          model: effectiveModel,
+          messages: [
+            { role: 'system', content: 'You are an AI assistant. Respond strictly with a JSON object.' },
+            { role: 'user', content: testPrompt }
+          ],
+          response_format: { type: 'json_object' }
+        },
+        12000
+      );
+    } else {
+      rawRes = await llmCrawler.makeJsonPost(
+        `https://generativelanguage.googleapis.com/v1beta/models/${effectiveModel}:generateContent?key=${encodeURIComponent(keyToUse)}`,
+        { 'Content-Type': 'application/json' },
+        {
+          contents: [{ role: 'user', parts: [{ text: testPrompt }] }],
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
+        },
+        12000
+      );
+    }
+
+    const latencyMs = Date.now() - startTime;
+
+    if (rawRes && rawRes.ok) {
+      // Auto-save the verified working key directly into the database
+      if (apiKey && typeof apiKey === 'string' && !apiKey.includes('••••') && apiKey.trim().length > 0) {
+        if (effectiveProvider === 'chatgpt') {
+          db.saveAdminSettings({ openaiApiKey: apiKey.trim(), llmProvider: effectiveProvider, openaiModel: effectiveModel });
+        } else {
+          db.saveAdminSettings({ geminiApiKey: apiKey.trim(), llmProvider: effectiveProvider, geminiModel: effectiveModel });
+        }
+      }
+      res.json({
+        success: true,
+        status: rawRes.status,
+        provider: effectiveProvider,
+        model: effectiveModel,
+        latencyMs,
+        keySaved: Boolean(apiKey && !apiKey.includes('••••')),
+        rawResponse: rawRes.bodyText,
+        message: `Connection successful! ${effectiveProvider.toUpperCase()} (${effectiveModel}) responded in ${latencyMs}ms.`
+      });
+    } else {
+      const errMsg = rawRes?.json?.error?.message || rawRes?.bodyText || 'Provider connection error';
+      res.status(rawRes?.status >= 400 ? rawRes.status : 500).json({
+        success: false,
+        status: rawRes?.status || 500,
+        provider: effectiveProvider,
+        model: effectiveModel,
+        latencyMs,
+        rawResponse: rawRes?.bodyText || null,
+        error: `API returned HTTP ${rawRes?.status || 500}: ${errMsg}`
+      });
+    }
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      status: 500,
+      latencyMs: Date.now() - startTime,
+      error: err.message || 'Connection test failed'
+    });
+  }
+});
+
+// POST /api/admin/llm-render-prompt - Render prompt template with school placeholders
+app.post('/api/admin/llm-render-prompt', requirePermission('admin:portal'), (req, res) => {
+  try {
+    const { schoolId, promptTemplate, provider } = req.body || {};
+    let school = null;
+    if (schoolId) {
+      school = db.getSchoolById(schoolId);
+    }
+    if (!school) {
+      const all = db.getAllSchools();
+      school = all.find(s => s.name?.includes("Queen's College")) || all[0];
+    }
+    const rendered = llmCrawler ? llmCrawler.renderPrompt(promptTemplate, school) : '';
+    const geminiUrl = llmCrawler ? llmCrawler.getGeminiSearchUrl(school, rendered) : 'https://gemini.google.com/app';
+    const chatgptUrl = llmCrawler ? llmCrawler.getChatGPTSearchUrl(school, rendered) : 'https://chatgpt.com/';
+
+    res.json({
+      success: true,
+      schoolName: school?.name || 'Sample School',
+      schoolId: school?.id || 'sample_id',
+      renderedPrompt: rendered,
+      publicSearchUrls: {
+        gemini: 'https://gemini.google.com/app',
+        chatgpt: 'https://chatgpt.com/'
+      },
+      queryUrls: {
+        gemini: geminiUrl,
+        chatgpt: chatgptUrl,
+        active: (provider === 'chatgpt') ? chatgptUrl : geminiUrl
+      }
+    });
+  } catch (err) {
+    console.error('Error rendering LLM prompt:', err);
+    res.status(500).json({ error: 'Failed to render LLM prompt' });
+  }
+});
+
+// POST /api/admin/llm-live-search - Live search any typed school with Google Gemini / OpenAI ChatGPT
+app.post('/api/admin/llm-live-search', requirePermission('admin:portal'), async (req, res) => {
+  try {
+    const { schoolName, schoolId, provider, model, apiKey, promptTemplate, mockResponse, autoApply } = req.body || {};
+    
+    if (!schoolName && !schoolId) {
+      return res.status(400).json({ error: 'Please enter a school name or select a school.' });
+    }
+
+    if (!llmCrawler) {
+      return res.status(500).json({ error: 'LLM Crawler module not loaded' });
+    }
+
+    let targetSchool = null;
+    let matchedDbSchool = null;
+
+    if (schoolId) {
+      targetSchool = db.getSchoolById(schoolId);
+      matchedDbSchool = targetSchool;
+    }
+
+    if (!targetSchool && schoolName) {
+      const allSchools = db.getAllSchools();
+      const queryTrim = schoolName.trim().toLowerCase();
+      
+      // Try exact name or URN match
+      matchedDbSchool = allSchools.find(s => 
+        (s.name && s.name.toLowerCase() === queryTrim) || 
+        (s.urn && String(s.urn) === queryTrim)
+      );
+
+      // Try substring match if no exact match
+      if (!matchedDbSchool) {
+        matchedDbSchool = allSchools.find(s => 
+          s.name && s.name.toLowerCase().includes(queryTrim)
+        );
+      }
+
+      if (matchedDbSchool) {
+        targetSchool = {
+          name: matchedDbSchool.name,
+          region: matchedDbSchool.region || matchedDbSchool.la || 'Greater London / UK',
+          website: (matchedDbSchool.website && matchedDbSchool.website !== 'N/A' && matchedDbSchool.website !== 'null') ? matchedDbSchool.website : ''
+        };
+      } else {
+        targetSchool = {
+          name: schoolName.trim(),
+          region: 'UK',
+          website: ''
+        };
+      }
+    }
+
+    const crawlResult = await llmCrawler.crawlSchoolWithLLM(targetSchool, {
+      provider,
+      model,
+      apiKey,
+      promptTemplate,
+      mockResponse
+    });
+
+    let appliedRecord = null;
+    if (crawlResult.success && autoApply && matchedDbSchool?.id) {
+      appliedRecord = llmCrawler.applyLLMResultToSchool(matchedDbSchool.id, crawlResult, req.user?.name || 'Admin Live Search');
+    }
+
+    res.json({
+      success: crawlResult.success,
+      provider: crawlResult.provider,
+      model: crawlResult.model,
+      querySchool: targetSchool,
+      matchedDbSchool: matchedDbSchool ? { id: matchedDbSchool.id, name: matchedDbSchool.name, urn: matchedDbSchool.urn, postcode: matchedDbSchool.postcode } : null,
+      crawlResult,
+      data: crawlResult.data || null,
+      exactRequest: crawlResult.exactRequest || null,
+      exactResponse: crawlResult.exactResponse || null,
+      error: crawlResult.error || null,
+      message: crawlResult.message || null,
+      appliedRecord: appliedRecord?.updatedSchool || null,
+      publicSearchUrls: {
+        gemini: 'https://gemini.google.com/app',
+        chatgpt: 'https://chatgpt.com/'
+      },
+      queryUrl: crawlResult.queryUrl || (crawlResult.provider === 'chatgpt' ? 'https://chatgpt.com/' : 'https://gemini.google.com/app')
+    });
+  } catch (err) {
+    console.error('Error during LLM live search:', err);
+    res.status(500).json({ error: err.message || 'Failed to execute live LLM search' });
+  }
+});
+
+// POST /api/admin/llm-crawl-single - Run dedicated LLM crawler for a single school
+app.post('/api/admin/llm-crawl-single', requirePermission('admin:edit'), async (req, res) => {
+  try {
+    const { schoolId, provider, model, apiKey, promptTemplate, mockResponse } = req.body || {};
+    if (!schoolId) {
+      return res.status(400).json({ error: 'schoolId is required' });
+    }
+    const school = db.getSchoolById(schoolId);
+    if (!school) {
       return res.status(404).json({ error: 'School not found' });
     }
-    res.json({ success: true, message: `Date timeline corrected and verified for ${updated.name}`, school: updated });
+    if (!llmCrawler) {
+      return res.status(500).json({ error: 'LLM Crawler module not loaded' });
+    }
+
+    const crawlResult = await llmCrawler.crawlSchoolWithLLM(school, {
+      provider,
+      model,
+      apiKey,
+      promptTemplate,
+      mockResponse
+    });
+
+    if (!crawlResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: crawlResult.error,
+        message: crawlResult.message,
+        exactRequest: crawlResult.exactRequest,
+        exactResponse: crawlResult.exactResponse
+      });
+    }
+
+    const applyResult = llmCrawler.applyLLMResultToSchool(schoolId, crawlResult, req.user?.name || 'Admin LLM Crawler');
+    res.json({
+      success: true,
+      message: `Successfully verified and updated "${school.name}" via ${crawlResult.provider.toUpperCase()} AI intelligence.`,
+      crawlResult,
+      data: crawlResult.data,
+      exactRequest: crawlResult.exactRequest,
+      exactResponse: crawlResult.exactResponse,
+      updatedSchool: applyResult.updatedSchool
+    });
   } catch (err) {
-    console.error('Error applying date fix:', err);
-    res.status(500).json({ error: 'Failed to apply date anomaly fix' });
+    console.error('Error in single LLM crawl:', err);
+    res.status(500).json({ error: err.message || 'Failed to crawl school with LLM' });
   }
 });
 
-// POST /api/admin/apply-all-date-fixes - Apply recommended date fixes in bulk across all anomaly schools
-app.post('/api/admin/apply-all-date-fixes', requirePermission('admin:edit'), (req, res) => {
+// ----------------------------------------------------
+// Web Crawler, Background Scanner & Admissions Verifier Endpoints
+// ----------------------------------------------------
+
+let backgroundScannerJob = {
+  isRunning: false,
+  jobId: null,
+  priorityCategory: 'ALL',
+  totalQueued: 0,
+  scannedCount: 0,
+  currentSchool: null,
+  isDelaying: false,
+  delayRemainingSeconds: 0,
+  startedAt: null,
+  completedAt: null,
+  stats: {
+    totalScanned: 0,
+    verifiedCount: 0,
+    anomaliesCount: 0,
+    missingWebsitesCount: 0,
+    dataMissingCount: 0,
+    stuckCount: 0
+  },
+  recentResults: [],
+  error: null
+};
+
+async function runBackgroundBatchScan(schoolsToScan, jobId, concurrency = 1, scanOptions = {}) {
+  let index = 0;
+  const activeWorkers = [];
+
+  // Strictly enforce single-worker sequential execution (1 query at a time)
+  const workerCount = 1;
+
+  async function worker() {
+    while (index < schoolsToScan.length) {
+      if (!backgroundScannerJob.isRunning || backgroundScannerJob.jobId !== jobId) {
+        break; // Stop/cancel requested
+      }
+      const currentIdx = index++;
+      const school = schoolsToScan[currentIdx];
+      if (!school) break;
+
+      backgroundScannerJob.currentSchool = school.name;
+      backgroundScannerJob.isDelaying = false;
+      backgroundScannerJob.delayRemainingSeconds = 0;
+
+      const llmSettings = db ? db.getSystemSettings() : {};
+      const provider = (llmSettings.llmProvider || 'gemini').toLowerCase();
+      const model = provider === 'chatgpt' ? (llmSettings.openaiModel || 'gpt-4o-mini') : (llmSettings.geminiModel || 'gemini-3.6-flash');
+      const promptTemplate = llmSettings.llmPromptTemplate || (llmCrawler ? llmCrawler.DEFAULT_LLM_PROMPT_TEMPLATE : '');
+      const promptText = llmCrawler ? llmCrawler.renderPrompt(promptTemplate, school) : '';
+      const endpoint = provider === 'chatgpt' ? 'https://api.openai.com/v1/chat/completions' : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+      backgroundScannerJob.latestRawInteraction = {
+        schoolId: school.id,
+        schoolName: school.name,
+        provider,
+        model,
+        isFetching: true,
+        exactRequest: {
+          provider,
+          model,
+          endpoint,
+          promptText,
+          schoolInput: {
+            schoolName: school.name,
+            region: school.region || school.la,
+            postcode: school.postcode,
+            website: school.website
+          },
+          payload: provider === 'chatgpt' ? {
+            model,
+            messages: [
+              { role: 'system', content: 'You are an expert UK School Admissions Data Verifier. Respond strictly with a JSON object matching the requested schema.' },
+              { role: 'user', content: promptText }
+            ],
+            response_format: { type: 'json_object' }
+          } : {
+            contents: [{ role: 'user', parts: [{ text: promptText }] }],
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
+          },
+          timestamp: new Date().toISOString()
+        },
+        exactResponse: null,
+        timestamp: new Date().toISOString()
+      };
+
+      try {
+        const scanResult = await scannerVerifier.auditAndVerifySchool(school, {
+          timeout: 15000,
+          maxCrawlTimeoutMs: 180000,
+          forceRerun: scanOptions.forceRerun,
+          force: scanOptions.force
+        });
+        db.saveSchoolVerificationResult(school.id, scanResult);
+
+        backgroundScannerJob.scannedCount++;
+        backgroundScannerJob.stats.totalScanned++;
+
+        if (scanResult.tags && (scanResult.tags.includes('auto_verified') || scanResult.tags.includes('llm_enriched'))) {
+          backgroundScannerJob.stats.verifiedCount++;
+        }
+        if (scanResult.anomalies && scanResult.anomalies.length > 0) {
+          backgroundScannerJob.stats.anomaliesCount++;
+        }
+        if (scanResult.tags && (scanResult.tags.includes('missing_website') || scanResult.tags.includes('dead_website'))) {
+          backgroundScannerJob.stats.missingWebsitesCount++;
+        }
+        if (scanResult.tags && scanResult.tags.includes('auto_verification_data_missing')) {
+          backgroundScannerJob.stats.dataMissingCount++;
+        }
+        if (scanResult.tags && scanResult.tags.includes('crawl_stuck')) {
+          backgroundScannerJob.stats.stuckCount = (backgroundScannerJob.stats.stuckCount || 0) + 1;
+        }
+
+        const respProvider = scanResult.llmVerification?.provider || (scanResult.tags?.includes('chatgpt_crawl') ? 'chatgpt' : provider);
+        const respModel = scanResult.llmVerification?.model || model;
+
+        const fullSchool = (db ? db.getSchoolById(school.id) : null) || scanResult.updatedSchool || school;
+        const previousSchool = scanResult.previousSchool || school;
+
+        const rawInteraction = {
+          schoolId: school.id,
+          schoolName: school.name,
+          provider: respProvider,
+          model: respModel,
+          isFetching: false,
+          status: scanResult.status,
+          exactRequest: scanResult.exactRequest || scanResult.llmVerification?.exactRequest || backgroundScannerJob.latestRawInteraction?.exactRequest || null,
+          exactResponse: scanResult.exactResponse || scanResult.llmVerification?.exactResponse || null,
+          timestamp: new Date().toISOString()
+        };
+        backgroundScannerJob.latestRawInteraction = rawInteraction;
+
+        backgroundScannerJob.recentResults.unshift({
+          schoolId: school.id,
+          schoolName: school.name,
+          schoolType: fullSchool.schoolType || school.schoolType,
+          phase: fullSchool.phase || school.phase,
+          gender: fullSchool.gender || school.gender,
+          ageRange: fullSchool.ageRange || school.ageRange,
+          ofstedRating: fullSchool.ofstedRating || school.ofstedRating,
+          website: fullSchool.website || school.website,
+          phone: fullSchool.phone || school.phone,
+          email: fullSchool.email || school.email,
+          address: fullSchool.address || school.address,
+          postcode: fullSchool.postcode || school.postcode,
+          la: fullSchool.la || school.la,
+          region: fullSchool.region || school.region || school.la,
+          entranceExamType: fullSchool.entranceExamType || school.entranceExamType,
+          entranceExamDates: fullSchool.entranceExamDates || school.entranceExamDates,
+          feesTermly: fullSchool.feesTermly || school.feesTermly,
+          status: scanResult.status,
+          tags: scanResult.tags || [],
+          qualityScore: scanResult.confidenceScore || 70,
+          anomaliesCount: (scanResult.anomalies || []).length,
+          verifiedAt: scanResult.verifiedAt || new Date().toISOString(),
+          provider: respProvider,
+          model: respModel,
+          diffs: scanResult.diffs || [],
+          fullSchoolData: fullSchool,
+          previousSchoolData: previousSchool,
+          exactRequest: scanResult.exactRequest || scanResult.llmVerification?.exactRequest || null,
+          exactResponse: scanResult.exactResponse || scanResult.llmVerification?.exactResponse || null,
+          extractedData: scanResult.llmVerification?.data || (scanResult.proposedDates && Object.keys(scanResult.proposedDates).length > 0 ? {
+            name: school.name,
+            entranceExamDates: scanResult.proposedDates || {},
+            website: scanResult.website || scanResult.proposedWebsite || school.website,
+            entranceExamType: scanResult.llmVerification?.data?.entranceExamType || school.entranceExamType,
+            gender: scanResult.llmVerification?.data?.gender || school.gender,
+            phone: scanResult.llmVerification?.data?.phone || school.phone,
+            email: scanResult.llmVerification?.data?.email || school.email,
+            confidenceScore: scanResult.confidenceScore || 95
+          } : null),
+          auditLogId: scanResult.auditLogId || null,
+          batchId: scanResult.batchId || null,
+          skipped: scanResult.skipped === true,
+          skipReason: scanResult.skipReason || null,
+          skipTag: scanResult.skipTag || null
+        });
+
+        if (backgroundScannerJob.recentResults.length > 60) {
+          backgroundScannerJob.recentResults.pop();
+        }
+      } catch (scanErr) {
+        console.warn(`[Background Scanner] Error scanning ${school.name}:`, scanErr.message);
+        backgroundScannerJob.scannedCount++;
+      }
+
+      // If more schools remain, pause between sequential LLM queries using configured sleep delay (default 20s)
+      if (index < schoolsToScan.length && backgroundScannerJob.isRunning && backgroundScannerJob.jobId === jobId) {
+        const configuredDelaySec = db?.getAdminSettings ? (db.getAdminSettings()?.scannerDelaySeconds ?? 20) : (db?.getSystemSetting ? (db.getSystemSetting('scannerDelaySeconds', 20) || 20) : 20);
+        const delaySec = Math.max(0, parseInt(configuredDelaySec, 10) || 0);
+
+        if (delaySec > 0) {
+          backgroundScannerJob.isDelaying = true;
+          backgroundScannerJob.delayRemainingSeconds = delaySec;
+          const delayMs = delaySec * 1000;
+          const delayStart = Date.now();
+
+          while (Date.now() - delayStart < delayMs) {
+            if (!backgroundScannerJob.isRunning || backgroundScannerJob.jobId !== jobId) {
+              break;
+            }
+            const elapsed = Date.now() - delayStart;
+            backgroundScannerJob.delayRemainingSeconds = Math.max(0, Math.ceil((delayMs - elapsed) / 1000));
+            await new Promise(r => setTimeout(r, 200));
+          }
+
+          backgroundScannerJob.isDelaying = false;
+          backgroundScannerJob.delayRemainingSeconds = 0;
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < Math.min(workerCount, schoolsToScan.length); i++) {
+    activeWorkers.push(worker());
+  }
+
+  await Promise.all(activeWorkers);
+
+  if (backgroundScannerJob.jobId === jobId) {
+    backgroundScannerJob.isRunning = false;
+    backgroundScannerJob.completedAt = new Date().toISOString();
+    backgroundScannerJob.currentSchool = null;
+    backgroundScannerJob.isDelaying = false;
+    backgroundScannerJob.delayRemainingSeconds = 0;
+  }
+}
+
+// POST /api/admin/scanner/verify-school/:id - Immediate live scan and audit of a single school
+app.post('/api/admin/scanner/verify-school/:id', requirePermission('admin:portal'), async (req, res) => {
   try {
-    const updatedSchools = db.applyAllDateAnomalyFixes(req.user?.name || 'Admin Auto-Fix');
-    res.json({ success: true, message: `Applied recommended date fixes across ${updatedSchools.length} schools`, count: updatedSchools.length });
+    const school = db.getSchoolById(req.params.id);
+    if (!school) {
+      return res.status(404).json({ error: 'School not found' });
+    }
+    const { forceRerun, force } = req.body || {};
+    const scanResult = await scannerVerifier.auditAndVerifySchool(school, {
+      timeout: 15000,
+      forceRerun: Boolean(forceRerun || force),
+      force: Boolean(forceRerun || force)
+    });
+    const updated = db.saveSchoolVerificationResult(school.id, scanResult);
+
+    const provider = scanResult.llmVerification?.provider || (scanResult.tags?.includes('chatgpt_crawl') ? 'chatgpt' : 'gemini');
+    const model = scanResult.llmVerification?.model || 'gemini-3.6-flash';
+    const fullSchool = updated || db.getSchoolById(school.id) || school;
+
+    const rawInteraction = {
+      schoolId: school.id,
+      schoolName: school.name,
+      provider,
+      model,
+      exactRequest: scanResult.exactRequest || scanResult.llmVerification?.exactRequest || null,
+      exactResponse: scanResult.exactResponse || scanResult.llmVerification?.exactResponse || null,
+      timestamp: new Date().toISOString()
+    };
+    backgroundScannerJob.latestRawInteraction = rawInteraction;
+
+    backgroundScannerJob.recentResults.unshift({
+      schoolId: school.id,
+      schoolName: school.name,
+      schoolType: fullSchool.schoolType || school.schoolType,
+      phase: fullSchool.phase || school.phase,
+      gender: fullSchool.gender || school.gender,
+      ageRange: fullSchool.ageRange || school.ageRange,
+      ofstedRating: fullSchool.ofstedRating || school.ofstedRating,
+      website: fullSchool.website || school.website,
+      phone: fullSchool.phone || school.phone,
+      email: fullSchool.email || school.email,
+      address: fullSchool.address || school.address,
+      postcode: fullSchool.postcode || school.postcode,
+      la: fullSchool.la || school.la,
+      region: fullSchool.region || school.region || school.la,
+      entranceExamType: fullSchool.entranceExamType || school.entranceExamType,
+      entranceExamDates: fullSchool.entranceExamDates || school.entranceExamDates,
+      feesTermly: fullSchool.feesTermly || school.feesTermly,
+      status: scanResult.status,
+      tags: scanResult.tags || [],
+      qualityScore: scanResult.confidenceScore || 70,
+      anomaliesCount: (scanResult.anomalies || []).length,
+      verifiedAt: scanResult.verifiedAt || new Date().toISOString(),
+      provider,
+      model,
+      diffs: scanResult.diffs || [],
+      fullSchoolData: fullSchool,
+      previousSchoolData: school,
+      exactRequest: scanResult.exactRequest || scanResult.llmVerification?.exactRequest || null,
+      exactResponse: scanResult.exactResponse || scanResult.llmVerification?.exactResponse || null,
+      auditLogId: scanResult.auditLogId || null,
+      batchId: scanResult.batchId || null,
+      skipped: scanResult.skipped === true,
+      skipReason: scanResult.skipReason || null,
+      skipTag: scanResult.skipTag || null
+    });
+
+    if (backgroundScannerJob.recentResults.length > 60) {
+      backgroundScannerJob.recentResults.pop();
+    }
+
+    res.json({ success: true, scanResult, school: updated, latestRawInteraction: rawInteraction });
   } catch (err) {
-    console.error('Error applying all date fixes:', err);
-    res.status(500).json({ error: 'Failed to apply all date fixes' });
+    console.error('Error during scanner verification of single school:', err);
+    res.status(500).json({ error: 'Failed to complete web verification scan' });
   }
 });
 
-// POST /api/admin/sync-date-confidence - Recalculate and synchronize confidence scores based on date quality
-app.post('/api/admin/sync-date-confidence', requirePermission('admin:portal'), (req, res) => {
+// POST /api/admin/scanner/batch-scan & start-batch-scan - Launch asynchronous background verification batch
+app.post(['/api/admin/scanner/batch-scan', '/api/admin/scanner/start-batch-scan'], requirePermission('admin:portal'), (req, res) => {
   try {
-    const count = db.autoSyncAllDateConfidenceScores();
-    res.json({ success: true, message: `Synchronized date quality confidence scores across ${count} schools`, count });
+    const { priorityCategory = 'LONDON_INDEPENDENT', limit = 25, concurrency = 4, skipDays, forceRerun, force, schoolId } = req.body || {};
+
+    if (backgroundScannerJob.isRunning) {
+      return res.json({
+        success: true,
+        alreadyRunning: true,
+        message: `Scanner is already running (${backgroundScannerJob.scannedCount}/${backgroundScannerJob.totalQueued})`,
+        state: backgroundScannerJob
+      });
+    }
+
+    let schoolsToScan = [];
+    if (schoolId) {
+      const targetSchool = db.getSchoolById(schoolId);
+      if (targetSchool) {
+        schoolsToScan = [targetSchool];
+      }
+    } else {
+      schoolsToScan = db.getSchoolsForScannerBatch(priorityCategory, parseInt(limit, 10) || 25, skipDays !== undefined ? skipDays : null);
+    }
+    const jobId = 'scan-' + Date.now();
+
+    backgroundScannerJob = {
+      isRunning: true,
+      jobId,
+      priorityCategory,
+      totalQueued: schoolsToScan.length,
+      scannedCount: 0,
+      currentSchool: schoolsToScan[0]?.name || null,
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      stats: {
+        totalScanned: 0,
+        verifiedCount: 0,
+        anomaliesCount: 0,
+        missingWebsitesCount: 0,
+        dataMissingCount: 0,
+        stuckCount: 0
+      },
+      recentResults: [],
+      error: null
+    };
+
+    // Run asynchronously in the background sequentially (1 at a time)
+    runBackgroundBatchScan(schoolsToScan, jobId, 1, {
+      forceRerun: Boolean(forceRerun || force),
+      force: Boolean(forceRerun || force)
+    }).catch(err => {
+      console.error('[Background Scanner Fatal Error]:', err);
+      backgroundScannerJob.isRunning = false;
+      backgroundScannerJob.error = err.message;
+    });
+
+    res.json({
+      success: true,
+      started: true,
+      message: `Started background web verification crawler for ${schoolsToScan.length} schools (${priorityCategory})`,
+      state: backgroundScannerJob
+    });
   } catch (err) {
-    console.error('Error syncing date confidence:', err);
-    res.status(500).json({ error: 'Failed to synchronize date confidence scores' });
+    console.error('Error starting background scanner:', err);
+    res.status(500).json({ error: 'Failed to start background scanner' });
+  }
+});
+
+// GET /api/admin/scanner/status - Polling endpoint for live scanner progress
+app.get('/api/admin/scanner/status', requirePermission('admin:portal'), (req, res) => {
+  if (!backgroundScannerJob.latestRawInteraction) {
+    if (backgroundScannerJob.recentResults && backgroundScannerJob.recentResults.length > 0) {
+      const top = backgroundScannerJob.recentResults.find(r => r.exactRequest || r.exactResponse) || backgroundScannerJob.recentResults[0];
+      backgroundScannerJob.latestRawInteraction = {
+        schoolId: top.schoolId,
+        schoolName: top.schoolName,
+        provider: top.provider || 'gemini',
+        model: top.model || 'gemini-3.6-flash',
+        exactRequest: top.exactRequest || null,
+        exactResponse: top.exactResponse || null,
+        timestamp: top.verifiedAt || new Date().toISOString()
+      };
+    } else if (db) {
+      try {
+        const latestLog = db.getDb()?.prepare(`SELECT * FROM admin_audit_logs WHERE actionType = 'LLM_CRAWL_APPLY' ORDER BY id DESC LIMIT 1`).get();
+        if (latestLog && latestLog.newState) {
+          const parsed = typeof latestLog.newState === 'string' ? JSON.parse(latestLog.newState) : latestLog.newState;
+          backgroundScannerJob.latestRawInteraction = {
+            schoolId: latestLog.schoolId,
+            schoolName: latestLog.schoolName || parsed.name || 'School',
+            provider: parsed.provider || 'gemini',
+            model: parsed.model || 'gemini-3.6-flash',
+            exactRequest: parsed.exactRequest || {
+              provider: parsed.provider || 'gemini',
+              model: parsed.model || 'gemini-3.6-flash',
+              schoolInput: { schoolName: latestLog.schoolName || parsed.name || 'School' }
+            },
+            exactResponse: parsed.exactResponse || {
+              status: 200,
+              statusText: '200 OK (Audited & Applied to DB)',
+              parsedJson: parsed
+            },
+            timestamp: latestLog.appliedAt
+          };
+        }
+      } catch (e) {}
+    }
+  }
+
+  res.json({
+    success: true,
+    state: backgroundScannerJob
+  });
+});
+
+// POST /api/admin/scanner/stop - Abort running background scan
+app.post('/api/admin/scanner/stop', requirePermission('admin:portal'), (req, res) => {
+  backgroundScannerJob.isRunning = false;
+  backgroundScannerJob.completedAt = new Date().toISOString();
+  backgroundScannerJob.currentSchool = null;
+  res.json({
+    success: true,
+    message: 'Background scan stopped',
+    state: backgroundScannerJob
+  });
+});
+
+// POST /api/admin/scanner/clear-feed - Clear the recent live feed
+app.post('/api/admin/scanner/clear-feed', requirePermission('admin:portal'), (req, res) => {
+  backgroundScannerJob.recentResults = [];
+  res.json({
+    success: true,
+    message: 'Enrichment feed cleared',
+    state: backgroundScannerJob
+  });
+});
+
+// GET /api/admin/enrichment/audit-history/:schoolId - Retrieve full version & change history for a school
+app.get('/api/admin/enrichment/audit-history/:schoolId', requirePermission('admin:portal'), (req, res) => {
+  try {
+    const history = db.getSchoolAuditHistory(req.params.schoolId);
+    const school = db.getSchoolById(req.params.schoolId);
+    res.json({
+      success: true,
+      schoolId: req.params.schoolId,
+      schoolName: school?.name || 'School',
+      currentSchool: school,
+      history
+    });
+  } catch (err) {
+    console.error('Error fetching school audit history:', err);
+    res.status(500).json({ error: 'Failed to fetch school audit history' });
+  }
+});
+
+// POST /api/admin/enrichment/rollback-school - Manually rollback a specific school to any historical audit version
+app.post('/api/admin/enrichment/rollback-school', requirePermission('admin:portal'), (req, res) => {
+  try {
+    const { schoolId, auditLogId } = req.body || {};
+    if (!schoolId || !auditLogId) {
+      return res.status(400).json({ error: 'schoolId and auditLogId are required for manual version rollback' });
+    }
+
+    const adminUser = req.adminUser || req.user?.username || req.user?.email || 'Admin User';
+    const rollbackResult = db.rollbackSchoolToAuditVersion(schoolId, parseInt(auditLogId, 10), adminUser);
+
+    res.json({
+      success: true,
+      message: rollbackResult.message,
+      rollbackResult
+    });
+  } catch (err) {
+    console.error('Error executing manual version rollback:', err);
+    res.status(500).json({ error: err.message || 'Failed to rollback school version' });
+  }
+});
+
+// GET /api/admin/scanner/summary - Retrieve unified verification and anomaly summary metrics
+app.get('/api/admin/scanner/summary', requirePermission('admin:portal'), (req, res) => {
+  try {
+    const data = db.getAllDateAnomalies();
+    res.json({
+      success: true,
+      stats: data.stats,
+      missingWebsitesCount: (data.missingWebsites || []).length,
+      dataMissingCount: (data.dataMissing || []).length,
+      verifiedCount: (data.autoVerified || []).length,
+      totalAnomalies: (data.anomalies || []).length
+    });
+  } catch (err) {
+    console.error('Error fetching scanner summary:', err);
+    res.status(500).json({ error: 'Failed to fetch scanner summary' });
+  }
+});
+
+// POST /api/admin/scanner/apply-fixes - Apply verified fixes for a single school
+app.post('/api/admin/scanner/apply-fixes', requirePermission('admin:edit'), (req, res) => {
+  try {
+    const { schoolId, fixes } = req.body;
+    if (!schoolId) {
+      return res.status(400).json({ error: 'schoolId is required' });
+    }
+    const updated = db.applyScannerFixes(schoolId, fixes, req.user?.name || 'Admin Scanner Fix');
+    res.json({ success: true, message: 'Applied verified changes', school: updated });
+  } catch (err) {
+    console.error('Error applying scanner fixes:', err);
+    res.status(500).json({ error: 'Failed to apply verified changes' });
+  }
+});
+
+// POST /api/admin/scanner/apply-all-fixes - Apply verified fixes across all anomaly schools
+app.post('/api/admin/scanner/apply-all-fixes', requirePermission('admin:edit'), (req, res) => {
+  try {
+    const updated = db.applyAllScannerFixes(req.user?.name || 'Admin Auto-Fix');
+    res.json({ success: true, message: `Applied verified fixes across ${updated.length} schools`, count: updated.length });
+  } catch (err) {
+    console.error('Error applying all scanner fixes:', err);
+    res.status(500).json({ error: 'Failed to apply all verified fixes' });
   }
 });
 
@@ -1753,8 +2619,12 @@ app.post('/api/recommendations', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`London High Schools DB Server running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`London High Schools DB Server running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;
 
 
