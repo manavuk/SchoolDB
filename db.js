@@ -299,11 +299,14 @@ function initTables() {
       stage_one_format_and_subjects TEXT,
       stage_two_format_and_subjects TEXT,
       registrationFee TEXT,
+      national_rank_england INTEGER,
+      gcse_rank_england INTEGER,
+      a_level_rank_england INTEGER,
       extra_json TEXT
     );
   `);
 
-  // Migration safeguard: add rawSchoolType, verification and new AI intelligence columns if missing
+  // Migration safeguard: add rawSchoolType, verification, rankings and new AI intelligence columns if missing
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN rawSchoolType TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN verification_status TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN verification_tags TEXT;`); } catch (e) {}
@@ -316,6 +319,9 @@ function initTables() {
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN second_stage_exam_required TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN stage_one_format_and_subjects TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN stage_two_format_and_subjects TEXT;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN national_rank_england INTEGER;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN gcse_rank_england INTEGER;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN a_level_rank_england INTEGER;`); } catch (e) {}
 
   // Index for fast search, filtering and verification audits
   sqlite.exec(`
@@ -326,6 +332,7 @@ function initTables() {
     CREATE INDEX IF NOT EXISTS idx_schools_ofstedRating ON schools(ofstedRating);
     CREATE INDEX IF NOT EXISTS idx_schools_postcode ON schools(postcode);
     CREATE INDEX IF NOT EXISTS idx_schools_verification_status ON schools(verification_status);
+    CREATE INDEX IF NOT EXISTS idx_schools_national_rank ON schools(national_rank_england);
   `);
 
   // 2. Users table
@@ -602,6 +609,9 @@ function recordToSchool(row) {
     second_stage_exam_required: row.second_stage_exam_required || '',
     stage_one_format_and_subjects: row.stage_one_format_and_subjects || '',
     stage_two_format_and_subjects: row.stage_two_format_and_subjects || '',
+    national_rank_england: (row.national_rank_england !== null && row.national_rank_england !== undefined && !isNaN(parseInt(row.national_rank_england, 10))) ? parseInt(row.national_rank_england, 10) : null,
+    gcse_rank_england: (row.gcse_rank_england !== null && row.gcse_rank_england !== undefined && !isNaN(parseInt(row.gcse_rank_england, 10))) ? parseInt(row.gcse_rank_england, 10) : null,
+    a_level_rank_england: (row.a_level_rank_england !== null && row.a_level_rank_england !== undefined && !isNaN(parseInt(row.a_level_rank_england, 10))) ? parseInt(row.a_level_rank_england, 10) : null,
     ...extra
   };
 
@@ -641,7 +651,8 @@ function schoolToParams(s) {
     'officialDataSource', 'compareSchoolPerformanceUrl', '_csv',
     'pillaiDetails', 'kpsDetails', '_potentialDuplicateOf', '_dedupNote',
     'verification_status', 'verification_tags', 'verification_report', 'verified_at', 'confidence_score',
-    'feesTermly', 'registrationFee', 'sourceUrl', 'second_stage_exam_required', 'stage_one_format_and_subjects', 'stage_two_format_and_subjects'
+    'feesTermly', 'registrationFee', 'sourceUrl', 'second_stage_exam_required', 'stage_one_format_and_subjects', 'stage_two_format_and_subjects',
+    'national_rank_england', 'gcse_rank_england', 'a_level_rank_england'
   ]);
 
   const extra = {};
@@ -691,6 +702,9 @@ function schoolToParams(s) {
     second_stage_exam_required: s.second_stage_exam_required || null,
     stage_one_format_and_subjects: s.stage_one_format_and_subjects || null,
     stage_two_format_and_subjects: s.stage_two_format_and_subjects || null,
+    national_rank_england: (s.national_rank_england !== null && s.national_rank_england !== undefined && s.national_rank_england !== '' && !isNaN(parseInt(s.national_rank_england, 10))) ? parseInt(s.national_rank_england, 10) : null,
+    gcse_rank_england: (s.gcse_rank_england !== null && s.gcse_rank_england !== undefined && s.gcse_rank_england !== '' && !isNaN(parseInt(s.gcse_rank_england, 10))) ? parseInt(s.gcse_rank_england, 10) : null,
+    a_level_rank_england: (s.a_level_rank_england !== null && s.a_level_rank_england !== undefined && s.a_level_rank_england !== '' && !isNaN(parseInt(s.a_level_rank_england, 10))) ? parseInt(s.a_level_rank_england, 10) : null,
     official: s.official ? 1 : 0,
     hot: s.hot ? 1 : 0,
     officialDataSource: s.officialDataSource || null,
@@ -730,7 +744,7 @@ function insertSchool(school) {
       phone, email, description, official, hot, officialDataSource,
       compareSchoolPerformanceUrl, raw_csv, pillaiDetails, kpsDetails,
       potentialDuplicateOf, dedupNote, feesTermly, registrationFee, sourceUrl, second_stage_exam_required,
-      stage_one_format_and_subjects, stage_two_format_and_subjects, extra_json
+      stage_one_format_and_subjects, stage_two_format_and_subjects, national_rank_england, gcse_rank_england, a_level_rank_england, extra_json
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
@@ -738,7 +752,7 @@ function insertSchool(school) {
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
-      ?, ?, ?
+      ?, ?, ?, ?, ?, ?
     )
   `);
   stmt.run(
@@ -748,7 +762,7 @@ function insertSchool(school) {
     p.phone, p.email, p.description, p.official, p.hot, p.officialDataSource,
     p.compareSchoolPerformanceUrl, p.raw_csv, p.pillaiDetails, p.kpsDetails,
     p.potentialDuplicateOf, p.dedupNote, p.feesTermly, p.registrationFee, p.sourceUrl, p.second_stage_exam_required,
-    p.stage_one_format_and_subjects, p.stage_two_format_and_subjects, p.extra_json
+    p.stage_one_format_and_subjects, p.stage_two_format_and_subjects, p.national_rank_england, p.gcse_rank_england, p.a_level_rank_england, p.extra_json
   );
   return getSchoolById(p.id);
 }
@@ -803,14 +817,14 @@ function insertSchoolsBulk(schoolsArray) {
         entranceExamType, entranceExamDates, gcseSubjects, admissionsPolicy, website,
         phone, email, description, official, hot, officialDataSource,
         compareSchoolPerformanceUrl, raw_csv, pillaiDetails, kpsDetails,
-        potentialDuplicateOf, dedupNote, extra_json
+        potentialDuplicateOf, dedupNote, national_rank_england, gcse_rank_england, a_level_rank_england, extra_json
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?, ?
+        ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -822,7 +836,7 @@ function insertSchoolsBulk(schoolsArray) {
         p.entranceExamType, p.entranceExamDates, p.gcseSubjects, p.admissionsPolicy, p.website,
         p.phone, p.email, p.description, p.official, p.hot, p.officialDataSource,
         p.compareSchoolPerformanceUrl, p.raw_csv, p.pillaiDetails, p.kpsDetails,
-        p.potentialDuplicateOf, p.dedupNote, p.extra_json
+        p.potentialDuplicateOf, p.dedupNote, p.national_rank_england, p.gcse_rank_england, p.a_level_rank_england, p.extra_json
       );
     }
     sqlite.exec('COMMIT;');
@@ -1113,6 +1127,10 @@ Instructions:
 5. Identify gender policy ("Boys", "Girls", or "Mixed").
 6. Extract admissions phone number, email, full street address, postcode, and official verified website URL.
 7. For Independent schools, extract termly tuition fees (e.g. "£7,500") and 11+ registration fee (e.g. "£150"); set null if State/Grammar/Free.
+8. Extract official published school rankings in England (e.g. Sunday Times Parent Power, DfE national rankings):
+   - 'national_rank_england': Overall national ranking in England (integer, e.g. 45; set null if not available / not published).
+   - 'gcse_rank_england': School ranking in England based specifically on GCSE performance (integer, e.g. 38; set null if not available).
+   - 'a_level_rank_england': School ranking in England based specifically on A-level performance (integer, e.g. 52; set null if not available).
 
 Output ONLY a valid JSON object matching this schema with no markdown formatting, code blocks, or preamble:
 
@@ -1150,6 +1168,9 @@ Output ONLY a valid JSON object matching this schema with no markdown formatting
   },
   "feesTermly": "£7,500",
   "registrationFee": "£150",
+  "national_rank_england": 45,
+  "gcse_rank_england": 38,
+  "a_level_rank_england": 52,
   "confidenceScore": 95,
   "sourceUrl": "https://..."
 }`;

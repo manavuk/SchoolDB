@@ -53,6 +53,9 @@ try {
   assert(renderedPrompt.includes('admissionsOverview'), 'Must contain admissionsOverview schema');
   assert(renderedPrompt.includes('registrationFee'), 'Must contain registrationFee schema');
   assert(renderedPrompt.includes('stage_one_examDate'), 'Must contain stage_one_examDate schema');
+  assert(renderedPrompt.includes('national_rank_england'), 'Must contain national_rank_england schema');
+  assert(renderedPrompt.includes('gcse_rank_england'), 'Must contain gcse_rank_england schema');
+  assert(renderedPrompt.includes('a_level_rank_england'), 'Must contain a_level_rank_england schema');
   console.log('  ✓ renderPrompt accurately populates all school placeholders with canonical template.');
 
   console.log('\n🎉 ALL CANONICAL PROMPT TEMPLATE TESTS PASSED SUCCESSFULLY!');

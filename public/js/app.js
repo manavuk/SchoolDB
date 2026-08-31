@@ -3436,6 +3436,9 @@ async function openSchoolDetail(id) {
           <i class="fa-solid fa-chart-line"></i> Academic Metrics &amp; GCSE Performance
         </h4>
         <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+          ${renderWidget('national_rank_england', 'National Rank in England', school.national_rank_england ? `#${school.national_rank_england} in England` : null)}
+          ${renderWidget('gcse_rank_england', 'GCSE Rank in England', school.gcse_rank_england ? `#${school.gcse_rank_england} in England` : null)}
+          ${renderWidget('a_level_rank_england', 'A-Level Rank in England', school.a_level_rank_england ? `#${school.a_level_rank_england} in England` : null)}
           ${renderWidget('pupilCount', 'Total Pupil Roll', school.pupilCount ? `${school.pupilCount.toLocaleString()} pupils` : 'N/A')}
           ${renderWidget('ageRange', 'Age Range', school.ageRange || '11 to 18')}
           ${renderWidget('gcseAttainment8', 'GCSE Attainment 8 Score', school.gcseAttainment8 !== null && school.gcseAttainment8 !== undefined && school.gcseAttainment8 !== '' ? school.gcseAttainment8 : 'N/A')}
@@ -7787,8 +7790,221 @@ async function initDataEnrichmentTab() {
   }
 
   setupScannerSchoolTypeahead();
+  await loadEnrichmentCategoryStats();
   await refreshEnrichmentStatus();
 }
+
+// Navigate to Directory View with pre-configured filters
+function navigateToFilteredDirectory(filters = {}) {
+  // 1. Reset all filter selects in Directory View sidebar
+  const filterInputs = [
+    'search-input', 'tag-select', 'region-select', 'la-select', 'hot-select',
+    'type-select', 'gender-select', 'ofsted-select', 'exam-select',
+    'second-stage-select', 'confidence-select', 'fee-select'
+  ];
+  filterInputs.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+
+  // 2. Apply requested filters
+  let filterDesc = [];
+  if (filters.tag) {
+    const tagEl = document.getElementById('tag-select');
+    if (tagEl) {
+      tagEl.value = filters.tag;
+      filterDesc.push(`Tag: ${filters.tag}`);
+    }
+  }
+  if (filters.type) {
+    const typeEl = document.getElementById('type-select');
+    if (typeEl) {
+      typeEl.value = filters.type;
+      filterDesc.push(`Type: ${filters.type}`);
+    }
+  }
+  if (filters.region) {
+    const regEl = document.getElementById('region-select');
+    if (regEl) {
+      regEl.value = filters.region;
+      filterDesc.push(`Region: ${filters.region}`);
+    }
+  }
+  if (filters.secondStage) {
+    const stageEl = document.getElementById('second-stage-select');
+    if (stageEl) {
+      stageEl.value = filters.secondStage;
+      filterDesc.push(`2nd Stage: ${filters.secondStage}`);
+    }
+  }
+  if (filters.fee) {
+    const feeEl = document.getElementById('fee-select');
+    if (feeEl) {
+      feeEl.value = filters.fee;
+      filterDesc.push(`Funding: ${filters.fee}`);
+    }
+  }
+  if (filters.search) {
+    const searchEl = document.getElementById('search-input');
+    if (searchEl) {
+      searchEl.value = filters.search;
+      filterDesc.push(`"${filters.search}"`);
+    }
+  }
+
+  // 3. Switch to directory subtab
+  switchAdminSubTab('directory');
+
+  // 4. Trigger school load with pre-filtered state
+  loadSchools();
+
+  if (typeof showToast === 'function') {
+    showToast(`Filtering Directory by ${filterDesc.join(', ') || 'Selected Category'}`, 'info');
+  }
+}
+window.navigateToFilteredDirectory = navigateToFilteredDirectory;
+
+// Load and render Enrichment Coverage by Category
+async function loadEnrichmentCategoryStats() {
+  const cardsGrid = document.getElementById('enrichment-category-cards-grid');
+  const attributeChips = document.getElementById('enrichment-attribute-chips');
+  const overallPill = document.getElementById('enrichment-overall-progress-pill');
+  const totalEnrichedBadge = document.getElementById('enrichment-total-enriched-badge');
+
+  if (!cardsGrid) return;
+
+  try {
+    const res = await fetch('/api/admin/enrichment/category-stats', {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+    if (!res.ok) return;
+    const { stats } = await res.json();
+    if (!stats) return;
+
+    const total = stats.total || 0;
+    const enrichedTotal = stats.enrichedTotal || 0;
+    const unscannedTotal = stats.unscannedTotal || 0;
+    const overallPct = total > 0 ? Math.round((enrichedTotal / total) * 100) : 0;
+
+    if (overallPill) {
+      overallPill.textContent = `Overall Coverage: ${overallPct}% (${enrichedTotal.toLocaleString()} / ${total.toLocaleString()})`;
+    }
+    if (totalEnrichedBadge) {
+      totalEnrichedBadge.textContent = `${enrichedTotal.toLocaleString()} Enriched`;
+    }
+
+    // Categories definition
+    const categories = [
+      {
+        id: 'grammar',
+        title: 'Selective Grammar Schools',
+        icon: 'fa-award',
+        color: '#d97706',
+        bg: '#fffbeb',
+        border: '#fde68a',
+        data: stats.byType?.Grammar || { total: 0, enriched: 0, unscanned: 0 },
+        filterType: 'Grammar'
+      },
+      {
+        id: 'independent',
+        title: 'Independent / Fee-Paying',
+        icon: 'fa-building-columns',
+        color: '#7c3aed',
+        bg: '#faf5ff',
+        border: '#e9d5ff',
+        data: stats.byType?.Independent || { total: 0, enriched: 0, unscanned: 0 },
+        filterType: 'Independent'
+      },
+      {
+        id: 'comprehensive',
+        title: 'State Comprehensive Schools',
+        icon: 'fa-school',
+        color: '#2563eb',
+        bg: '#eff6ff',
+        border: '#bfdbfe',
+        data: stats.byType?.Comprehensive || { total: 0, enriched: 0, unscanned: 0 },
+        filterType: 'Comprehensive'
+      },
+      {
+        id: 'london',
+        title: 'Greater London Region',
+        icon: 'fa-map-location-dot',
+        color: '#059669',
+        bg: '#ecfdf5',
+        border: '#a7f3d0',
+        data: stats.byRegion?.['Greater London'] || { total: 0, enriched: 0, unscanned: 0 },
+        filterRegion: 'Greater London'
+      }
+    ];
+
+    cardsGrid.innerHTML = categories.map(cat => {
+      const cTotal = cat.data.total || 0;
+      const cEnriched = cat.data.enriched || 0;
+      const cUnscanned = cat.data.unscanned || 0;
+      const cPct = cTotal > 0 ? Math.round((cEnriched / cTotal) * 100) : 0;
+
+      const enrichedFilterJson = JSON.stringify(cat.filterType ? { type: cat.filterType, tag: 'auto_verified' } : { region: cat.filterRegion, tag: 'auto_verified' }).replace(/"/g, '&quot;');
+      const unscannedFilterJson = JSON.stringify(cat.filterType ? { type: cat.filterType, tag: 'unscanned' } : { region: cat.filterRegion, tag: 'unscanned' }).replace(/"/g, '&quot;');
+      const allFilterJson = JSON.stringify(cat.filterType ? { type: cat.filterType } : { region: cat.filterRegion }).replace(/"/g, '&quot;');
+
+      return `
+        <div class="category-coverage-card" style="background: ${cat.bg}; border: 1px solid ${cat.border}; border-radius: 10px; padding: 0.9rem 1rem; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.2s ease;">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div style="background: white; color: ${cat.color}; width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                  <i class="fa-solid ${cat.icon}"></i>
+                </div>
+                <strong style="font-size: 0.88rem; color: #1e293b; cursor: pointer;" onclick="navigateToFilteredDirectory(${allFilterJson})" title="Click to view all ${cat.title} in Directory">
+                  ${cat.title}
+                </strong>
+              </div>
+              <span style="font-size: 0.78rem; font-weight: 700; color: ${cat.color}; background: white; padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid ${cat.border};">
+                ${cPct}%
+              </span>
+            </div>
+
+            <!-- Progress Bar -->
+            <div style="background: rgba(0,0,0,0.06); height: 6px; border-radius: 999px; overflow: hidden; margin-bottom: 0.75rem;">
+              <div style="background: ${cat.color}; height: 100%; width: ${cPct}%; border-radius: 999px; transition: width 0.4s ease;"></div>
+            </div>
+          </div>
+
+          <!-- Interactive Click Badges -->
+          <div style="display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn btn-outline" onclick="navigateToFilteredDirectory(${enrichedFilterJson})" style="flex: 1; padding: 0.3rem 0.5rem; font-size: 0.76rem; font-weight: 700; color: #065f46; background: #ffffff; border-color: #a7f3d0; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 0.3rem;" title="Click to view ${cEnriched} Enriched ${cat.title} in Directory">
+              <i class="fa-solid fa-circle-check"></i> ${cEnriched.toLocaleString()} Enriched
+            </button>
+            <button type="button" class="btn btn-outline" onclick="navigateToFilteredDirectory(${unscannedFilterJson})" style="flex: 1; padding: 0.3rem 0.5rem; font-size: 0.76rem; font-weight: 700; color: #9a3412; background: #ffffff; border-color: #fed7aa; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 0.3rem;" title="Click to view ${cUnscanned} Unscanned ${cat.title} in Directory">
+              <i class="fa-solid fa-clock"></i> ${cUnscanned.toLocaleString()} Unscanned
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Quick Attribute Chips
+    if (attributeChips) {
+      const chips = [
+        { label: `📝 2nd Stage Required (${stats.bySecondStage?.yes?.total || 0})`, filter: { secondStage: 'yes' } },
+        { label: `📅 Verified Dates (${stats.datesVerifiedTotal || 0})`, filter: { tag: 'dates_verified' } },
+        { label: `🤖 LLM Enriched (${stats.llmEnrichedTotal || 0})`, filter: { tag: 'llm_enriched' } },
+        { label: `⚠️ Needs Review (${stats.anomaliesTotal || 0})`, filter: { tag: 'has_anomalies' } },
+        { label: `💷 Fee-Paying (${stats.byFee?.independent?.total || 0})`, filter: { fee: 'independent' } },
+        { label: `🏛️ State-Funded (${stats.byFee?.state?.total || 0})`, filter: { fee: 'state' } }
+      ];
+
+      attributeChips.innerHTML = chips.map(c => `
+        <button type="button" class="btn btn-outline" onclick="navigateToFilteredDirectory(${JSON.stringify(c.filter).replace(/"/g, '&quot;')})" style="font-size: 0.75rem; padding: 0.2rem 0.6rem; border-radius: 999px; background: white; border-color: #cbd5e1; color: #334155; font-weight: 600; cursor: pointer;" title="Click to filter Directory">
+          ${c.label}
+        </button>
+      `).join('');
+    }
+  } catch (err) {
+    console.warn('Error loading enrichment category stats:', err);
+  }
+}
+window.loadEnrichmentCategoryStats = loadEnrichmentCategoryStats;
 
 async function refreshEnrichmentStatus() {
   try {

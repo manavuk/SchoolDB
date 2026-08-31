@@ -60,6 +60,10 @@ Instructions:
 5. Identify gender policy ("Boys", "Girls", or "Mixed").
 6. Extract admissions phone number, email, full street address, postcode, and official verified website URL.
 7. For Independent schools, extract termly tuition fees (e.g. "£7,500") and 11+ registration fee (e.g. "£150"); set null if State/Grammar/Free.
+8. Extract official published school rankings in England (e.g. Sunday Times Parent Power, DfE national rankings):
+   - 'national_rank_england': Overall national ranking in England (integer, e.g. 45; set null if not available / not published).
+   - 'gcse_rank_england': School ranking in England based specifically on GCSE performance (integer, e.g. 38; set null if not available).
+   - 'a_level_rank_england': School ranking in England based specifically on A-level performance (integer, e.g. 52; set null if not available).
 
 Output ONLY a valid JSON object matching this schema with no markdown formatting, code blocks, or preamble:
 
@@ -97,6 +101,9 @@ Output ONLY a valid JSON object matching this schema with no markdown formatting
   },
   "feesTermly": "£7,500",
   "registrationFee": "£150",
+  "national_rank_england": 45,
+  "gcse_rank_england": 38,
+  "a_level_rank_england": 52,
   "confidenceScore": 95,
   "sourceUrl": "https://..."
 }`;
@@ -868,6 +875,20 @@ function reconcileLlmSchoolPayload(rawData, existingSchool = {}) {
   }
   reconciled.confidenceScore = Math.max(70, Math.min(100, parseInt(rawData.confidenceScore, 10) || 95));
 
+  // 8. Rankings in England
+  if (rawData.national_rank_england !== undefined) {
+    const r = parseInt(rawData.national_rank_england, 10);
+    reconciled.national_rank_england = (!isNaN(r) && r > 0) ? r : null;
+  }
+  if (rawData.gcse_rank_england !== undefined) {
+    const r = parseInt(rawData.gcse_rank_england, 10);
+    reconciled.gcse_rank_england = (!isNaN(r) && r > 0) ? r : null;
+  }
+  if (rawData.a_level_rank_england !== undefined) {
+    const r = parseInt(rawData.a_level_rank_england, 10);
+    reconciled.a_level_rank_england = (!isNaN(r) && r > 0) ? r : null;
+  }
+
   return reconciled;
 }
 
@@ -1051,6 +1072,21 @@ function applyLLMResultToSchool(schoolId, llmResult, adminUser = 'LLM AI Crawler
     if (data.stage_two_format_and_subjects) {
       updates.push('stage_two_format_and_subjects = ?');
       params.push(String(data.stage_two_format_and_subjects).trim());
+    }
+    if (data.national_rank_england !== undefined) {
+      const parsedRank = parseInt(data.national_rank_england, 10);
+      updates.push('national_rank_england = ?');
+      params.push(!isNaN(parsedRank) && parsedRank > 0 ? parsedRank : null);
+    }
+    if (data.gcse_rank_england !== undefined) {
+      const parsedGcseRank = parseInt(data.gcse_rank_england, 10);
+      updates.push('gcse_rank_england = ?');
+      params.push(!isNaN(parsedGcseRank) && parsedGcseRank > 0 ? parsedGcseRank : null);
+    }
+    if (data.a_level_rank_england !== undefined) {
+      const parsedALevelRank = parseInt(data.a_level_rank_england, 10);
+      updates.push('a_level_rank_england = ?');
+      params.push(!isNaN(parsedALevelRank) && parsedALevelRank > 0 ? parsedALevelRank : null);
     }
 
     updates.push('verification_status = ?');

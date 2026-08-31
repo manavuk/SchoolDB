@@ -2257,6 +2257,103 @@ app.post('/api/admin/scanner/clear-feed', requirePermission('admin:portal'), (re
   });
 });
 
+// GET /api/admin/enrichment/category-stats - Returns enriched / unscanned counts split by category
+app.get('/api/admin/enrichment/category-stats', (req, res) => {
+  try {
+    const allSchools = db ? db.getAllSchools() : [];
+
+    const isEnriched = (s) => {
+      let tags = [];
+      if (Array.isArray(s.verification_tags)) tags = s.verification_tags;
+      else if (typeof s.verification_tags === 'string') {
+        try { tags = JSON.parse(s.verification_tags); } catch(e) { tags = [s.verification_tags]; }
+      }
+      return tags.includes('llm_enriched') || tags.includes('llm_verified') || tags.includes('auto_verified') || tags.includes('web_verified') || s.verification_status === 'llm_enriched' || s.verification_status === 'auto_verified' || s.verification_status === 'verified' || Boolean(s.verified_at);
+    };
+
+    const isLlmOnly = (s) => {
+      let tags = [];
+      if (Array.isArray(s.verification_tags)) tags = s.verification_tags;
+      else if (typeof s.verification_tags === 'string') {
+        try { tags = JSON.parse(s.verification_tags); } catch(e) { tags = [s.verification_tags]; }
+      }
+      return tags.includes('llm_enriched') || tags.includes('llm_verified') || tags.includes('gemini_crawl') || tags.includes('chatgpt_crawl') || s.verification_status === 'llm_enriched' || Boolean(s.llm_enriched_at);
+    };
+
+    const hasDatesVer = (s) => {
+      let tags = [];
+      if (Array.isArray(s.verification_tags)) tags = s.verification_tags;
+      else if (typeof s.verification_tags === 'string') {
+        try { tags = JSON.parse(s.verification_tags); } catch(e) { tags = [s.verification_tags]; }
+      }
+      return tags.includes('dates_verified') || tags.includes('dates_current') || tags.includes('p0_cycle_current');
+    };
+
+    const hasAnomaly = (s) => {
+      let tags = [];
+      if (Array.isArray(s.verification_tags)) tags = s.verification_tags;
+      else if (typeof s.verification_tags === 'string') {
+        try { tags = JSON.parse(s.verification_tags); } catch(e) { tags = [s.verification_tags]; }
+      }
+      return tags.some(t => t.includes('mismatch') || t.includes('dead') || t.includes('missing') || t.includes('error') || t.includes('stuck') || t.includes('anomal')) || s.verification_status === 'anomaly_flagged';
+    };
+
+    const stats = {
+      total: allSchools.length,
+      enrichedTotal: allSchools.filter(isEnriched).length,
+      unscannedTotal: allSchools.filter(s => !isEnriched(s)).length,
+      llmEnrichedTotal: allSchools.filter(isLlmOnly).length,
+      datesVerifiedTotal: allSchools.filter(hasDatesVer).length,
+      anomaliesTotal: allSchools.filter(hasAnomaly).length,
+      byType: {},
+      byRegion: {},
+      bySecondStage: {
+        yes: { total: 0, enriched: 0, unscanned: 0 },
+        no: { total: 0, enriched: 0, unscanned: 0 }
+      },
+      byFee: {
+        independent: { total: 0, enriched: 0, unscanned: 0 },
+        state: { total: 0, enriched: 0, unscanned: 0 }
+      }
+    };
+
+    for (const s of allSchools) {
+      const enriched = isEnriched(s);
+      const type = (s.schoolType && s.schoolType.includes('Grammar')) ? 'Grammar'
+                 : (s.schoolType && s.schoolType.includes('Independent')) ? 'Independent'
+                 : 'Comprehensive';
+
+      if (!stats.byType[type]) stats.byType[type] = { total: 0, enriched: 0, unscanned: 0 };
+      stats.byType[type].total++;
+      if (enriched) stats.byType[type].enriched++;
+      else stats.byType[type].unscanned++;
+
+      const region = s.region || 'Other';
+      if (!stats.byRegion[region]) stats.byRegion[region] = { total: 0, enriched: 0, unscanned: 0 };
+      stats.byRegion[region].total++;
+      if (enriched) stats.byRegion[region].enriched++;
+      else stats.byRegion[region].unscanned++;
+
+      const isStage2 = s.second_stage_exam_required === 'Yes' || (s.entranceExamType && (s.entranceExamType.includes('Two-Stage') || s.entranceExamType.includes('Stage 2')));
+      const stageKey = isStage2 ? 'yes' : 'no';
+      stats.bySecondStage[stageKey].total++;
+      if (enriched) stats.bySecondStage[stageKey].enriched++;
+      else stats.bySecondStage[stageKey].unscanned++;
+
+      const isFeePaying = (s.schoolType && s.schoolType.includes('Independent')) || Boolean(s.feesTermly);
+      const feeKey = isFeePaying ? 'independent' : 'state';
+      stats.byFee[feeKey].total++;
+      if (enriched) stats.byFee[feeKey].enriched++;
+      else stats.byFee[feeKey].unscanned++;
+    }
+
+    res.json({ success: true, stats });
+  } catch (err) {
+    console.error('Error computing enrichment category stats:', err);
+    res.status(500).json({ error: 'Failed to compute enrichment category stats' });
+  }
+});
+
 // GET /api/admin/enrichment/audit-history/:schoolId - Retrieve full version & change history for a school
 app.get('/api/admin/enrichment/audit-history/:schoolId', requirePermission('admin:portal'), (req, res) => {
   try {
