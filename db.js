@@ -271,7 +271,7 @@ function initTables() {
       rawSchoolType TEXT,
       gender TEXT,
       ageRange TEXT,
-      pupilCount INTEGER,
+      pupilCount INTEGER DEFAULT 0,
       ofstedRating TEXT,
       gcseProgress8 REAL,
       gcseAttainment8 REAL,
@@ -284,29 +284,29 @@ function initTables() {
       phone TEXT,
       email TEXT,
       description TEXT,
-      official INTEGER DEFAULT 0,
+      official INTEGER DEFAULT 1,
       hot INTEGER DEFAULT 0,
-      officialDataSource TEXT,
-      compareSchoolPerformanceUrl TEXT,
-      raw_csv TEXT,
-      pillaiDetails TEXT,
-      kpsDetails TEXT,
+      officialDataSource TEXT DEFAULT 'DfE GIAS',
       potentialDuplicateOf TEXT,
       dedupNote TEXT,
       feesTermly TEXT,
+      registrationFee TEXT,
       sourceUrl TEXT,
       second_stage_exam_required TEXT,
       stage_one_format_and_subjects TEXT,
       stage_two_format_and_subjects TEXT,
-      registrationFee TEXT,
       national_rank_england INTEGER,
       gcse_rank_england INTEGER,
       a_level_rank_england INTEGER,
-      extra_json TEXT
+      verification_status TEXT,
+      verification_tags TEXT,
+      verification_report TEXT,
+      verified_at TEXT,
+      confidence_score INTEGER DEFAULT 70
     );
   `);
 
-  // Migration safeguard: add rawSchoolType, verification, rankings and new AI intelligence columns if missing
+  // Migration safeguard: add columns if missing
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN rawSchoolType TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN verification_status TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN verification_tags TEXT;`); } catch (e) {}
@@ -323,17 +323,51 @@ function initTables() {
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN gcse_rank_england INTEGER;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN a_level_rank_england INTEGER;`); } catch (e) {}
 
-  // Index for fast search, filtering and verification audits
+  // High-performance single and composite indexes
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_schools_name ON schools(name);
+    CREATE INDEX IF NOT EXISTS idx_schools_urn ON schools(urn);
+    CREATE INDEX IF NOT EXISTS idx_schools_postcode ON schools(postcode);
     CREATE INDEX IF NOT EXISTS idx_schools_la ON schools(la);
     CREATE INDEX IF NOT EXISTS idx_schools_schoolType ON schools(schoolType);
     CREATE INDEX IF NOT EXISTS idx_schools_gender ON schools(gender);
     CREATE INDEX IF NOT EXISTS idx_schools_ofstedRating ON schools(ofstedRating);
-    CREATE INDEX IF NOT EXISTS idx_schools_postcode ON schools(postcode);
     CREATE INDEX IF NOT EXISTS idx_schools_verification_status ON schools(verification_status);
+    CREATE INDEX IF NOT EXISTS idx_schools_verified_at ON schools(verified_at);
     CREATE INDEX IF NOT EXISTS idx_schools_national_rank ON schools(national_rank_england);
+    CREATE INDEX IF NOT EXISTS idx_schools_type_region ON schools(schoolType, region);
+    CREATE INDEX IF NOT EXISTS idx_schools_status_region ON schools(verification_status, region);
   `);
+
+  // Ensure FTS5 search virtual table and synchronizing triggers exist
+  try {
+    sqlite.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS schools_fts USING fts5(
+        id UNINDEXED,
+        name,
+        postcode,
+        address,
+        la,
+        description,
+        tokenize = 'porter unicode61'
+      );
+
+      CREATE TRIGGER IF NOT EXISTS schools_ai AFTER INSERT ON schools BEGIN
+        INSERT INTO schools_fts(id, name, postcode, address, la, description)
+        VALUES (new.id, new.name, COALESCE(new.postcode, ''), COALESCE(new.address, ''), COALESCE(new.la, ''), COALESCE(new.description, ''));
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS schools_ad AFTER DELETE ON schools BEGIN
+        DELETE FROM schools_fts WHERE id = old.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS schools_au AFTER UPDATE ON schools BEGIN
+        DELETE FROM schools_fts WHERE id = old.id;
+        INSERT INTO schools_fts(id, name, postcode, address, la, description)
+        VALUES (new.id, new.name, COALESCE(new.postcode, ''), COALESCE(new.address, ''), COALESCE(new.la, ''), COALESCE(new.description, ''));
+      END;
+    `);
+  } catch (e) {}
 
   // 2. Users table
   sqlite.exec(`
@@ -558,26 +592,6 @@ function recordToSchool(row) {
     }
   }
 
-  let _csv = null;
-  if (row.raw_csv) {
-    try { _csv = JSON.parse(row.raw_csv); } catch (e) {}
-  }
-
-  let pillaiDetails = null;
-  if (row.pillaiDetails) {
-    try { pillaiDetails = JSON.parse(row.pillaiDetails); } catch (e) {}
-  }
-
-  let kpsDetails = null;
-  if (row.kpsDetails) {
-    try { kpsDetails = JSON.parse(row.kpsDetails); } catch (e) {}
-  }
-
-  let extra = {};
-  if (row.extra_json) {
-    try { extra = JSON.parse(row.extra_json); } catch (e) {}
-  }
-
   const school = {
     id: row.id,
     name: row.name,
@@ -611,17 +625,16 @@ function recordToSchool(row) {
     stage_two_format_and_subjects: row.stage_two_format_and_subjects || '',
     national_rank_england: (row.national_rank_england !== null && row.national_rank_england !== undefined && !isNaN(parseInt(row.national_rank_england, 10))) ? parseInt(row.national_rank_england, 10) : null,
     gcse_rank_england: (row.gcse_rank_england !== null && row.gcse_rank_england !== undefined && !isNaN(parseInt(row.gcse_rank_england, 10))) ? parseInt(row.gcse_rank_england, 10) : null,
-    a_level_rank_england: (row.a_level_rank_england !== null && row.a_level_rank_england !== undefined && !isNaN(parseInt(row.a_level_rank_england, 10))) ? parseInt(row.a_level_rank_england, 10) : null,
-    ...extra
+    a_level_rank_england: (row.a_level_rank_england !== null && row.a_level_rank_england !== undefined && !isNaN(parseInt(row.a_level_rank_england, 10))) ? parseInt(row.a_level_rank_england, 10) : null
   };
 
-  if (row.official) school.official = Boolean(row.official);
-  if (row.hot) school.hot = Boolean(row.hot);
-  if (row.officialDataSource) school.officialDataSource = row.officialDataSource;
-  if (row.compareSchoolPerformanceUrl) school.compareSchoolPerformanceUrl = row.compareSchoolPerformanceUrl;
-  if (_csv) school._csv = _csv;
-  if (pillaiDetails) school.pillaiDetails = pillaiDetails;
-  if (kpsDetails) school.kpsDetails = kpsDetails;
+  school.official = row.official !== undefined && row.official !== null ? Boolean(row.official) : true;
+  school.hot = Boolean(row.hot);
+  school.officialDataSource = row.officialDataSource || 'DfE GIAS';
+  school.compareSchoolPerformanceUrl = (row.urn && String(row.urn).trim())
+    ? `https://www.compare-school-performance.service.gov.uk/school/${String(row.urn).trim()}`
+    : null;
+
   if (row.potentialDuplicateOf) school._potentialDuplicateOf = row.potentialDuplicateOf;
   if (row.dedupNote) school._dedupNote = row.dedupNote;
 
@@ -642,26 +655,6 @@ function recordToSchool(row) {
 
 // Convert school JS object to params for SQLite INSERT/UPDATE
 function schoolToParams(s) {
-  const knownKeys = new Set([
-    'id', 'name', 'urn', 'la', 'region', 'postcode', 'address', 'schoolType',
-    'rawSchoolType', 'gender', 'ageRange', 'pupilCount', 'ofstedRating',
-    'gcseProgress8', 'gcseAttainment8', 'ebaccAveragePointScore',
-    'entranceExamType', 'entranceExamDates', 'gcseSubjects', 'admissionsPolicy',
-    'website', 'phone', 'email', 'description', 'official', 'hot',
-    'officialDataSource', 'compareSchoolPerformanceUrl', '_csv',
-    'pillaiDetails', 'kpsDetails', '_potentialDuplicateOf', '_dedupNote',
-    'verification_status', 'verification_tags', 'verification_report', 'verified_at', 'confidence_score',
-    'feesTermly', 'registrationFee', 'sourceUrl', 'second_stage_exam_required', 'stage_one_format_and_subjects', 'stage_two_format_and_subjects',
-    'national_rank_england', 'gcse_rank_england', 'a_level_rank_england'
-  ]);
-
-  const extra = {};
-  for (const k of Object.keys(s)) {
-    if (!knownKeys.has(k)) {
-      extra[k] = s[k];
-    }
-  }
-
   const pupilCount = typeof s.pupilCount === 'number' ? s.pupilCount : parseInt(s.pupilCount, 10) || 0;
   const gcseProgress8 = (s.gcseProgress8 !== null && s.gcseProgress8 !== undefined && s.gcseProgress8 !== '') ? parseFloat(s.gcseProgress8) : null;
   const gcseAttainment8 = (s.gcseAttainment8 !== null && s.gcseAttainment8 !== undefined && s.gcseAttainment8 !== '') ? parseFloat(s.gcseAttainment8) : null;
@@ -674,28 +667,28 @@ function schoolToParams(s) {
   return {
     id: schoolId,
     name: s.name || '',
-    urn: s.urn || '',
-    la: s.la || '',
+    urn: s.urn || null,
+    la: s.la || null,
     region: s.region || 'Greater London',
-    postcode: s.postcode || '',
-    address: s.address || '',
+    postcode: s.postcode || null,
+    address: s.address || null,
     schoolType: normalizeSchoolType(s.schoolType, s.name, s.ofstedRating),
-    rawSchoolType: s.rawSchoolType || s.schoolType || '',
-    gender: s.gender || '',
-    ageRange: s.ageRange || '',
+    rawSchoolType: s.rawSchoolType || s.schoolType || null,
+    gender: s.gender || null,
+    ageRange: s.ageRange || null,
     pupilCount,
-    ofstedRating: s.ofstedRating || '',
+    ofstedRating: s.ofstedRating || null,
     gcseProgress8: isNaN(gcseProgress8) ? null : gcseProgress8,
     gcseAttainment8: isNaN(gcseAttainment8) ? null : gcseAttainment8,
     ebaccAveragePointScore: isNaN(ebaccAveragePointScore) ? null : ebaccAveragePointScore,
-    entranceExamType: s.entranceExamType || '',
+    entranceExamType: s.entranceExamType || null,
     entranceExamDates: s.entranceExamDates ? (typeof s.entranceExamDates === 'string' ? s.entranceExamDates : JSON.stringify(s.entranceExamDates)) : null,
     gcseSubjects: s.gcseSubjects ? (typeof s.gcseSubjects === 'string' ? s.gcseSubjects : JSON.stringify(s.gcseSubjects)) : null,
-    admissionsPolicy: s.admissionsPolicy || '',
-    website: s.website || '',
-    phone: s.phone || '',
-    email: s.email || '',
-    description: s.description || '',
+    admissionsPolicy: s.admissionsPolicy || null,
+    website: s.website || null,
+    phone: s.phone || null,
+    email: s.email || null,
+    description: s.description || null,
     feesTermly: s.feesTermly || null,
     registrationFee: s.registrationFee || null,
     sourceUrl: s.sourceUrl || null,
@@ -705,16 +698,16 @@ function schoolToParams(s) {
     national_rank_england: (s.national_rank_england !== null && s.national_rank_england !== undefined && s.national_rank_england !== '' && !isNaN(parseInt(s.national_rank_england, 10))) ? parseInt(s.national_rank_england, 10) : null,
     gcse_rank_england: (s.gcse_rank_england !== null && s.gcse_rank_england !== undefined && s.gcse_rank_england !== '' && !isNaN(parseInt(s.gcse_rank_england, 10))) ? parseInt(s.gcse_rank_england, 10) : null,
     a_level_rank_england: (s.a_level_rank_england !== null && s.a_level_rank_england !== undefined && s.a_level_rank_england !== '' && !isNaN(parseInt(s.a_level_rank_england, 10))) ? parseInt(s.a_level_rank_england, 10) : null,
-    official: s.official ? 1 : 0,
+    official: s.official !== false ? 1 : 0,
     hot: s.hot ? 1 : 0,
-    officialDataSource: s.officialDataSource || null,
-    compareSchoolPerformanceUrl: s.compareSchoolPerformanceUrl || null,
-    raw_csv: s._csv ? JSON.stringify(s._csv) : null,
-    pillaiDetails: s.pillaiDetails ? JSON.stringify(s.pillaiDetails) : null,
-    kpsDetails: s.kpsDetails ? JSON.stringify(s.kpsDetails) : null,
-    potentialDuplicateOf: s._potentialDuplicateOf || null,
-    dedupNote: s._dedupNote || null,
-    extra_json: Object.keys(extra).length > 0 ? JSON.stringify(extra) : null
+    officialDataSource: s.officialDataSource || 'DfE GIAS',
+    potentialDuplicateOf: s._potentialDuplicateOf || s.potentialDuplicateOf || null,
+    dedupNote: s._dedupNote || s.dedupNote || null,
+    verification_status: s.verification_status || 'unverified',
+    verification_tags: s.verification_tags ? (typeof s.verification_tags === 'string' ? s.verification_tags : JSON.stringify(s.verification_tags)) : '[]',
+    verification_report: s.verification_report ? (typeof s.verification_report === 'string' ? s.verification_report : JSON.stringify(s.verification_report)) : null,
+    verified_at: s.verified_at || null,
+    confidence_score: s.confidence_score !== undefined && s.confidence_score !== null ? s.confidence_score : 70
   };
 }
 
@@ -742,17 +735,17 @@ function insertSchool(school) {
       pupilCount, ofstedRating, gcseProgress8, gcseAttainment8, ebaccAveragePointScore,
       entranceExamType, entranceExamDates, gcseSubjects, admissionsPolicy, website,
       phone, email, description, official, hot, officialDataSource,
-      compareSchoolPerformanceUrl, raw_csv, pillaiDetails, kpsDetails,
       potentialDuplicateOf, dedupNote, feesTermly, registrationFee, sourceUrl, second_stage_exam_required,
-      stage_one_format_and_subjects, stage_two_format_and_subjects, national_rank_england, gcse_rank_england, a_level_rank_england, extra_json
+      stage_one_format_and_subjects, stage_two_format_and_subjects, national_rank_england, gcse_rank_england, a_level_rank_england,
+      verification_status, verification_tags, verification_report, verified_at, confidence_score
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?
     )
   `);
   stmt.run(
@@ -760,9 +753,9 @@ function insertSchool(school) {
     p.pupilCount, p.ofstedRating, p.gcseProgress8, p.gcseAttainment8, p.ebaccAveragePointScore,
     p.entranceExamType, p.entranceExamDates, p.gcseSubjects, p.admissionsPolicy, p.website,
     p.phone, p.email, p.description, p.official, p.hot, p.officialDataSource,
-    p.compareSchoolPerformanceUrl, p.raw_csv, p.pillaiDetails, p.kpsDetails,
     p.potentialDuplicateOf, p.dedupNote, p.feesTermly, p.registrationFee, p.sourceUrl, p.second_stage_exam_required,
-    p.stage_one_format_and_subjects, p.stage_two_format_and_subjects, p.national_rank_england, p.gcse_rank_england, p.a_level_rank_england, p.extra_json
+    p.stage_one_format_and_subjects, p.stage_two_format_and_subjects, p.national_rank_england, p.gcse_rank_england, p.a_level_rank_england,
+    p.verification_status, p.verification_tags, p.verification_report, p.verified_at, p.confidence_score
   );
   return getSchoolById(p.id);
 }
@@ -816,15 +809,17 @@ function insertSchoolsBulk(schoolsArray) {
         pupilCount, ofstedRating, gcseProgress8, gcseAttainment8, ebaccAveragePointScore,
         entranceExamType, entranceExamDates, gcseSubjects, admissionsPolicy, website,
         phone, email, description, official, hot, officialDataSource,
-        compareSchoolPerformanceUrl, raw_csv, pillaiDetails, kpsDetails,
-        potentialDuplicateOf, dedupNote, national_rank_england, gcse_rank_england, a_level_rank_england, extra_json
+        potentialDuplicateOf, dedupNote, feesTermly, registrationFee, sourceUrl, second_stage_exam_required,
+        stage_one_format_and_subjects, stage_two_format_and_subjects, national_rank_england, gcse_rank_england, a_level_rank_england,
+        verification_status, verification_tags, verification_report, verified_at, confidence_score
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?
       )
     `);
 
@@ -835,8 +830,9 @@ function insertSchoolsBulk(schoolsArray) {
         p.pupilCount, p.ofstedRating, p.gcseProgress8, p.gcseAttainment8, p.ebaccAveragePointScore,
         p.entranceExamType, p.entranceExamDates, p.gcseSubjects, p.admissionsPolicy, p.website,
         p.phone, p.email, p.description, p.official, p.hot, p.officialDataSource,
-        p.compareSchoolPerformanceUrl, p.raw_csv, p.pillaiDetails, p.kpsDetails,
-        p.potentialDuplicateOf, p.dedupNote, p.national_rank_england, p.gcse_rank_england, p.a_level_rank_england, p.extra_json
+        p.potentialDuplicateOf, p.dedupNote, p.feesTermly, p.registrationFee, p.sourceUrl, p.second_stage_exam_required,
+        p.stage_one_format_and_subjects, p.stage_two_format_and_subjects, p.national_rank_england, p.gcse_rank_england, p.a_level_rank_england,
+        p.verification_status, p.verification_tags, p.verification_report, p.verified_at, p.confidence_score
       );
     }
     sqlite.exec('COMMIT;');
@@ -844,6 +840,38 @@ function insertSchoolsBulk(schoolsArray) {
   } catch (err) {
     sqlite.exec('ROLLBACK;');
     throw err;
+  }
+}
+
+/**
+ * Fast Sub-Millisecond Full-Text Search via SQLite FTS5 Virtual Table
+ */
+function searchSchoolsFts(query, limit = 50) {
+  if (!query || typeof query !== 'string' || !query.trim()) {
+    return [];
+  }
+  const cleanQuery = query.trim().replace(/['"*^]/g, ' ') + '*';
+  const sqlite = getDb();
+  try {
+    const stmt = sqlite.prepare(`
+      SELECT s.*
+      FROM schools_fts fts
+      JOIN schools s ON s.id = fts.id
+      WHERE schools_fts MATCH ?
+      LIMIT ?
+    `);
+    const rows = stmt.all(cleanQuery, limit);
+    return rows.map(recordToSchool);
+  } catch (e) {
+    // Fallback if FTS syntax error
+    const fallbackStmt = sqlite.prepare(`
+      SELECT * FROM schools
+      WHERE name LIKE ? OR postcode LIKE ? OR la LIKE ?
+      LIMIT ?
+    `);
+    const pattern = `%${query.trim()}%`;
+    const rows = fallbackStmt.all(pattern, pattern, pattern, limit);
+    return rows.map(recordToSchool);
   }
 }
 
@@ -1112,67 +1140,73 @@ function saveRecSettings(weights) {
 
 const DEFAULT_LLM_PROMPT_TEMPLATE = `You are an expert UK School Admissions Data Researcher and Verifier. Your task is to provide accurate, verified, and structured information for the following UK school:
 
-Target School Information:
+Target School Identification & Anchors:
 - School Name: {{school_name}}
-- City: {{city}}
-- County: {{county}}
+- City / Town: {{city}}
+- Local Authority / County: {{county}}
 - Postcode: {{postcode}}
 - Known Website: {{website}}
 
-Instructions:
-1. Verify official 11+ admissions policy, entrance exam specifications, timeline milestones, and contact details for Year 7 entry (September 2027 / 2026–2027 cycle).
-2. In 'admissionsOverview', provide structured bullet points covering: eligibility, registration requirements, exam stages, interview/audition steps, offer decisions, and specific exam details if published (such as exam duration/papers, stage 1 to stage 2 selection criteria, number of qualifiers to stage 2, and parent-relevant exam specifics). Exclude generic filler; leave blank if nothing specific is found.
-3. Dates must use "Day Month Year" format (e.g. "6 November 2026"). Never guess or extrapolate. Return an array of date strings only for multi-date milestones ('stage_one_examDate', 'stage_two_examDate', 'interviewDates', e.g. ["2 December 2026", "3 December 2026"]); all other milestone dates must be single date strings.
-4. Identify exact exam board/provider (e.g. "GL Assessment (English & Maths)", "ISEB Common Pre-Test", "London 11+ Consortium", "CSSE 11+", "CEM", "School's Own Exam", "Non-selective / Comprehensive Banding").
-5. Identify gender policy ("Boys", "Girls", or "Mixed").
-6. Extract admissions phone number, email, full street address, postcode, and official verified website URL.
-7. For Independent schools, extract termly tuition fees (e.g. "£7,500") and 11+ registration fee (e.g. "£150"); set null if State/Grammar/Free.
-8. Extract official published school rankings in England (e.g. Sunday Times Parent Power, DfE national rankings):
-   - 'national_rank_england': Overall national ranking in England (integer, e.g. 45; set null if not available / not published).
-   - 'gcse_rank_england': School ranking in England based specifically on GCSE performance (integer, e.g. 38; set null if not available).
-   - 'a_level_rank_england': School ranking in England based specifically on A-level performance (integer, e.g. 52; set null if not available).
+CRITICAL ACCURACY & ANTI-HALLUCINATION RULES:
+1. STRICT DISAMBIGUATION: You must verify information ONLY for the specific UK school located at Postcode {{postcode}} in {{city}}, {{county}}. Do NOT confuse with schools of similar or identical names in other regions.
+2. ABSOLUTE ACCURACY OVER COMPLETENESS (ZERO GUESSWORK ON BASIC INFO): Never guess, estimate, or fabricate basic school details. If any field is unconfirmed, return null.
+3. STRICT GENDER POLICY & BASIC PROFILE INTEGRITY:
+   - 'gender': You MUST return "Girls", "Boys", or "Mixed" ONLY if 100% verified from official sources (such as DfE Get Information About Schools or official school website). NEVER default to "Mixed" or guess the gender policy. If single-sex girls, state "Girls"; if single-sex boys, state "Boys"; if co-educational, state "Mixed". If unconfirmed, set null.
+   - 'schoolType' / 'rawSchoolType': Return accurate classification ("Independent", "Grammar", "Comprehensive", or official DfE category).
+   - 'ageRange': Return official age range (e.g. "11 to 18", "4 to 11", "11 to 16", "3 to 19") if verified; otherwise set null.
+   - 'address': Return full official postal street address if known (e.g. including road/street name). Do not replace a detailed address with just a city name. If unknown, set null.
+   - 'description': Provide an accurate summary of the school and its ethos.
+   - 'website', 'phone', 'email': Return official contact info if known; otherwise null.
+4. 11+ ADMISSIONS CYCLE CONTEXT:
+   - Focus on Year 7 entry (11+ admissions). Dates must follow "Day Month Year" format (e.g. "6 November 2026").
+   - For Grammar / State Selective: Identify exact 11+ consortium/board (e.g. "GL Assessment", "CSSE 11+", "Kent 11+ PESE", "School's Own Exam"). Fees must be null.
+   - For Independent / Fee-Paying: Identify exam format (e.g. "ISEB Common Pre-Test", "London 11+ Consortium", "School's Own Assessment"), termly tuition fee (e.g. "£7,500"), and registration fee (e.g. "£150").
+   - For Comprehensive / Non-Selective State: Exam board is "Non-selective / DfE Coordinated Admissions", second_stage_exam_required is "No", fees are null.
+   - If specific Year 7 entrance exam dates are not applicable or unconfirmed (e.g. primary/special/non-selective), leave those date fields as null or empty arrays [].
+5. OFFICIAL ENGLAND RANKINGS:
+   - 'national_rank_england', 'gcse_rank_england', 'a_level_rank_england': Official integer rank in England if published; otherwise null.
 
 Output ONLY a valid JSON object matching this schema with no markdown formatting, code blocks, or preamble:
 
 {
   "name": "{{school_name}}",
-  "website": "https://...",
-  "phone": "020...",
-  "email": "...@...",
-  "address": "Full postal street address",
-  "postcode": "POSTCODE",
-  "schoolType": "Independent",
-  "rawSchoolType": "Independent Senior School (11–18)",
-  "gender": "Boys or Girls or Mixed",
-  "ageRange": "11 to 18",
-  "description": "Comprehensive school profile and academic summary.",
-  "admissionsOverview": "• Registration: Complete online registration before November deadline.\\n• Stage 1 Test: 60-minute English and Maths papers in December.\\n• Stage 2 Qualification: Top 300 scoring candidates invited to Stage 2 exam in January.\\n• Decisions: Offers released 1 March with acceptance due mid-March.",
-  "entranceExamType": "GL Assessment (English & Maths)",
+  "website": null,
+  "phone": null,
+  "email": null,
+  "address": null,
+  "postcode": "{{postcode}}",
+  "schoolType": null,
+  "rawSchoolType": null,
+  "gender": null,
+  "ageRange": null,
+  "description": null,
+  "admissionsOverview": "",
+  "entranceExamType": null,
   "entranceExamDates": {
-    "registrationOpen": "",
-    "registrationDeadline": "",
-    "registrationFee": "£150",
-    "stage_one_examDate": ["2 December 2026", "3 December 2026"],
-    "stage_one_format_and_subjects": "",
-    "stage_one_resultDate": "",
-    "second_stage_exam_required": "Yes or No",
-    "stage_two_examDate": ["9 January 2027"],
-    "stage_two_format_and_subjects": "",
-    "stage_two_resultDate": "",
-    "interviewDates": ["15 January 2027", "16 January 2027"],
-    "offerDate": "",
-    "acceptanceDeadline": "",
-    "openEvents": "",
-    "scholarshipsOffered": "",
-    "bursaryDeadline": ""
+    "registrationOpen": null,
+    "registrationDeadline": null,
+    "registrationFee": null,
+    "stage_one_examDate": [],
+    "stage_one_format_and_subjects": null,
+    "stage_one_resultDate": null,
+    "second_stage_exam_required": null,
+    "stage_two_examDate": [],
+    "stage_two_format_and_subjects": null,
+    "stage_two_resultDate": null,
+    "interviewDates": [],
+    "offerDate": null,
+    "acceptanceDeadline": null,
+    "openEvents": null,
+    "scholarshipsOffered": null,
+    "bursaryDeadline": null
   },
-  "feesTermly": "£7,500",
-  "registrationFee": "£150",
-  "national_rank_england": 45,
-  "gcse_rank_england": 38,
-  "a_level_rank_england": 52,
+  "feesTermly": null,
+  "registrationFee": null,
+  "national_rank_england": null,
+  "gcse_rank_england": null,
+  "a_level_rank_england": null,
   "confidenceScore": 95,
-  "sourceUrl": "https://..."
+  "sourceUrl": null
 }`;
 
 // -------------------------------------------------------------
@@ -1180,10 +1214,13 @@ Output ONLY a valid JSON object matching this schema with no markdown formatting
 // -------------------------------------------------------------
 
 const SUPPORTED_GEMINI_MODELS = [
+  'gemini-3.7-flash',
   'gemini-3.6-flash',
+  'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
-  'gemini-3.6-flash-lite',
-  'gemini-3.0-flash'
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite'
 ];
 
 const SUPPORTED_OPENAI_MODELS = [
@@ -1239,8 +1276,12 @@ function getAdminSettings() {
 
   const llmProvider = (rawMap.llmProvider === 'chatgpt') ? 'chatgpt' : 'gemini';
   let geminiModel = typeof rawMap.geminiModel === 'string' && rawMap.geminiModel.trim() ? rawMap.geminiModel.trim() : DEFAULT_ADMIN_SETTINGS.geminiModel;
-  // Migrate deprecated models to modern flash series
-  if (geminiModel === 'gemini-3.6-pro' || geminiModel === 'gemini-3.0-pro') {
+  // Migrate deprecated/nonexistent models to valid API models
+  if (geminiModel === 'gemini-3.1-flash-lite-preview') {
+    geminiModel = 'gemini-3.1-flash-lite';
+  } else if (geminiModel === 'gemini-3.6-flash-lite' || geminiModel === 'gemini-3.0-flash-lite') {
+    geminiModel = 'gemini-3.5-flash-lite';
+  } else if (geminiModel === 'gemini-3.6-pro' || geminiModel === 'gemini-3.0-pro' || geminiModel === 'gemini-3.0-flash' || geminiModel === 'gemini-3-flash') {
     geminiModel = 'gemini-3.6-flash';
   }
   const openaiModel = typeof rawMap.openaiModel === 'string' && rawMap.openaiModel.trim() ? rawMap.openaiModel.trim() : DEFAULT_ADMIN_SETTINGS.openaiModel;
@@ -1249,7 +1290,7 @@ function getAdminSettings() {
   const scannerSkipDays = typeof rawMap.scannerSkipDays === 'number' ? Math.max(0, Math.min(100, rawMap.scannerSkipDays)) : (parseInt(rawMap.scannerSkipDays, 10) || 10);
   const scannerDelaySeconds = typeof rawMap.scannerDelaySeconds === 'number' ? Math.max(0, Math.min(300, rawMap.scannerDelaySeconds)) : (parseInt(rawMap.scannerDelaySeconds, 10) || 20);
   let llmPromptTemplate = typeof rawMap.llmPromptTemplate === 'string' && rawMap.llmPromptTemplate.trim() ? rawMap.llmPromptTemplate : DEFAULT_LLM_PROMPT_TEMPLATE;
-  if (!llmPromptTemplate.includes('You are an expert UK School Admissions Data Researcher and Verifier')) {
+  if (!llmPromptTemplate.includes('CRITICAL ACCURACY') || !llmPromptTemplate.includes('You are an expert UK School Admissions Data Researcher and Verifier')) {
     llmPromptTemplate = DEFAULT_LLM_PROMPT_TEMPLATE;
   }
 
@@ -1371,7 +1412,7 @@ function updateEnvVariable(key, val) {
 
     if (typeof updates.llmPromptTemplate !== 'undefined' && typeof updates.llmPromptTemplate === 'string') {
       const trimmed = updates.llmPromptTemplate.trim();
-      const templateVal = (trimmed && trimmed.includes('You are an expert UK School Admissions Data Researcher and Verifier')) ? trimmed : DEFAULT_LLM_PROMPT_TEMPLATE;
+      const templateVal = (trimmed && trimmed.includes('You are an expert UK School Admissions Data Researcher and Verifier') && trimmed.includes('CRITICAL ACCURACY & ANTI-HALLUCINATION RULES')) ? trimmed : DEFAULT_LLM_PROMPT_TEMPLATE;
       stmt.run('llmPromptTemplate', JSON.stringify(templateVal));
     }
 
@@ -2544,6 +2585,13 @@ function saveSchoolVerificationResult(schoolId, scanResult) {
   const school = getSchoolById(schoolId);
   if (!school) return null;
 
+  let cleanTags = Array.isArray(scanResult.tags) ? [...scanResult.tags] : [];
+  const isErrorStatus = scanResult.status === 'llm_error' || scanResult.status === 'rate_limit_429' || String(scanResult.status).includes('error') || String(scanResult.status).includes('429');
+  
+  if (isErrorStatus) {
+    cleanTags = cleanTags.filter(t => t !== 'llm_enriched' && t !== 'llm_verified' && t !== 'auto_verified');
+  }
+
   sqlite.exec('BEGIN TRANSACTION;');
   try {
     const updateStmt = sqlite.prepare(`
@@ -2558,7 +2606,7 @@ function saveSchoolVerificationResult(schoolId, scanResult) {
 
     updateStmt.run(
       scanResult.status || 'unverified',
-      JSON.stringify(scanResult.tags || []),
+      JSON.stringify(cleanTags),
       JSON.stringify(scanResult),
       scanResult.verifiedAt || new Date().toISOString(),
       scanResult.confidenceScore || 70,
@@ -2593,6 +2641,11 @@ function getSchoolsForScannerBatch(priorityCategory = 'ALL', limit = 50, skipDay
   const params = [];
 
   switch (priorityCategory.toUpperCase()) {
+    case 'GREATER_LONDON':
+    case 'GREATER_LONDON_REGION':
+    case 'LONDON':
+      conditions.push("(region = 'Greater London' OR la IN ('Barnet','Bexley','Brent','Bromley','Camden','Croydon','Ealing','Enfield','Greenwich','Hackney','Hammersmith and Fulham','Haringey','Harrow','Havering','Hillingdon','Hounslow','Islington','Kensington and Chelsea','Kingston upon Thames','Lambeth','Lewisham','Merton','Newham','Redbridge','Richmond upon Thames','Southwark','Sutton','Tower Hamlets','Waltham Forest','Wandsworth','Westminster'))");
+      break;
     case 'LONDON_INDEPENDENT':
       conditions.push("schoolType = 'Independent' AND (region = 'Greater London' OR la IN ('Barnet','Bexley','Brent','Bromley','Camden','Croydon','Ealing','Enfield','Greenwich','Hackney','Hammersmith and Fulham','Haringey','Harrow','Havering','Hillingdon','Hounslow','Islington','Kensington and Chelsea','Kingston upon Thames','Lambeth','Lewisham','Merton','Newham','Redbridge','Richmond upon Thames','Southwark','Sutton','Tower Hamlets','Waltham Forest','Wandsworth','Westminster'))");
       break;
@@ -3340,6 +3393,7 @@ module.exports = {
   setActiveDatabaseInstance,
   resetTestDatabaseFromProduction,
   getDatabaseInstancesMetadata,
+  searchSchoolsFts,
   DEFAULT_LLM_PROMPT_TEMPLATE
 };
 

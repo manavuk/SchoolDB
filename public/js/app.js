@@ -2209,7 +2209,7 @@ const MERGE_FIELDS = [
   { key: 'postcode',                    label: 'Postcode' },
   { key: 'address',                     label: 'Address' },
   { key: 'schoolType',                  label: 'School Type' },
-  { key: 'gender',                      label: 'Gender Intake' },
+  { key: 'gender',                      label: 'Gender' },
   { key: 'ageRange',                    label: 'Age Range' },
   { key: 'pupilCount',                  label: 'Pupil Count' },
   { key: 'ofstedRating',                label: 'Ofsted Rating' },
@@ -2966,7 +2966,7 @@ function openMergeModal(dupIdx) {
     { key: 'la', label: 'Local Authority (Borough)' },
     { key: 'postcode', label: 'Postcode' },
     { key: 'schoolType', label: 'School Type' },
-    { key: 'gender', label: 'Gender Intake' },
+    { key: 'gender', label: 'Gender' },
     { key: 'pupilCount', label: 'Pupil Count' },
     { key: 'ofstedRating', label: 'Ofsted Rating' },
     { key: 'gcseAttainment8', label: 'Attainment 8 Score' },
@@ -3148,7 +3148,7 @@ async function deleteSchool(id) {
 }
 
 
-// Render subtle field-level data confidence status icon indicator
+// Render simplified field-level data confidence status icon indicator (High / Low only; Medium is implicit)
 function renderFieldConfidenceBadge(schoolId, fieldName, confidenceStats) {
   const stat = (confidenceStats && confidenceStats[fieldName]) || {
     score: 60,
@@ -3161,25 +3161,20 @@ function renderFieldConfidenceBadge(schoolId, fieldName, confidenceStats) {
   };
 
   const isAdmin = stat.isAdminVerified;
-  let iconHtml = '<i class="fa-solid fa-exclamation" style="color: #f59e0b; font-weight: 800;"></i>';
-  let iconClass = 'icon-medium';
-  let tooltipText = `${stat.score}% Confidence (${stat.upvotes} confirm, ${stat.downvotes} report)`;
 
+  // Medium confidence is implicit and does NOT show an indicator
   if (isAdmin) {
-    iconHtml = '<i class="fa-solid fa-check-double" style="color: #10b981; font-weight: 800;"></i>';
-    iconClass = 'icon-admin';
-    tooltipText = 'Admin Verified (100% Data Accuracy)';
-  } else if (stat.level === 'High') {
-    iconHtml = '<i class="fa-solid fa-check" style="color: #22c55e; font-weight: 800;"></i>';
-    iconClass = 'icon-high';
-    tooltipText = `${stat.score}% High Confidence (${stat.upvotes} confirm, ${stat.downvotes} report)`;
-  } else if (stat.level === 'Low') {
-    iconHtml = '<i class="fa-solid fa-circle-exclamation" style="color: #f43f5e; font-weight: 800;"></i>';
-    iconClass = 'icon-low';
-    tooltipText = `${stat.score}% Low Confidence (${stat.upvotes} confirm, ${stat.downvotes} report)`;
+    const tooltipText = 'Admin Verified (100% Data Accuracy)';
+    return `<span class="confidence-icon-indicator icon-admin" title="${tooltipText}" data-school-id="${schoolId}" data-field-name="${fieldName}"><i class="fa-solid fa-check-double" style="color: #10b981; font-weight: 800;"></i></span>`;
+  } else if (stat.level === 'High' || stat.score >= 80) {
+    const tooltipText = `${stat.score}% High Confidence (${stat.upvotes} confirm, ${stat.downvotes} report)`;
+    return `<span class="confidence-icon-indicator icon-high" title="${tooltipText}" data-school-id="${schoolId}" data-field-name="${fieldName}"><i class="fa-solid fa-check" style="color: #22c55e; font-weight: 800;"></i></span>`;
+  } else if (stat.level === 'Low' || (stat.score < 50 && stat.score > 0)) {
+    const tooltipText = `${stat.score}% Low Confidence (${stat.upvotes} confirm, ${stat.downvotes} report)`;
+    return `<span class="confidence-icon-indicator icon-low" title="${tooltipText}" data-school-id="${schoolId}" data-field-name="${fieldName}"><i class="fa-solid fa-circle-exclamation" style="color: #f43f5e; font-weight: 800;"></i></span>`;
   }
 
-  return `<span class="confidence-icon-indicator ${iconClass}" title="${tooltipText}" data-school-id="${schoolId}" data-field-name="${fieldName}">${iconHtml}</span>`;
+  return '';
 }
 
 // Bind event listeners to confidence vote buttons
@@ -3211,6 +3206,7 @@ async function openSchoolDetail(id) {
     }
 
     const detailContent = document.getElementById('detail-modal-content');
+    const isAdminUser = Array.isArray(currentPermissions) && (currentPermissions.includes('admin:portal') || currentPermissions.includes('admin:edit'));
 
     let subjectsArray = [];
     if (Array.isArray(school.gcseSubjects)) {
@@ -3233,7 +3229,7 @@ async function openSchoolDetail(id) {
     const p = school.pillaiDetails || {};
 
     // ----------------------------------------------------
-    // Reconcile Multi-Source Admissions Data (DfE + Pillai + KPS + LLM)
+    // Reconcile Multi-Source Admissions Data
     // ----------------------------------------------------
     const examBoard = p.examBoard || dates.examBoard || null;
     const examType = school.entranceExamType || dates.entranceExamType || (examBoard ? `11+ Entrance Assessment (${examBoard})` : 'Standard 11+ Assessment');
@@ -3261,8 +3257,8 @@ async function openSchoolDetail(id) {
     // Interviews & Offers
     const rawInterviewInfo = p.interview || k.interviewGroupActivity || k.interviewsDate || dates.interviewDates || dates.interviewInfo || dates.interviewDate || null;
     const interviewInfo = formatDisplayDates(rawInterviewInfo);
-    const offersInfo = p.offersAcceptance || k.offerDate || dates.resultsDate || dates.offersDate || dates.offersAcceptance || null;
-    const offerAcceptBy = k.offerAcceptByDate || dates.offerAcceptByDate || dates.offerAcceptBy || null;
+    const offersInfo = p.offersAcceptance || k.offerDate || dates.resultsDate || dates.offersDate || dates.offersAcceptance || dates.offerDate || null;
+    const offerAcceptBy = k.offerAcceptByDate || dates.offerAcceptByDate || dates.offerAcceptBy || dates.acceptanceDeadline || null;
 
     // Financials & Tuition Fees
     const feesTermly = school.feesTermly || dates.feesTermly || dates.feesPerTerm || p.feesTermly || null;
@@ -3291,6 +3287,7 @@ async function openSchoolDetail(id) {
     const verifiedAt = school.verified_at ? new Date(school.verified_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
     const sourceUrl = school.sourceUrl || null;
     const verificationTags = Array.isArray(school.verification_tags) ? school.verification_tags : [];
+    const scanModelName = (school.verification_report && school.verification_report.model) ? school.verification_report.model : (isLlmEnriched ? 'Google Gemini / OpenAI AI' : 'Standard Ingestion');
 
     const userReports = school.userReports || {};
     const userOverrides = school.userCustomOverrides || {};
@@ -3306,7 +3303,7 @@ async function openSchoolDetail(id) {
       const confBadge = typeof renderFieldConfidenceBadge === 'function' ? renderFieldConfidenceBadge(school.id, fieldName, confidenceStats) : '';
 
       return `
-        <div class="field-rating-row" style="display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; width: 100%; margin-bottom: 0.4rem; font-size: 0.85rem; color: #334155;">
+        <div class="field-rating-row" style="display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; width: 100%; margin-bottom: 0.35rem; font-size: 0.85rem; color: #334155;">
           <div style="flex: 1; word-break: break-word;">
             <span style="font-weight: 600; color: #475569;">${fieldLabel}:</span> <span style="font-weight: ${displayVal !== 'N/A' ? '700' : '400'}; color: ${displayVal !== 'N/A' ? '#0f172a' : '#94a3b8'};">${displayVal}</span> ${confBadge}
             ${isCustom ? `
@@ -3318,10 +3315,10 @@ async function openSchoolDetail(id) {
           </div>
 
           <div style="display: flex; align-items: center; gap: 0.25rem; flex-shrink: 0;">
-            <button type="button" class="btn-field-thumb btn-thumb-up ${isUp ? 'active' : ''}" data-school-id="${school.id}" data-field-name="${fieldName}" data-label="${fieldLabel}" data-orig="${origValue || ''}" title="Mark field as accurate" style="padding: 0.18rem 0.4rem; font-size: 0.75rem; border-radius: 6px; border: 1px solid ${isUp ? '#16a34a' : '#cbd5e1'}; background: ${isUp ? '#dcfce7' : '#ffffff'}; color: ${isUp ? '#15803d' : '#64748b'}; cursor: pointer;">
+            <button type="button" class="btn-field-thumb btn-thumb-up ${isUp ? 'active' : ''}" data-school-id="${school.id}" data-field-name="${fieldName}" data-label="${fieldLabel}" data-orig="${origValue || ''}" title="Confirm accurate" style="padding: 0.16rem 0.35rem; font-size: 0.72rem; border-radius: 5px; border: 1px solid ${isUp ? '#16a34a' : '#cbd5e1'}; background: ${isUp ? '#dcfce7' : '#ffffff'}; color: ${isUp ? '#15803d' : '#64748b'}; cursor: pointer;">
               <i class="fa-solid fa-thumbs-up"></i>
             </button>
-            <button type="button" class="btn-field-thumb btn-thumb-down ${isDown ? 'active' : ''}" data-school-id="${school.id}" data-field-name="${fieldName}" data-label="${fieldLabel}" data-orig="${origValue || ''}" data-custom="${customVal || ''}" title="Mark as inaccurate & update in your records" style="padding: 0.18rem 0.4rem; font-size: 0.75rem; border-radius: 6px; border: 1px solid ${isDown ? '#dc2626' : '#cbd5e1'}; background: ${isDown ? '#fee2e2' : '#ffffff'}; color: ${isDown ? '#b91c1c' : '#64748b'}; cursor: pointer;">
+            <button type="button" class="btn-field-thumb btn-thumb-down ${isDown ? 'active' : ''}" data-school-id="${school.id}" data-field-name="${fieldName}" data-label="${fieldLabel}" data-orig="${origValue || ''}" data-custom="${customVal || ''}" title="Suggest correction" style="padding: 0.16rem 0.35rem; font-size: 0.72rem; border-radius: 5px; border: 1px solid ${isDown ? '#dc2626' : '#cbd5e1'}; background: ${isDown ? '#fee2e2' : '#ffffff'}; color: ${isDown ? '#b91c1c' : '#64748b'}; cursor: pointer;">
               <i class="fa-solid fa-thumbs-down"></i>
             </button>
           </div>
@@ -3333,10 +3330,10 @@ async function openSchoolDetail(id) {
     // Build Unified Admissions & Examination Milestone Card
     // ----------------------------------------------------
     const admissionsUnifiedHtml = `
-      <div class="detail-box" style="grid-column: 1 / -1; background: #ffffff; border: 1px solid #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+      <div class="detail-box" style="grid-column: 1 / -1; background: #ffffff; border: 1px solid #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.04); border-radius: 8px;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.6rem; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
-          <h4 style="color: #1e293b; font-size: 1.1rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
-            <i class="fa-solid fa-calendar-check" style="color: #4338ca;"></i> 11+ Admissions Intelligence &amp; Examination Profile
+          <h4 style="color: #1e293b; font-size: 1.08rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fa-solid fa-calendar-check" style="color: #4338ca;"></i> 11+ Admissions Milestones &amp; Entrance Profile
           </h4>
           <span style="font-size: 0.78rem; font-weight: 700; color: #4338ca; background: #eef2ff; border: 1px solid #c7d2fe; padding: 0.2rem 0.6rem; border-radius: 6px;">
             <i class="fa-solid fa-graduation-cap"></i> ${examType}
@@ -3345,12 +3342,12 @@ async function openSchoolDetail(id) {
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
           <!-- Column 1: Registration & Key Deadlines -->
-          <div style="background: #f8fafc; padding: 0.9rem; border-radius: 8px; border: 1px solid #e2e8f0;">
-            <strong style="color: #2563eb; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; font-size: 0.92rem; border-bottom: 1px dashed #cbd5e1; padding-bottom: 0.35rem;">
-              <i class="fa-solid fa-file-pen"></i> Registration &amp; Overview
+          <div style="background: #f8fafc; padding: 0.85rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <strong style="color: #2563eb; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; font-size: 0.9rem; border-bottom: 1px dashed #cbd5e1; padding-bottom: 0.35rem;">
+              <i class="fa-solid fa-file-pen"></i> Registration &amp; Deadlines
             </strong>
-            <div style="display: flex; flex-direction: column; gap: 0.3rem;">
-              ${renderWidget('entranceExamType', 'Exam Type / Board', examBoard ? `${examType} (${examBoard})` : examType)}
+            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+              ${renderWidget('entranceExamType', 'Exam Board / Format', examBoard ? `${examType} (${examBoard})` : examType)}
               ${renderWidget('registrationStatus', 'Registration Status', regStatus || 'Active')}
               ${renderWidget('registrationOpen', 'Registration Opens', regOpen)}
               ${renderWidget('registrationDeadline', 'Registration Deadline', regDeadline)}
@@ -3359,30 +3356,30 @@ async function openSchoolDetail(id) {
           </div>
 
           <!-- Column 2: Stage 1 Assessment -->
-          <div style="background: #f8fafc; padding: 0.9rem; border-radius: 8px; border: 1px solid #e2e8f0;">
-            <strong style="color: #d97706; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; font-size: 0.92rem; border-bottom: 1px dashed #cbd5e1; padding-bottom: 0.35rem;">
+          <div style="background: #f8fafc; padding: 0.85rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <strong style="color: #d97706; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; font-size: 0.9rem; border-bottom: 1px dashed #cbd5e1; padding-bottom: 0.35rem;">
               <i class="fa-solid fa-pen-nib"></i> 1st Stage Assessment
             </strong>
-            <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
               ${renderWidget('firstExamDate', '1st Exam Date', firstExamDate)}
-              ${renderWidget('stage_one_format_and_subjects', '1st Exam Format & Subjects', firstExamSubjects)}
-              ${renderWidget('firstStageResult', '1st Stage Results Release', firstStageResult)}
+              ${renderWidget('stage_one_format_and_subjects', 'Format & Subjects', firstExamSubjects)}
+              ${renderWidget('firstStageResult', 'Results Release Date', firstStageResult)}
             </div>
           </div>
 
           <!-- Column 3: Stage 2 Assessment, Interviews & Offers -->
-          <div style="background: #f8fafc; padding: 0.9rem; border-radius: 8px; border: 1px solid #e2e8f0;">
-            <strong style="color: #059669; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; font-size: 0.92rem; border-bottom: 1px dashed #cbd5e1; padding-bottom: 0.35rem;">
+          <div style="background: #f8fafc; padding: 0.85rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <strong style="color: #059669; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; font-size: 0.9rem; border-bottom: 1px dashed #cbd5e1; padding-bottom: 0.35rem;">
               <i class="fa-solid fa-award"></i> Stage 2, Interview &amp; Offers
             </strong>
-            <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+            <div style="display: flex; flex-direction: column; gap: 0.25rem;">
               ${renderWidget('second_stage_exam_required', '2nd Stage Required', secondStageRequired)}
               ${renderWidget('secondExamDate', '2nd Exam Date', secondExamDate)}
               ${renderWidget('stage_two_format_and_subjects', '2nd Exam Format', secondExamSubjects)}
               ${renderWidget('secondStageResult', '2nd Stage Results', secondStageResult)}
-              ${renderWidget('interviewInfo', 'Interview / Group Activity', interviewInfo)}
-              ${renderWidget('offersInfo', 'Offers / Results Date', offersInfo)}
-              ${renderWidget('offerAcceptBy', 'Accept Offer By Deadline', offerAcceptBy)}
+              ${renderWidget('interviewInfo', 'Interview / Audition', interviewInfo)}
+              ${renderWidget('offersInfo', 'Offers / Notification Date', offersInfo)}
+              ${renderWidget('offerAcceptBy', 'Acceptance Deadline', offerAcceptBy)}
             </div>
           </div>
         </div>
@@ -3392,50 +3389,52 @@ async function openSchoolDetail(id) {
     // ----------------------------------------------------
     // Build Financials, Tuition & Scholarships Card
     // ----------------------------------------------------
-    const financialsHtml = `
-      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1;">
+    const hasFinancials = Boolean(feesTermly || regFee || scholarships || bursaryDeadline);
+    const financialsHtml = hasFinancials ? `
+      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;">
         <h4 style="color: #059669; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
           <i class="fa-solid fa-sterling-sign"></i> Tuition Fees, Financials &amp; Scholarships
         </h4>
-        <div style="display: flex; flex-direction: column; gap: 0.35rem;">
-          ${renderWidget('feesTermly', 'Termly Tuition Fees', feesTermly)}
+        <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+          ${renderWidget('feesTermly', 'Termly Tuition Fee', feesTermly)}
           ${annualFeesEst ? `
-            <div class="field-rating-row" style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #334155; margin-bottom: 0.4rem;">
+            <div class="field-rating-row" style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #334155; margin-bottom: 0.35rem;">
               <div><span style="font-weight: 600; color: #475569;">Annual Fee (Estimated):</span> <strong style="color: #059669;">${annualFeesEst}</strong></div>
             </div>
           ` : ''}
           ${renderWidget('registrationFee', 'Registration Fee', regFee)}
           ${renderWidget('scholarshipsOffered', 'Scholarships &amp; Bursaries', scholarships)}
-          ${bursaryDeadline ? renderWidget('bursaryDeadline', 'Bursary Application Deadline', bursaryDeadline) : ''}
+          ${bursaryDeadline ? renderWidget('bursaryDeadline', 'Bursary Deadline', bursaryDeadline) : ''}
         </div>
       </div>
-    `;
+    ` : '';
 
     // ----------------------------------------------------
     // Build Admissions Policy & Catchment Card
     // ----------------------------------------------------
-    const policyHtml = `
-      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1;">
+    const hasPolicy = Boolean(admissionsPolicy || catchmentInfo || notes);
+    const policyHtml = hasPolicy ? `
+      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;">
         <h4 style="color: #7c3aed; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
           <i class="fa-solid fa-shield-halved"></i> Admissions Policy &amp; Catchment
         </h4>
-        <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+        <div style="display: flex; flex-direction: column; gap: 0.3rem;">
           ${renderWidget('admissionsPolicy', 'Admissions Policy Summary', admissionsPolicy || 'Standard 11+ entry policy.')}
-          ${catchmentInfo ? renderWidget('catchmentArea', 'Catchment Area / Oversubscription', catchmentInfo) : ''}
-          ${notes ? renderWidget('additionalNotes', 'Additional Admissions Notes', notes) : ''}
+          ${catchmentInfo ? renderWidget('catchmentArea', 'Catchment Area / Criteria', catchmentInfo) : ''}
+          ${notes ? renderWidget('additionalNotes', 'Admissions Notes', notes) : ''}
         </div>
       </div>
-    `;
+    ` : '';
 
     // ----------------------------------------------------
     // Build Academic Performance Card
     // ----------------------------------------------------
     const academicMetricsHtml = `
-      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1;">
+      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;">
         <h4 style="color: #2563eb; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
           <i class="fa-solid fa-chart-line"></i> Academic Metrics &amp; GCSE Performance
         </h4>
-        <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+        <div style="display: flex; flex-direction: column; gap: 0.3rem;">
           ${renderWidget('national_rank_england', 'National Rank in England', school.national_rank_england ? `#${school.national_rank_england} in England` : null)}
           ${renderWidget('gcse_rank_england', 'GCSE Rank in England', school.gcse_rank_england ? `#${school.gcse_rank_england} in England` : null)}
           ${renderWidget('a_level_rank_england', 'A-Level Rank in England', school.a_level_rank_england ? `#${school.a_level_rank_england} in England` : null)}
@@ -3456,64 +3455,10 @@ async function openSchoolDetail(id) {
     `;
 
     // ----------------------------------------------------
-    // Build Multi-Source Provenance & AI Audit Footprint Card
-    // ----------------------------------------------------
-    const provenanceHtml = `
-      <div class="detail-box" style="background: #ffffff; border: 1px solid #cbd5e1;">
-        <h4 style="color: #d97706; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
-          <i class="fa-solid fa-database"></i> Multi-Source Provenance &amp; Verification Footprint
-        </h4>
-        <div style="display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.85rem; color: #334155;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-weight: 600; color: #475569;">Verification Status:</span>
-            <span style="font-weight: 700; color: ${isLlmEnriched ? '#6d28d9' : '#059669'}; background: ${isLlmEnriched ? '#ede9fe' : '#dcfce7'}; border: 1px solid ${isLlmEnriched ? '#ddd6fe' : '#bbf7d0'}; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.76rem;">
-              ${isLlmEnriched ? '<i class="fa-solid fa-wand-magic-sparkles"></i> AI Reconciled & Enriched' : (school.official ? '<i class="fa-solid fa-circle-check"></i> Official DfE Verified' : 'Community Reconciled')}
-            </span>
-          </div>
-
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-weight: 600; color: #475569;">Reconciliation Confidence:</span>
-            <span style="font-weight: 800; color: ${confidenceScore >= 90 ? '#059669' : '#d97706'}; display: inline-flex; align-items: center; gap: 0.3rem;">
-              ${confidenceScore}%
-              <span style="display: inline-block; width: 60px; height: 6px; background: #e2e8f0; border-radius: 999px; overflow: hidden; vertical-align: middle;">
-                <span style="display: block; width: ${confidenceScore}%; height: 100%; background: ${confidenceScore >= 90 ? '#10b981' : '#f59e0b'};"></span>
-              </span>
-            </span>
-          </div>
-
-          ${verifiedAt ? `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: 600; color: #475569;">Last Intelligence Scan:</span>
-              <span style="font-weight: 600; color: #1e293b;">${verifiedAt}</span>
-            </div>
-          ` : ''}
-
-          <div style="margin-top: 0.35rem; border-top: 1px dashed #e2e8f0; padding-top: 0.45rem;">
-            <span style="font-weight: 600; color: #475569; display: block; margin-bottom: 0.3rem;">Reconciled Source Datasets:</span>
-            <div style="display: flex; flex-wrap: wrap; gap: 0.35rem;">
-              ${school.urn ? `<span style="font-size: 0.74rem; background: #f1f5f9; color: #334155; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #e2e8f0;"><i class="fa-solid fa-landmark"></i> DfE Register (${school.urn})</span>` : ''}
-              ${Object.keys(p).length > 0 ? `<span style="font-size: 0.74rem; background: #f0fdf4; color: #166534; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #bbf7d0;"><i class="fa-solid fa-book-bookmark"></i> Pillai Admissions Dataset</span>` : ''}
-              ${Object.keys(k).length > 0 ? `<span style="font-size: 0.74rem; background: #eff6ff; color: #1e40af; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #bfdbfe;"><i class="fa-solid fa-list-check"></i> KPS 11+ Guide</span>` : ''}
-              ${isLlmEnriched ? `<span style="font-size: 0.74rem; background: #faf5ff; color: #6b21a8; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #e9d5ff;"><i class="fa-solid fa-robot"></i> LLM Live Crawler</span>` : ''}
-            </div>
-          </div>
-
-          ${sourceUrl ? `
-            <div style="margin-top: 0.35rem;">
-              <a href="${sourceUrl}" target="_blank" style="font-size: 0.78rem; color: #4338ca; font-weight: 700; text-decoration: underline; display: inline-flex; align-items: center; gap: 0.3rem;">
-                <i class="fa-solid fa-arrow-up-right-from-square"></i> View Verification Source Reference
-              </a>
-            </div>
-          ` : ''}
-        </div>
-      </div>
-    `;
-
-    // ----------------------------------------------------
     // Build School Contact Card
     // ----------------------------------------------------
     const contactHtml = `
-      <div class="detail-box" style="grid-column: 1 / -1; background: #ffffff; border: 1px solid #cbd5e1;">
+      <div class="detail-box" style="grid-column: 1 / -1; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;">
         <h4 style="color: #0284c7; font-size: 1.02rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.5rem; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
           <i class="fa-solid fa-address-book"></i> School Contact &amp; Location Details
         </h4>
@@ -3531,74 +3476,114 @@ async function openSchoolDetail(id) {
     `;
 
     // ----------------------------------------------------
+    // Build Admin Data Quality & AI Verification Card (ADMIN ONLY)
+    // ----------------------------------------------------
+    const adminQualityHtml = isAdminUser ? `
+      <div class="admin-quality-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.6rem; margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
+          <h4 style="color: #4338ca; font-size: 1.05rem; margin: 0; display: flex; align-items: center; gap: 0.45rem;">
+            <i class="fa-solid fa-shield-halved"></i> Data Quality &amp; AI Verification Intelligence
+          </h4>
+          <span style="font-size: 0.74rem; font-weight: 700; color: #4338ca; background: #e0e7ff; border: 1px solid #c7d2fe; padding: 0.2rem 0.55rem; border-radius: 5px;">
+            <i class="fa-solid fa-user-shield"></i> Administrator Controls
+          </span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.85rem; margin-bottom: 0.85rem;">
+          <div style="background: #ffffff; padding: 0.75rem 0.85rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <div style="font-size: 0.78rem; color: #64748b; font-weight: 600; margin-bottom: 0.25rem;">Quality &amp; Confidence Level</div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1.25rem; font-weight: 800; color: ${confidenceScore >= 80 ? '#16a34a' : (confidenceScore < 50 ? '#dc2626' : '#d97706')};">
+                ${confidenceScore}%
+              </span>
+              <div style="flex: 1; height: 7px; background: #e2e8f0; border-radius: 999px; overflow: hidden;">
+                <div style="width: ${confidenceScore}%; height: 100%; background: ${confidenceScore >= 80 ? '#22c55e' : (confidenceScore < 50 ? '#ef4444' : '#f59e0b')};"></div>
+              </div>
+            </div>
+            <div style="font-size: 0.72rem; color: #64748b; margin-top: 0.25rem;">
+              Status: <strong style="color: #1e293b;">${verificationStatus}</strong>
+            </div>
+          </div>
+
+          <div style="background: #ffffff; padding: 0.75rem 0.85rem; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <div style="font-size: 0.78rem; color: #64748b; font-weight: 600; margin-bottom: 0.25rem;">Last Intelligence Scan</div>
+            <div style="font-size: 0.88rem; font-weight: 700; color: #1e293b;">
+              <i class="fa-solid fa-clock" style="color: #6366f1;"></i> ${verifiedAt || 'Not scanned yet'}
+            </div>
+            <div style="font-size: 0.72rem; color: #64748b; margin-top: 0.25rem;">
+              Model: <strong style="color: #4338ca;">${scanModelName}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+          <div style="font-size: 0.76rem; font-weight: 700; color: #475569; margin-bottom: 0.3rem;">System Verification Tags:</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 0.3rem;">
+            ${verificationTags.length > 0 ? verificationTags.map(t => `<span class="admin-quality-badge">${t}</span>`).join('') : '<span style="font-size:0.75rem; color:#94a3b8;">No tags</span>'}
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; border-top: 1px dashed #cbd5e1; padding-top: 0.65rem; font-size: 0.78rem;">
+          ${school.urn ? `<span><strong>URN:</strong> ${school.urn}</span>` : ''}
+          ${sourceUrl ? `<a href="${sourceUrl}" target="_blank" style="color: #4f46e5; font-weight: 700; text-decoration: underline;"><i class="fa-solid fa-arrow-up-right-from-square"></i> Verification Source Link</a>` : ''}
+        </div>
+      </div>
+    ` : '';
+
+    // ----------------------------------------------------
     // Assemble Full Modal Content
     // ----------------------------------------------------
     detailContent.innerHTML = `
       <div class="detail-header-hero" style="border-bottom: 1px solid #e2e8f0; padding-bottom: 1.25rem; margin-bottom: 1.5rem;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
           <div>
-            <h2 style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0 0 0.35rem 0; letter-spacing: -0.02em;">
+            <h2 style="font-size: 1.55rem; font-weight: 800; color: #0f172a; margin: 0 0 0.35rem 0; letter-spacing: -0.02em;">
               ${school.name}
             </h2>
-            <div style="color: #64748b; font-size: 0.92rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <div style="color: #64748b; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
               <span><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> ${school.address || school.la}, ${school.postcode || ''}</span>
               <span>•</span>
               <span><strong>Region:</strong> ${school.region || school.la}</span>
-              <span>•</span>
-              <span><strong>URN:</strong> ${school.urn || 'N/A'}</span>
             </div>
           </div>
-
-          ${isLlmEnriched ? `
-            <div style="background: linear-gradient(135deg, #faf5ff 0%, #ede9fe 100%); border: 1px solid #ddd6fe; border-radius: 8px; padding: 0.45rem 0.85rem; display: flex; align-items: center; gap: 0.5rem;">
-              <i class="fa-solid fa-wand-magic-sparkles" style="color: #7c3aed; font-size: 1.1rem;"></i>
-              <div>
-                <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #6d28d9; letter-spacing: 0.05em;">AI Enriched Record</div>
-                <div style="font-size: 0.85rem; font-weight: 800; color: #4338ca;">${confidenceScore}% Confidence</div>
-              </div>
-            </div>
-          ` : ''}
         </div>
 
-        <div class="detail-tags-row" style="display: flex; gap: 0.5rem; margin-top: 0.85rem; flex-wrap: wrap; align-items: center;">
+        <!-- Clean Parent-Relevant Tags -->
+        <div class="detail-tags-row" style="display: flex; gap: 0.45rem; margin-top: 0.85rem; flex-wrap: wrap; align-items: center;">
           <span class="badge-ofsted" style="font-size: 0.78rem;"><i class="fa-solid fa-star"></i> ${formatOfsted(userOverrides.ofstedRating || school.ofstedRating)}</span>
           <span class="badge-exam" style="font-size: 0.78rem; background: #e0e7ff; color: #3730a3;"><i class="fa-solid fa-school"></i> ${userOverrides.schoolType || school.rawSchoolType || school.schoolType}</span>
-          <span class="badge-exam" style="font-size: 0.78rem; background: #f1f5f9; color: #334155;"><i class="fa-solid fa-venus-mars"></i> ${userOverrides.gender || school.gender} intake</span>
+          <span class="badge-exam" style="font-size: 0.78rem; background: #f1f5f9; color: #334155;"><i class="fa-solid fa-venus-mars"></i> ${userOverrides.gender || school.gender}</span>
           ${school.ageRange ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-user-group"></i> Age ${school.ageRange}</span>` : ''}
           ${school.pupilCount ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-users"></i> ${school.pupilCount.toLocaleString()} pupils</span>` : ''}
+          ${school.hot ? `<span class="badge-hot" style="font-size: 0.76rem;"><i class="fa-solid fa-fire"></i> Hot School</span>` : ''}
+          ${secondStageRequired.startsWith('Yes') ? `<span class="badge-exam" style="font-size: 0.76rem; background: #fef3c7; color: #92400e; border: 1px solid #fde68a;"><i class="fa-solid fa-award"></i> 2-Stage Selective Exam</span>` : ''}
 
-          <!-- Toggleable Hot Pill -->
-          <button type="button" class="btn" id="toggle-hot-btn" style="border:none; cursor:${currentPermissions.includes('admin:edit') ? 'pointer' : 'default'}; padding:0;" title="${currentPermissions.includes('admin:edit') ? 'Click to toggle Hot status' : 'Hot status'}">
-            ${school.hot
-              ? `<span class="badge-hot" style="font-size:0.76rem;"><i class="fa-solid fa-fire"></i> Hot ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
-              : `<span style="font-size:0.76rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-fire"></i> Not Hot ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
-            }
-          </button>
-
-          <!-- Toggleable Verified / Official Pill -->
-          <button type="button" class="btn" id="toggle-official-btn" style="border:none; cursor:${currentPermissions.includes('admin:edit') ? 'pointer' : 'default'}; padding:0;" title="${currentPermissions.includes('admin:edit') ? 'Click to toggle Official DfE status' : 'Official status'}">
-            ${school.official
-              ? `<span class="badge-official" style="font-size:0.76rem;"><i class="fa-solid fa-circle-check"></i> Official DfE ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
-              : `<span style="font-size:0.76rem; padding:0.2rem 0.55rem; border-radius:999px; background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0;"><i class="fa-solid fa-circle-question"></i> Unofficial ${currentPermissions.includes('admin:edit') ? '✏️' : ''}</span>`
-            }
-          </button>
+          <!-- Admin Quick Toggles (Admin Only) -->
+          ${currentPermissions.includes('admin:edit') ? `
+            <button type="button" class="btn" id="toggle-hot-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Hot status">
+              <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;"><i class="fa-solid fa-fire"></i> ${school.hot ? 'Hot (Active)' : 'Mark Hot'} ✏️</span>
+            </button>
+            <button type="button" class="btn" id="toggle-official-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Official status">
+              <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;"><i class="fa-solid fa-circle-check"></i> ${school.official ? 'Official DfE' : 'Unofficial'} ✏️</span>
+            </button>
+          ` : ''}
         </div>
       </div>
 
-      <p style="margin-bottom: 1.5rem; color: #334155; font-size: 0.95rem; line-height: 1.5; background: #f8fafc; padding: 0.9rem 1.1rem; border-radius: 8px; border: 1px solid #e2e8f0;">
-        ${school.description || 'Comprehensive admissions and curriculum profile verified across UK official school registers, independent examination syndicates, and AI crawler intelligence.'}
+      <p style="margin-bottom: 1.25rem; color: #334155; font-size: 0.92rem; line-height: 1.5; background: #f8fafc; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid #e2e8f0;">
+        ${school.description || 'Comprehensive admissions and curriculum profile verified across UK official educational registers and examination guides.'}
       </p>
 
-      <div class="detail-sections-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem;">
+      <div class="detail-sections-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.1rem;">
         ${admissionsUnifiedHtml}
         ${financialsHtml}
-        ${policyHtml}
         ${academicMetricsHtml}
-        ${provenanceHtml}
+        ${policyHtml}
+        ${adminQualityHtml}
         ${contactHtml}
       </div>
 
-      <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap:wrap; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 1.25rem;">
+      <div style="margin-top: 1.5rem; display: flex; gap: 0.65rem; flex-wrap:wrap; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 1.25rem;">
         <button type="button" class="btn ${userSelectedSchools.some(u => u.id === school.id) ? 'btn-primary' : 'btn-outline'}" id="detail-shortlist-btn" style="${userSelectedSchools.some(u => u.id === school.id) ? 'background:#059669; border-color:#059669;' : 'color:#059669; border-color:#6ee7b7;'}">
           <i class="fa-solid ${userSelectedSchools.some(u => u.id === school.id) ? 'fa-check' : 'fa-plus'}"></i> ${userSelectedSchools.some(u => u.id === school.id) ? 'Shortlisted' : 'Add to Shortlist'}
         </button>
@@ -3608,8 +3593,11 @@ async function openSchoolDetail(id) {
         ${school.phone ? `<a href="tel:${school.phone}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-phone"></i> ${school.phone}</a>` : ''}
         ${school.email ? `<a href="mailto:${school.email}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-envelope"></i> Email School</a>` : ''}
 
-        ${currentPermissions.includes('admin:portal') ? `
-          <button type="button" class="btn btn-outline" id="detail-version-history-btn" style="color:#4f46e5; border-color:#c7d2fe; margin-left:auto; display: inline-flex; align-items: center; gap: 0.35rem;">
+        ${isAdminUser ? `
+          <button type="button" class="btn btn-outline" id="detail-edit-specs-btn" style="color:#0284c7; border-color:#bae6fd; margin-left:auto; display: inline-flex; align-items: center; gap: 0.35rem;">
+            <i class="fa-solid fa-pen-to-square"></i> Edit Specs
+          </button>
+          <button type="button" class="btn btn-outline" id="detail-version-history-btn" style="color:#4f46e5; border-color:#c7d2fe; display: inline-flex; align-items: center; gap: 0.35rem;">
             <i class="fa-solid fa-clock-rotate-left"></i> Version History
           </button>
           <button type="button" class="btn btn-primary" id="detail-merge-btn" style="background:#7c3aed; border-color:#7c3aed; display: inline-flex; align-items: center; gap: 0.35rem;">
@@ -3626,6 +3614,17 @@ async function openSchoolDetail(id) {
         e.preventDefault();
         addUserSchool(school);
         openSchoolDetail(school.id);
+      });
+    }
+
+    // Wire Edit Specs button listener for admin
+    const detailEditSpecsBtn = document.getElementById('detail-edit-specs-btn');
+    if (detailEditSpecsBtn && currentPermissions.includes('admin:edit')) {
+      detailEditSpecsBtn.addEventListener('click', () => {
+        document.getElementById('detail-modal').style.display = 'none';
+        if (typeof openEditModal === 'function') {
+          openEditModal(school.id);
+        }
       });
     }
 
@@ -4082,12 +4081,12 @@ function updateBulkValueInput(fieldName) {
   } else if (fieldName === 'gender') {
     container.innerHTML = `
       <label style="font-size: 0.8rem; font-weight: 700; color: #475569; display: block; margin-bottom: 0.3rem;">
-        <i class="fa-solid fa-users" style="color: #7c3aed;"></i> New Gender Intake
+        <i class="fa-solid fa-users" style="color: #7c3aed;"></i> New Gender
       </label>
       <select id="bulk-val-input" style="width: 100%; padding: 0.5rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.85rem; background: white;">
         <option value="Girls">Girls Only</option>
         <option value="Boys">Boys Only</option>
-        <option value="Mixed">Mixed Intake</option>
+        <option value="Mixed">Mixed</option>
       </select>
     `;
   } else if (fieldName === 'entranceExamType') {

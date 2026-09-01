@@ -7,16 +7,46 @@ archive/
 # Environment configuration
 .env
 .env.local
+.env.*.local
 
 # Operating System files
 .DS_Store
 Thumbs.db
+*.DS_Store
+
+# SQLite Database Backups, Test Databases & Temp Files
+data/*.bak*
+data/*.bak
+data/*.sqlite.bak*
+data/*.db.bak*
+data/*_test.sqlite*
+data/*-test.sqlite*
+data/*.tmp
+data/active_instance.json
 
 # SQLite WAL and shared memory temporary files
+*.sqlite-shm
+*.sqlite-wal
 data/*.sqlite-shm
 data/*.sqlite-wal
 
-# Logs
+# Temporary & Backup files
+*.bak
+*.bak.*
+*.tmp
+*.temp
+*~
+*.swp
+*.swo
+
+# Logs & Runtime
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+
+# Test output & Coverage
+coverage/
+.nyc_output/

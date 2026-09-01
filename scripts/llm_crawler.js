@@ -45,67 +45,73 @@ function getLLMPublicSearchUrl(provider = 'gemini', school = null, promptText = 
 
 const DEFAULT_LLM_PROMPT_TEMPLATE = `You are an expert UK School Admissions Data Researcher and Verifier. Your task is to provide accurate, verified, and structured information for the following UK school:
 
-Target School Information:
+Target School Identification & Anchors:
 - School Name: {{school_name}}
-- City: {{city}}
-- County: {{county}}
+- City / Town: {{city}}
+- Local Authority / County: {{county}}
 - Postcode: {{postcode}}
 - Known Website: {{website}}
 
-Instructions:
-1. Verify official 11+ admissions policy, entrance exam specifications, timeline milestones, and contact details for Year 7 entry (September 2027 / 2026–2027 cycle).
-2. In 'admissionsOverview', provide structured bullet points covering: eligibility, registration requirements, exam stages, interview/audition steps, offer decisions, and specific exam details if published (such as exam duration/papers, stage 1 to stage 2 selection criteria, number of qualifiers to stage 2, and parent-relevant exam specifics). Exclude generic filler; leave blank if nothing specific is found.
-3. Dates must use "Day Month Year" format (e.g. "6 November 2026"). Never guess or extrapolate. Return an array of date strings only for multi-date milestones ('stage_one_examDate', 'stage_two_examDate', 'interviewDates', e.g. ["2 December 2026", "3 December 2026"]); all other milestone dates must be single date strings.
-4. Identify exact exam board/provider (e.g. "GL Assessment (English & Maths)", "ISEB Common Pre-Test", "London 11+ Consortium", "CSSE 11+", "CEM", "School's Own Exam", "Non-selective / Comprehensive Banding").
-5. Identify gender policy ("Boys", "Girls", or "Mixed").
-6. Extract admissions phone number, email, full street address, postcode, and official verified website URL.
-7. For Independent schools, extract termly tuition fees (e.g. "£7,500") and 11+ registration fee (e.g. "£150"); set null if State/Grammar/Free.
-8. Extract official published school rankings in England (e.g. Sunday Times Parent Power, DfE national rankings):
-   - 'national_rank_england': Overall national ranking in England (integer, e.g. 45; set null if not available / not published).
-   - 'gcse_rank_england': School ranking in England based specifically on GCSE performance (integer, e.g. 38; set null if not available).
-   - 'a_level_rank_england': School ranking in England based specifically on A-level performance (integer, e.g. 52; set null if not available).
+CRITICAL ACCURACY & ANTI-HALLUCINATION RULES:
+1. STRICT DISAMBIGUATION: You must verify information ONLY for the specific UK school located at Postcode {{postcode}} in {{city}}, {{county}}. Do NOT confuse with schools of similar or identical names in other regions.
+2. ABSOLUTE ACCURACY OVER COMPLETENESS (ZERO GUESSWORK ON BASIC INFO): Never guess, estimate, or fabricate basic school details. If any field is unconfirmed, return null.
+3. STRICT GENDER POLICY & BASIC PROFILE INTEGRITY:
+   - 'gender': You MUST return "Girls", "Boys", or "Mixed" ONLY if 100% verified from official sources (such as DfE Get Information About Schools or official school website). NEVER default to "Mixed" or guess the gender policy. If single-sex girls, state "Girls"; if single-sex boys, state "Boys"; if co-educational, state "Mixed". If unconfirmed, set null.
+   - 'schoolType' / 'rawSchoolType': Return accurate classification ("Independent", "Grammar", "Comprehensive", or official DfE category).
+   - 'ageRange': Return official age range (e.g. "11 to 18", "4 to 11", "11 to 16", "3 to 19") if verified; otherwise set null.
+   - 'address': Return full official postal street address if known (e.g. including road/street name). Do not replace a detailed address with just a city name. If unknown, set null.
+   - 'description': Provide an accurate summary of the school and its ethos.
+   - 'website', 'phone', 'email': Return official contact info if known; otherwise null.
+4. 11+ ADMISSIONS CYCLE CONTEXT:
+   - Focus on Year 7 entry (11+ admissions). Dates must follow "Day Month Year" format (e.g. "6 November 2026").
+   - For Grammar / State Selective: Identify exact 11+ consortium/board (e.g. "GL Assessment", "CSSE 11+", "Kent 11+ PESE", "School's Own Exam"). Fees must be null.
+   - For Independent / Fee-Paying: Identify exam format (e.g. "ISEB Common Pre-Test", "London 11+ Consortium", "School's Own Assessment"), termly tuition fee (e.g. "£7,500"), and registration fee (e.g. "£150").
+   - For Comprehensive / Non-Selective State: Exam board is "Non-selective / DfE Coordinated Admissions", second_stage_exam_required is "No", fees are null.
+   - If specific Year 7 entrance exam dates are not applicable or unconfirmed (e.g. primary/special/non-selective), leave those date fields as null or empty arrays [].
+5. OFFICIAL ENGLAND RANKINGS:
+   - 'national_rank_england', 'gcse_rank_england', 'a_level_rank_england': Official integer rank in England if published; otherwise null.
 
 Output ONLY a valid JSON object matching this schema with no markdown formatting, code blocks, or preamble:
 
 {
   "name": "{{school_name}}",
-  "website": "https://...",
-  "phone": "020...",
-  "email": "...@...",
-  "address": "Full postal street address",
-  "postcode": "POSTCODE",
-  "schoolType": "Independent",
-  "rawSchoolType": "Independent Senior School (11–18)",
-  "gender": "Boys or Girls or Mixed",
-  "ageRange": "11 to 18",
-  "description": "Comprehensive school profile and academic summary.",
-  "admissionsOverview": "• Registration: Complete online registration before November deadline.\\n• Stage 1 Test: 60-minute English and Maths papers in December.\\n• Stage 2 Qualification: Top 300 scoring candidates invited to Stage 2 exam in January.\\n• Decisions: Offers released 1 March with acceptance due mid-March.",
-  "entranceExamType": "GL Assessment (English & Maths)",
+  "website": null,
+  "phone": null,
+  "email": null,
+  "address": null,
+  "postcode": "{{postcode}}",
+  "schoolType": null,
+  "rawSchoolType": null,
+  "gender": null,
+  "ageRange": null,
+  "description": null,
+  "admissionsOverview": "",
+  "entranceExamType": null,
   "entranceExamDates": {
-    "registrationOpen": "",
-    "registrationDeadline": "",
-    "registrationFee": "£150",
-    "stage_one_examDate": ["2 December 2026", "3 December 2026"],
-    "stage_one_format_and_subjects": "",
-    "stage_one_resultDate": "",
-    "second_stage_exam_required": "Yes or No",
-    "stage_two_examDate": ["9 January 2027"],
-    "stage_two_format_and_subjects": "",
-    "stage_two_resultDate": "",
-    "interviewDates": ["15 January 2027", "16 January 2027"],
-    "offerDate": "",
-    "acceptanceDeadline": "",
-    "openEvents": "",
-    "scholarshipsOffered": "",
-    "bursaryDeadline": ""
+    "registrationOpen": null,
+    "registrationDeadline": null,
+    "registrationFee": null,
+    "stage_one_examDate": [],
+    "stage_one_format_and_subjects": null,
+    "stage_one_resultDate": null,
+    "second_stage_exam_required": null,
+    "stage_two_examDate": [],
+    "stage_two_format_and_subjects": null,
+    "stage_two_resultDate": null,
+    "interviewDates": [],
+    "offerDate": null,
+    "acceptanceDeadline": null,
+    "openEvents": null,
+    "scholarshipsOffered": null,
+    "bursaryDeadline": null
   },
-  "feesTermly": "£7,500",
-  "registrationFee": "£150",
-  "national_rank_england": 45,
-  "gcse_rank_england": 38,
-  "a_level_rank_england": 52,
+  "feesTermly": null,
+  "registrationFee": null,
+  "national_rank_england": null,
+  "gcse_rank_england": null,
+  "a_level_rank_england": null,
   "confidenceScore": 95,
-  "sourceUrl": "https://..."
+  "sourceUrl": null
 }`;
 
 /**
@@ -326,31 +332,70 @@ async function makeJsonPost(urlString, headers = {}, bodyObj = {}, timeoutMs = 1
 }
 
 /**
- * Clean LLM response string to extract pure JSON
+ * Clean LLM response string to extract pure JSON with fault-tolerant auto-repair
  */
 function extractJsonFromLlmText(text) {
   if (!text || typeof text !== 'string') return null;
   let clean = text.trim();
-  
-  // Remove markdown fences ```json ... ```
-  if (clean.startsWith('```')) {
-    clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+  // Try direct parse first
+  try {
+    return JSON.parse(clean);
+  } catch (e) {}
+
+  // 1. Remove markdown fences ```json ... ``` or extract innermost code block
+  if (clean.includes('```')) {
+    const codeMatch = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (codeMatch && codeMatch[1]) {
+      clean = codeMatch[1].trim();
+      try {
+        return JSON.parse(clean);
+      } catch (e) {}
+    } else {
+      clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    }
+  }
+
+  // 2. Extract outermost JSON boundaries { ... }
+  const firstBrace = clean.indexOf('{');
+  const lastBrace = clean.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    clean = clean.substring(firstBrace, lastBrace + 1);
   }
 
   try {
     return JSON.parse(clean);
-  } catch (e) {
-    const firstBrace = clean.indexOf('{');
-    const lastBrace = clean.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      try {
-        return JSON.parse(clean.substring(firstBrace, lastBrace + 1));
-      } catch (inner) {
-        return null;
-      }
-    }
-    return null;
-  }
+  } catch (e) {}
+
+  // 3. Repair Step: Strip JS comments
+  let repaired = clean
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\r\n]*/g, '$1');
+
+  // 4. Repair Step: Replace Python constants
+  repaired = repaired
+    .replace(/\bNone\b/g, 'null')
+    .replace(/\bTrue\b/g, 'true')
+    .replace(/\bFalse\b/g, 'false');
+
+  // 5. Repair Step: Remove trailing commas before } or ]
+  repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
+
+  // 6. Repair Step: Normalize single-quoted property keys
+  repaired = repaired.replace(/([{,]\s*)'([^'\r\n]+)'\s*:/g, '$1"$2":');
+
+  try {
+    return JSON.parse(repaired);
+  } catch (e) {}
+
+  // 7. Repair Step: Fix unescaped control characters in string values
+  repaired = repaired.replace(/[\u0000-\u0009\u000B-\u001F]+/g, ' ');
+
+  try {
+    return JSON.parse(repaired);
+  } catch (e) {}
+
+  return null;
 }
 
 /**
@@ -434,14 +479,32 @@ async function crawlSchoolWithGemini(school, options = {}) {
     };
   }
 
-  // Candidate models to try in case of 404 NOT_FOUND on a specific model alias (strictly Gemini 3+ models)
+  // Model alias mapping for Gemini models to ensure non-existent models gracefully map to valid endpoints
+  const GEMINI_MODEL_ALIASES = {
+    'gemini-3.6-flash-lite': 'gemini-3.5-flash-lite',
+    'gemini-3.0-flash-lite': 'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite-preview': 'gemini-3.1-flash-lite',
+    'gemini-3.0-flash': 'gemini-3.6-flash',
+    'gemini-3-flash': 'gemini-3.6-flash',
+    'gemini-3.6-pro': 'gemini-3.6-flash',
+    'gemini-3.0-pro': 'gemini-3.6-flash'
+  };
+
+  let normalizedRequestedModel = requestedModel;
+  if (GEMINI_MODEL_ALIASES[requestedModel]) {
+    normalizedRequestedModel = GEMINI_MODEL_ALIASES[requestedModel];
+  }
+
+  // Candidate models to try in case of 404 NOT_FOUND on a specific model alias
   const candidateModels = [
-    requestedModel,
+    normalizedRequestedModel,
     'gemini-3.6-flash',
     'gemini-3.5-flash-lite',
-    'gemini-3.6-flash-lite',
-    'gemini-3.0-flash',
-    'gemini-3-flash'
+    'gemini-3.1-flash-lite',
+    'gemini-3.7-flash',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite'
   ].filter((v, i, a) => a.indexOf(v) === i);
 
   let res = null;
@@ -496,14 +559,35 @@ async function crawlSchoolWithGemini(school, options = {}) {
         status: res.status,
         statusText: `${res.status} Error`,
         rawText: rawApiBody,
+        candidateText: rawApiBody,
         parsedJson: res.json,
         timestamp: new Date().toISOString()
       }
     };
   }
 
-  const candidateText = res.json?.candidates?.[0]?.content?.parts?.[0]?.text || res.bodyText;
-  const parsedData = extractJsonFromLlmText(candidateText);
+  // Extract candidate text from Gemini response structure, iterating across parts if necessary
+  let candidateText = '';
+  const candidateParts = res.json?.candidates?.[0]?.content?.parts;
+  if (Array.isArray(candidateParts) && candidateParts.length > 0) {
+    const validParts = candidateParts.filter(p => p && typeof p.text === 'string' && !p.thought);
+    if (validParts.length > 0) {
+      candidateText = validParts.map(p => p.text).join('\n');
+    } else {
+      candidateText = candidateParts.map(p => p.text || '').join('\n');
+    }
+  } else if (typeof res.json?.candidates?.[0]?.content?.text === 'string') {
+    candidateText = res.json.candidates[0].content.text;
+  } else if (typeof res.json?.text === 'string') {
+    candidateText = res.json.text;
+  } else {
+    candidateText = res.bodyText || '';
+  }
+
+  let parsedData = extractJsonFromLlmText(candidateText);
+  if (!parsedData && res.bodyText && res.bodyText !== candidateText) {
+    parsedData = extractJsonFromLlmText(res.bodyText);
+  }
 
   if (!parsedData) {
     return {
@@ -667,6 +751,7 @@ async function crawlSchoolWithChatGPT(school, options = {}) {
         status: res.status,
         statusText: `${res.status} Error`,
         rawText: rawApiBody,
+        candidateText: rawApiBody,
         parsedJson: res.json,
         timestamp: new Date().toISOString()
       }
@@ -674,7 +759,10 @@ async function crawlSchoolWithChatGPT(school, options = {}) {
   }
 
   const messageContent = res.json?.choices?.[0]?.message?.content || res.bodyText;
-  const parsedData = extractJsonFromLlmText(messageContent);
+  let parsedData = extractJsonFromLlmText(messageContent);
+  if (!parsedData && res.bodyText && res.bodyText !== messageContent) {
+    parsedData = extractJsonFromLlmText(res.bodyText);
+  }
 
   if (!parsedData) {
     return {
@@ -718,30 +806,72 @@ async function crawlSchoolWithChatGPT(school, options = {}) {
 }
 
 /**
- * Universal LLM Crawler Dispatcher
+ * Determine if a new candidate address should replace an existing address.
+ * Prevents downgrading detailed full addresses (e.g. "Broadfield Road, London, SE6 1TJ")
+ * with basic/coarse ones (e.g. "London" or "Lewisham").
  */
-/**
- * Reconciles raw returned LLM JSON fields into standardized database school attributes.
- */
-function reconcileLlmSchoolPayload(rawData, existingSchool = {}) {
-  if (!rawData || typeof rawData !== 'object') return {};
+function shouldUpdateAddress(existingAddress, newAddress) {
+  if (!newAddress || typeof newAddress !== 'string') return false;
+  const next = newAddress.trim();
+  if (!next || next === 'N/A' || next === 'null' || next === 'undefined') return false;
+  
+  if (!existingAddress || typeof existingAddress !== 'string') return true;
+  const current = existingAddress.trim();
+  if (!current || current === 'N/A' || current === 'null' || current === 'undefined') return true;
+  
+  // If identical (ignoring whitespace and case), no update needed
+  if (current.toLowerCase() === next.toLowerCase()) return false;
 
+  // Street / building indicator regex
+  const streetRegex = /\b(\d+[a-z]?|road|rd|street|st|avenue|ave|lane|ln|close|cl|drive|dr|way|crescent|cres|court|ct|gardens|gdns|terrace|terr|hill|walk|place|pl|grove|grv|park|pk|house|hall|square|sq|row|quay|wharf|boulevard|blvd|mews|rise|vale|yard|broadway|bypass|embankment)\b/i;
+  
+  const currentHasStreet = streetRegex.test(current);
+  const nextHasStreet = streetRegex.test(next);
+
+  const currentParts = current.split(/[,;\n]+/).map(p => p.trim()).filter(Boolean);
+  const nextParts = next.split(/[,;\n]+/).map(p => p.trim()).filter(Boolean);
+
+  // If next address is just a single word or single component (e.g. "London", "Richmond", "Barnet") and current has multiple components or street details
+  if (nextParts.length === 1 && (currentParts.length > 1 || currentHasStreet)) {
+    return false;
+  }
+
+  // If current has street/building details but next does NOT
+  if (currentHasStreet && !nextHasStreet) {
+    return false;
+  }
+
+  // If current address contains next address as a sub-part and is substantially longer (e.g. "Church Road, Wimbledon, London" vs "London" or "Wimbledon")
+  if (current.toLowerCase().includes(next.toLowerCase()) && current.length > next.length + 4) {
+    return false;
+  }
+
+  // If current address has more components and is longer, and next has fewer components
+  if (currentParts.length > nextParts.length && current.length > next.length + 8) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Reconcile and Standardize Raw LLM School Payload
+ */
+function reconcileLlmSchoolPayload(rawData = {}, school = {}) {
   const reconciled = {};
 
-  // 1. School Identity & Classification
-  if (rawData.name) reconciled.name = String(rawData.name).trim();
-  if (rawData.schoolType) reconciled.schoolType = String(rawData.schoolType).trim();
-  if (rawData.rawSchoolType || rawData.raw_school_type || rawData.schoolTypeDetail) {
-    reconciled.rawSchoolType = String(rawData.rawSchoolType || rawData.raw_school_type || rawData.schoolTypeDetail).trim();
+  // 1. Classification & High-Level Metadata
+  if (rawData.schoolType || rawData.type) {
+    reconciled.schoolType = String(rawData.schoolType || rawData.type).trim();
   }
-  if (rawData.gender && ['Boys', 'Girls', 'Mixed'].includes(rawData.gender)) {
+  if (rawData.rawSchoolType || rawData.raw_school_type) {
+    reconciled.rawSchoolType = String(rawData.rawSchoolType || rawData.raw_school_type).trim();
+  }
+  if (rawData.gender && (rawData.gender === 'Boys' || rawData.gender === 'Girls' || rawData.gender === 'Mixed')) {
     reconciled.gender = rawData.gender;
   }
   if (rawData.ageRange || rawData.age_range) {
     reconciled.ageRange = String(rawData.ageRange || rawData.age_range).trim();
-  }
-  if (rawData.description || rawData.summary || rawData.overview) {
-    reconciled.description = String(rawData.description || rawData.summary || rawData.overview).trim();
   }
 
   // 2. Admissions Overview & Policy Formatted Text
@@ -763,7 +893,12 @@ function reconcileLlmSchoolPayload(rawData, existingSchool = {}) {
     reconciled.email = String(rawData.email).trim();
   }
   if (rawData.address && String(rawData.address).trim() && rawData.address !== 'N/A') {
-    reconciled.address = String(rawData.address).trim();
+    const candidateAddr = String(rawData.address).trim();
+    if (school && school.address && !shouldUpdateAddress(school.address, candidateAddr)) {
+      reconciled.address = school.address;
+    } else {
+      reconciled.address = candidateAddr;
+    }
   }
   if (rawData.postcode && String(rawData.postcode).trim() && rawData.postcode !== 'N/A') {
     reconciled.postcode = String(rawData.postcode).trim().toUpperCase();
@@ -912,8 +1047,8 @@ function applyLLMResultToSchool(schoolId, llmResult, adminUser = 'LLM AI Crawler
   if (!db) {
     throw new Error('Database module not available');
   }
-  if (!llmResult || !llmResult.success || !llmResult.data) {
-    throw new Error('Invalid or unsuccessful LLM result cannot be applied to school record');
+  if (!llmResult || !llmResult.success || !llmResult.data || llmResult.error || llmResult.exactResponse?.status === 429 || (llmResult.exactResponse?.status && llmResult.exactResponse.status >= 400)) {
+    throw new Error(`Invalid or unsuccessful LLM result cannot be applied to school record: ${llmResult?.error || (llmResult?.exactResponse?.status ? `HTTP ${llmResult.exactResponse.status}` : 'Unknown LLM error')}`);
   }
 
   const sqlite = db.getDb();
@@ -926,7 +1061,286 @@ function applyLLMResultToSchool(schoolId, llmResult, adminUser = 'LLM AI Crawler
   const data = reconcileLlmSchoolPayload(rawData, school);
   const now = new Date().toISOString();
 
-  // Combine verification tags
+  const dataUpdates = [];
+  const dataParams = [];
+  const updatedFieldNames = [];
+
+  const cleanDatesJson = JSON.stringify(data.entranceExamDates || {});
+
+  // Helper to compare dates objects deeply
+  function areDatesDifferent(oldDatesRaw, newDatesRaw) {
+    let oldObj = {};
+    let newObj = {};
+    try {
+      oldObj = typeof oldDatesRaw === 'string' ? JSON.parse(oldDatesRaw) : (oldDatesRaw || {});
+    } catch(e) {}
+    try {
+      newObj = typeof newDatesRaw === 'string' ? JSON.parse(newDatesRaw) : (newDatesRaw || {});
+    } catch(e) {}
+
+    const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
+    for (const k of allKeys) {
+      if (k === 'second_stage_exam_required') continue;
+      const oldV = oldObj[k];
+      const newV = newObj[k];
+      const oldStr = Array.isArray(oldV) ? oldV.join(', ') : (oldV !== undefined && oldV !== null ? String(oldV).trim() : '');
+      const newStr = Array.isArray(newV) ? newV.join(', ') : (newV !== undefined && newV !== null ? String(newV).trim() : '');
+      if (newStr && newStr !== 'N/A' && newStr !== 'null' && newStr !== oldStr) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 1. Entrance Exam Dates
+  if (cleanDatesJson && cleanDatesJson !== '{}' && cleanDatesJson !== 'null') {
+    if (areDatesDifferent(school.entranceExamDates, data.entranceExamDates)) {
+      dataUpdates.push('entranceExamDates = ?');
+      dataParams.push(cleanDatesJson);
+      updatedFieldNames.push('entranceExamDates');
+    }
+  }
+
+  // 2. Admissions Policy
+  if (data.admissionsPolicy && String(data.admissionsPolicy).trim()) {
+    const val = String(data.admissionsPolicy).trim();
+    if ((school.admissionsPolicy || '').trim() !== val) {
+      dataUpdates.push('admissionsPolicy = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('admissionsPolicy');
+    }
+  }
+
+  // 3. Description
+  if (data.description && String(data.description).trim()) {
+    const val = String(data.description).trim();
+    if ((school.description || '').trim() !== val) {
+      dataUpdates.push('description = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('description');
+    }
+  }
+
+  // 4. Raw School Type
+  if (data.rawSchoolType && String(data.rawSchoolType).trim()) {
+    const val = String(data.rawSchoolType).trim();
+    if ((school.rawSchoolType || '').trim() !== val) {
+      dataUpdates.push('rawSchoolType = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('rawSchoolType');
+    }
+  }
+
+  // 5. School Type
+  if (data.schoolType && String(data.schoolType).trim()) {
+    const val = String(data.schoolType).trim();
+    if ((school.schoolType || '').trim() !== val) {
+      dataUpdates.push('schoolType = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('schoolType');
+    }
+  }
+
+  // 6. Gender (Protect established single-sex schools from being erroneously flipped to 'Mixed' without high confidence and verified web presence)
+  if (data.gender && (data.gender === 'Boys' || data.gender === 'Girls' || data.gender === 'Mixed')) {
+    const currentGender = (school.gender || '').trim();
+    let shouldUpdateGender = false;
+
+    if (!currentGender || currentGender === 'N/A') {
+      shouldUpdateGender = true;
+    } else if (currentGender !== data.gender) {
+      if ((currentGender === 'Boys' || currentGender === 'Girls') && data.gender === 'Mixed') {
+        const hasVerifiedProof = (data.confidenceScore && data.confidenceScore >= 95) && data.website;
+        if (hasVerifiedProof) {
+          shouldUpdateGender = true;
+        }
+      } else {
+        shouldUpdateGender = true;
+      }
+    }
+
+    if (shouldUpdateGender) {
+      dataUpdates.push('gender = ?');
+      dataParams.push(data.gender);
+      updatedFieldNames.push('gender');
+    }
+  }
+
+  // 7. Age Range
+  if (data.ageRange && String(data.ageRange).trim()) {
+    const val = String(data.ageRange).trim();
+    if ((school.ageRange || '').trim() !== val) {
+      dataUpdates.push('ageRange = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('ageRange');
+    }
+  }
+
+  // 8. Website
+  if (data.website && String(data.website).startsWith('http')) {
+    const val = String(data.website).trim();
+    if ((school.website || '').trim() !== val) {
+      dataUpdates.push('website = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('website');
+    }
+  }
+
+  // 9. Phone
+  if (data.phone && String(data.phone).trim()) {
+    const val = String(data.phone).trim();
+    if ((school.phone || '').trim() !== val) {
+      dataUpdates.push('phone = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('phone');
+    }
+  }
+
+  // 10. Email
+  if (data.email && String(data.email).includes('@')) {
+    const val = String(data.email).trim();
+    if ((school.email || '').trim() !== val) {
+      dataUpdates.push('email = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('email');
+    }
+  }
+
+  // 11. Address (Preserve detailed address if candidate is only basic/city name)
+  if (data.address && shouldUpdateAddress(school.address, data.address)) {
+    const val = String(data.address).trim();
+    dataUpdates.push('address = ?');
+    dataParams.push(val);
+    updatedFieldNames.push('address');
+  }
+
+  // 12. Postcode
+  if (data.postcode && String(data.postcode).trim() && data.postcode !== 'N/A') {
+    const val = String(data.postcode).trim().toUpperCase();
+    if ((school.postcode || '').trim().toUpperCase() !== val) {
+      dataUpdates.push('postcode = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('postcode');
+    }
+  }
+
+  // 13. Entrance Exam Type
+  if (data.entranceExamType && String(data.entranceExamType).trim()) {
+    const val = String(data.entranceExamType).trim();
+    if ((school.entranceExamType || '').trim() !== val) {
+      dataUpdates.push('entranceExamType = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('entranceExamType');
+    }
+  }
+
+  // 14. Fees Termly
+  if (data.feesTermly && String(data.feesTermly).trim() && data.feesTermly !== 'null') {
+    const val = String(data.feesTermly).trim();
+    if ((school.feesTermly || '').trim() !== val) {
+      dataUpdates.push('feesTermly = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('feesTermly');
+    }
+  }
+
+  // 15. Registration Fee
+  if (data.registrationFee && String(data.registrationFee).trim() && data.registrationFee !== 'null') {
+    const val = String(data.registrationFee).trim();
+    if ((school.registrationFee || '').trim() !== val) {
+      dataUpdates.push('registrationFee = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('registrationFee');
+    }
+  }
+
+  // 16. Source URL
+  if (data.sourceUrl && String(data.sourceUrl).startsWith('http')) {
+    const val = String(data.sourceUrl).trim();
+    if ((school.sourceUrl || '').trim() !== val) {
+      dataUpdates.push('sourceUrl = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('sourceUrl');
+    }
+  }
+
+  // 17. Second Stage Exam Required (only if explicitly in rawData or changed from existing)
+  if (rawData.second_stage_exam_required !== undefined || rawData.stage2Required !== undefined || rawData.secondStageRequired !== undefined) {
+    const val = String(data.second_stage_exam_required).trim();
+    if ((school.second_stage_exam_required || '').trim() !== val) {
+      dataUpdates.push('second_stage_exam_required = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('second_stage_exam_required');
+    }
+  }
+
+  // 18. Stage One Format & Subjects
+  if (data.stage_one_format_and_subjects && String(data.stage_one_format_and_subjects).trim()) {
+    const val = String(data.stage_one_format_and_subjects).trim();
+    if ((school.stage_one_format_and_subjects || '').trim() !== val) {
+      dataUpdates.push('stage_one_format_and_subjects = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('stage_one_format_and_subjects');
+    }
+  }
+
+  // 19. Stage Two Format & Subjects
+  if (data.stage_two_format_and_subjects && String(data.stage_two_format_and_subjects).trim()) {
+    const val = String(data.stage_two_format_and_subjects).trim();
+    if ((school.stage_two_format_and_subjects || '').trim() !== val) {
+      dataUpdates.push('stage_two_format_and_subjects = ?');
+      dataParams.push(val);
+      updatedFieldNames.push('stage_two_format_and_subjects');
+    }
+  }
+
+  // 20. National Rank England
+  if (rawData.national_rank_england !== undefined && rawData.national_rank_england !== null) {
+    const parsedRank = parseInt(data.national_rank_england, 10);
+    const validRank = (!isNaN(parsedRank) && parsedRank > 0) ? parsedRank : null;
+    if (validRank !== null && school.national_rank_england !== validRank) {
+      dataUpdates.push('national_rank_england = ?');
+      dataParams.push(validRank);
+      updatedFieldNames.push('national_rank_england');
+    }
+  }
+
+  // 21. GCSE Rank England
+  if (rawData.gcse_rank_england !== undefined && rawData.gcse_rank_england !== null) {
+    const parsedRank = parseInt(data.gcse_rank_england, 10);
+    const validRank = (!isNaN(parsedRank) && parsedRank > 0) ? parsedRank : null;
+    if (validRank !== null && school.gcse_rank_england !== validRank) {
+      dataUpdates.push('gcse_rank_england = ?');
+      dataParams.push(validRank);
+      updatedFieldNames.push('gcse_rank_england');
+    }
+  }
+
+  // 22. A-Level Rank England
+  if (rawData.a_level_rank_england !== undefined && rawData.a_level_rank_england !== null) {
+    const parsedRank = parseInt(data.a_level_rank_england, 10);
+    const validRank = (!isNaN(parsedRank) && parsedRank > 0) ? parsedRank : null;
+    if (validRank !== null && school.a_level_rank_england !== validRank) {
+      dataUpdates.push('a_level_rank_england = ?');
+      dataParams.push(validRank);
+      updatedFieldNames.push('a_level_rank_england');
+    }
+  }
+
+  // STRICT REQUIREMENT: If no fields were added or updated, do NOT mark as llm_enriched
+  if (updatedFieldNames.length === 0) {
+    console.log(`[LLM Crawler] No new or updated fields found for "${school.name}". Skipping llm_enriched tag.`);
+    return {
+      success: false,
+      reason: 'NO_FIELDS_UPDATED',
+      updated: false,
+      updatedSchool: school,
+      updatedFieldsCount: 0,
+      updatedFields: []
+    };
+  }
+
+  // Combine verification tags ONLY when at least one field was updated
   let existingTags = [];
   if (Array.isArray(school.verification_tags)) {
     existingTags = school.verification_tags;
@@ -949,8 +1363,6 @@ function applyLLMResultToSchool(schoolId, llmResult, adminUser = 'LLM AI Crawler
     'dates_verified'
   ]));
 
-  const cleanDatesJson = JSON.stringify(data.entranceExamDates || {});
-
   const reportPayload = {
     provider: llmResult.provider,
     model: llmResult.model,
@@ -963,7 +1375,8 @@ function applyLLMResultToSchool(schoolId, llmResult, adminUser = 'LLM AI Crawler
     reconciledData: data,
     exactRequest: llmResult.exactRequest || null,
     exactResponse: llmResult.exactResponse || null,
-    status: 'llm_enriched'
+    status: 'llm_enriched',
+    updatedFields: updatedFieldNames
   };
 
   const batchId = `llm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -987,130 +1400,39 @@ function applyLLMResultToSchool(schoolId, llmResult, adminUser = 'LLM AI Crawler
         exactResponse: llmResult.exactResponse || null,
         provider: llmResult.provider,
         model: llmResult.model,
-        verifiedAt: now
+        verifiedAt: now,
+        updatedFields: updatedFieldNames
       }),
       adminUser,
       now
     );
     auditLogId = Number(logInfo.lastInsertRowid);
 
-    const updates = [];
-    const params = [];
+    const allUpdates = [...dataUpdates];
+    const allParams = [...dataParams];
 
-    if (cleanDatesJson && cleanDatesJson !== '{}') {
-      updates.push('entranceExamDates = ?');
-      params.push(cleanDatesJson);
-    }
-    if (data.admissionsPolicy && String(data.admissionsPolicy).trim()) {
-      updates.push('admissionsPolicy = ?');
-      params.push(String(data.admissionsPolicy).trim());
-    }
-    if (data.description && String(data.description).trim()) {
-      updates.push('description = ?');
-      params.push(String(data.description).trim());
-    }
-    if (data.rawSchoolType && String(data.rawSchoolType).trim()) {
-      updates.push('rawSchoolType = ?');
-      params.push(String(data.rawSchoolType).trim());
-    }
-    if (data.schoolType && String(data.schoolType).trim()) {
-      updates.push('schoolType = ?');
-      params.push(String(data.schoolType).trim());
-    }
-    if (data.gender && (data.gender === 'Boys' || data.gender === 'Girls' || data.gender === 'Mixed')) {
-      updates.push('gender = ?');
-      params.push(data.gender);
-    }
-    if (data.ageRange && String(data.ageRange).trim()) {
-      updates.push('ageRange = ?');
-      params.push(String(data.ageRange).trim());
-    }
-    if (data.website && String(data.website).startsWith('http')) {
-      updates.push('website = ?');
-      params.push(String(data.website).trim());
-    }
-    if (data.phone && String(data.phone).trim()) {
-      updates.push('phone = ?');
-      params.push(String(data.phone).trim());
-    }
-    if (data.email && String(data.email).includes('@')) {
-      updates.push('email = ?');
-      params.push(String(data.email).trim());
-    }
-    if (data.address && String(data.address).trim() && data.address !== 'N/A') {
-      updates.push('address = ?');
-      params.push(String(data.address).trim());
-    }
-    if (data.postcode && String(data.postcode).trim() && data.postcode !== 'N/A') {
-      updates.push('postcode = ?');
-      params.push(String(data.postcode).trim().toUpperCase());
-    }
-    if (data.entranceExamType && String(data.entranceExamType).trim()) {
-      updates.push('entranceExamType = ?');
-      params.push(String(data.entranceExamType).trim());
-    }
-    if (data.feesTermly && String(data.feesTermly).trim() && data.feesTermly !== 'null') {
-      updates.push('feesTermly = ?');
-      params.push(String(data.feesTermly).trim());
-    }
-    if (data.registrationFee && String(data.registrationFee).trim() && data.registrationFee !== 'null') {
-      updates.push('registrationFee = ?');
-      params.push(String(data.registrationFee).trim());
-    }
-    if (data.sourceUrl && String(data.sourceUrl).startsWith('http')) {
-      updates.push('sourceUrl = ?');
-      params.push(String(data.sourceUrl).trim());
-    }
-    if (data.second_stage_exam_required) {
-      updates.push('second_stage_exam_required = ?');
-      params.push(String(data.second_stage_exam_required).trim());
-    }
-    if (data.stage_one_format_and_subjects) {
-      updates.push('stage_one_format_and_subjects = ?');
-      params.push(String(data.stage_one_format_and_subjects).trim());
-    }
-    if (data.stage_two_format_and_subjects) {
-      updates.push('stage_two_format_and_subjects = ?');
-      params.push(String(data.stage_two_format_and_subjects).trim());
-    }
-    if (data.national_rank_england !== undefined) {
-      const parsedRank = parseInt(data.national_rank_england, 10);
-      updates.push('national_rank_england = ?');
-      params.push(!isNaN(parsedRank) && parsedRank > 0 ? parsedRank : null);
-    }
-    if (data.gcse_rank_england !== undefined) {
-      const parsedGcseRank = parseInt(data.gcse_rank_england, 10);
-      updates.push('gcse_rank_england = ?');
-      params.push(!isNaN(parsedGcseRank) && parsedGcseRank > 0 ? parsedGcseRank : null);
-    }
-    if (data.a_level_rank_england !== undefined) {
-      const parsedALevelRank = parseInt(data.a_level_rank_england, 10);
-      updates.push('a_level_rank_england = ?');
-      params.push(!isNaN(parsedALevelRank) && parsedALevelRank > 0 ? parsedALevelRank : null);
-    }
+    allUpdates.push('verification_status = ?');
+    allParams.push('llm_enriched');
 
-    updates.push('verification_status = ?');
-    params.push('llm_enriched');
+    allUpdates.push('verification_tags = ?');
+    allParams.push(JSON.stringify(newTags));
 
-    updates.push('verification_tags = ?');
-    params.push(JSON.stringify(newTags));
+    allUpdates.push('verification_report = ?');
+    allParams.push(JSON.stringify(reportPayload));
 
-    updates.push('verification_report = ?');
-    params.push(JSON.stringify(reportPayload));
+    allUpdates.push('verified_at = ?');
+    allParams.push(now);
 
-    updates.push('verified_at = ?');
-    params.push(now);
+    allUpdates.push('confidence_score = ?');
+    allParams.push(Math.max(school.confidence_score || 0, data.confidenceScore || 95));
 
-    updates.push('confidence_score = ?');
-    params.push(Math.max(school.confidence_score || 0, data.confidenceScore || 95));
-
-    params.push(schoolId);
+    allParams.push(schoolId);
 
     sqlite.prepare(`
       UPDATE schools
-      SET ${updates.join(', ')}
+      SET ${allUpdates.join(', ')}
       WHERE id = ?
-    `).run(...params);
+    `).run(...allParams);
 
     sqlite.exec('COMMIT;');
   } catch (err) {
@@ -1118,15 +1440,18 @@ function applyLLMResultToSchool(schoolId, llmResult, adminUser = 'LLM AI Crawler
     throw err;
   }
 
+  const updatedSchool = db.getSchoolById(schoolId);
   return {
     success: true,
+    updated: true,
     schoolId,
-    batchId,
+    updatedSchool,
     auditLogId,
-    provider: llmResult.provider,
+    batchId,
     tags: newTags,
     previousSchool: school,
-    updatedSchool: db.getSchoolById(schoolId)
+    updatedFieldsCount: updatedFieldNames.length,
+    updatedFields: updatedFieldNames
   };
 }
 
@@ -1145,5 +1470,6 @@ module.exports = {
   crawlSchoolWithGemini,
   crawlSchoolWithChatGPT,
   crawlSchoolWithLLM,
-  applyLLMResultToSchool
+  applyLLMResultToSchool,
+  shouldUpdateAddress
 };

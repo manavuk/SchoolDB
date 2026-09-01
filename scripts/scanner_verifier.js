@@ -988,16 +988,6 @@ function validateLlmResponse(data, school) {
     }
   }
 
-  const hasDates = Boolean(data.entranceExamDates && typeof data.entranceExamDates === 'object' && Object.values(data.entranceExamDates).some(v => v && typeof v === 'string' && v.trim()));
-  const hasWebsite = Boolean(data.website && String(data.website).startsWith('http'));
-  const hasExamType = Boolean(data.entranceExamType && String(data.entranceExamType).trim() && data.entranceExamType !== 'Unknown');
-  const hasContacts = Boolean((data.phone && String(data.phone).trim()) || (data.email && String(data.email).includes('@')));
-  const hasGender = Boolean(data.gender && (data.gender === 'Boys' || data.gender === 'Girls' || data.gender === 'Mixed'));
-
-  if (!hasDates && !hasWebsite && !hasExamType && !hasContacts && !hasGender) {
-    return { valid: false, reason: 'LLM returned no actionable school intelligence fields' };
-  }
-
   return { valid: true };
 }
 
@@ -1117,7 +1107,10 @@ function computeSchoolDiff(previousSchool = {}, newData = {}, updatedSchool = {}
   // 8. Address Diff
   const oldAddress = previousSchool.address || null;
   const newAddress = newData.address || null;
-  if (newAddress && newAddress !== 'N/A' && newAddress !== oldAddress) {
+  const shouldChangeAddr = llmCrawler && typeof llmCrawler.shouldUpdateAddress === 'function'
+    ? llmCrawler.shouldUpdateAddress(oldAddress, newAddress)
+    : (newAddress && newAddress !== 'N/A' && newAddress !== oldAddress);
+  if (shouldChangeAddr && newAddress && newAddress !== 'N/A' && newAddress !== oldAddress) {
     diffs.push({ field: 'address', label: 'Address', oldVal: oldAddress, newVal: newAddress, type: 'text' });
   }
 
@@ -1367,18 +1360,19 @@ async function auditAndVerifySchool(school, options = {}) {
     }
 
     // 2. Process Verified LLM Intelligence
-    if (llmRes && llmRes.success && llmRes.data) {
+    if (llmRes && llmRes.success && llmRes.data && !llmRes.error && llmRes.exactResponse?.status !== 429 && (!llmRes.exactResponse?.status || llmRes.exactResponse.status < 400)) {
       const data = llmRes.data;
       const validation = validateLlmResponse(data, school);
 
       if (validation.valid) {
-        // Response is satisfactory -> Directly update database and mark school as llm_enriched
         let updatedDbSchool = null;
         let auditLogId = null;
         let batchId = null;
+        let applyRes = null;
+
         if (llmCrawler) {
           try {
-            const applyRes = llmCrawler.applyLLMResultToSchool(school.id, llmRes, 'Live Background AI Auditor');
+            applyRes = llmCrawler.applyLLMResultToSchool(school.id, llmRes, 'Live Background AI Auditor');
             updatedDbSchool = applyRes?.updatedSchool;
             auditLogId = applyRes?.auditLogId || null;
             batchId = applyRes?.batchId || null;
@@ -1387,34 +1381,52 @@ async function auditAndVerifySchool(school, options = {}) {
           }
         }
 
-        const providerTag = llmRes.provider === 'chatgpt' ? 'chatgpt_crawl' : 'gemini_crawl';
-        result.status = 'llm_enriched';
-        result.tags = Array.from(new Set([
-          ...result.tags,
-          'llm_enriched',
-          'auto_verified',
-          'llm_verified',
-          providerTag,
-          'p0_cycle_current',
-          'dates_verified'
-        ]));
-        result.gemini_crawl = 'success';
-        if (llmRes.provider === 'chatgpt') result.chatgpt_crawl = 'success';
-        result.llmVerification = llmRes;
-        result.confidenceScore = Math.max(75, data.confidenceScore || 95);
-        result.proposedDates = data.entranceExamDates || {};
-        result.website = data.website || school.website;
-        result.auditLogId = auditLogId;
-        result.batchId = batchId;
-        result.diffs = computeSchoolDiff(school, data, updatedDbSchool);
-        result.previousSchool = school;
-        result.exactRequest = llmRes.exactRequest || null;
-        result.exactResponse = llmRes.exactResponse || null;
-        if (updatedDbSchool) {
-          result.updatedSchool = updatedDbSchool;
+        // ONLY mark as llm_enriched if the DB update succeeded AND at least one field was added/updated
+        if (applyRes && applyRes.success && applyRes.updated && applyRes.updatedFieldsCount > 0) {
+          const providerTag = llmRes.provider === 'chatgpt' ? 'chatgpt_crawl' : 'gemini_crawl';
+          result.status = 'llm_enriched';
+          result.tags = Array.from(new Set([
+            ...result.tags,
+            'llm_enriched',
+            'auto_verified',
+            'llm_verified',
+            providerTag,
+            'p0_cycle_current',
+            'dates_verified'
+          ]));
+          result.gemini_crawl = 'success';
+          if (llmRes.provider === 'chatgpt') result.chatgpt_crawl = 'success';
+          result.llmVerification = llmRes;
+          result.confidenceScore = Math.max(75, data.confidenceScore || 95);
+          result.proposedDates = data.entranceExamDates || {};
+          result.website = data.website || school.website;
+          result.auditLogId = auditLogId;
+          result.batchId = batchId;
+          result.diffs = computeSchoolDiff(school, data, updatedDbSchool);
+          result.previousSchool = school;
+          result.exactRequest = llmRes.exactRequest || null;
+          result.exactResponse = llmRes.exactResponse || null;
+          if (updatedDbSchool) {
+            result.updatedSchool = updatedDbSchool;
+          }
+          return result;
+        } else {
+          // No fields were updated -> preserve existing valid status, do NOT add llm_enriched tag, but clear any old llm_error
+          const prevStatus = school.verification_status;
+          result.status = (prevStatus && prevStatus !== 'llm_error' && prevStatus !== 'unverified') ? prevStatus : 'auto_verified';
+          let prevTags = Array.isArray(school.verification_tags) ? [...school.verification_tags] : [];
+          prevTags = prevTags.filter(t => t !== 'llm_error' && t !== 'auto_verification_data_missing' && t !== 'dead_website');
+          if (!prevTags.includes('auto_verified') && !prevTags.includes('inspected') && !prevTags.includes('llm_enriched')) {
+            prevTags.push('inspected');
+          }
+          result.tags = prevTags;
+          result.diffs = [];
+          result.previousSchool = school;
+          result.updatedSchool = school;
+          result.exactRequest = llmRes.exactRequest || null;
+          result.exactResponse = llmRes.exactResponse || null;
+          return result;
         }
-
-        return result;
       }
     }
 
@@ -1535,6 +1547,10 @@ async function auditAndVerifySchool(school, options = {}) {
  */
 function getPriorityGroupQuery(category = 'ALL') {
   switch (category.toUpperCase()) {
+    case 'GREATER_LONDON':
+    case 'GREATER_LONDON_REGION':
+    case 'LONDON':
+      return "WHERE (region = 'Greater London' OR la IN ('Camden','Barnet','Westminster','Kensington and Chelsea','Hammersmith and Fulham','Wandsworth','Richmond upon Thames','Kingston upon Thames','Merton','Sutton','Croydon','Bromley','Lewisham','Greenwich','Bexley','Havering','Barking and Dagenham','Redbridge','Newham','Waltham Forest','Haringey','Enfield','Islington','Hackney','Tower Hamlets','Southwark','Lambeth','Hounslow','Ealing','Brent','Harrow','Hillingdon'))";
     case 'LONDON_INDEPENDENT':
       return "WHERE schoolType = 'Independent' AND (region = 'Greater London' OR la IN ('Camden','Barnet','Westminster','Kensington and Chelsea','Hammersmith and Fulham','Wandsworth','Richmond upon Thames','Kingston upon Thames','Merton','Sutton','Croydon','Bromley','Lewisham','Greenwich','Bexley','Havering','Barking and Dagenham','Redbridge','Newham','Waltham Forest','Haringey','Enfield','Islington','Hackney','Tower Hamlets','Southwark','Lambeth','Hounslow','Ealing','Brent','Harrow','Hillingdon'))";
     case 'ALL_INDEPENDENT':

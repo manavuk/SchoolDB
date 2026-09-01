@@ -654,12 +654,12 @@
                 </div>
 
                 <div class="filter-group">
-                  <label><i class="fa-solid fa-users"></i> Gender Intake</label>
+                  <label><i class="fa-solid fa-users"></i> Gender</label>
                   <select id="gender-select" onchange="loadSchools()">
                     <option value="">All (Boys, Girls, Mixed)</option>
                     <option value="Girls">Girls Only</option>
                     <option value="Boys">Boys Only</option>
-                    <option value="Mixed">Mixed Intake</option>
+                    <option value="Mixed">Mixed</option>
                   </select>
                 </div>
 
@@ -866,6 +866,7 @@
                     <select id="scanner-priority-category" style="font-size: 0.82rem; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid #cbd5e1; background: white;">
                       <option value="CURRENT_TAB">🎯 Active Tab Category (Unscanned First)</option>
                       <option value="UNVERIFIED">⚡ All Unscanned Schools (Priority)</option>
+                      <option value="GREATER_LONDON">🏛️ Greater London Region (All Types)</option>
                       <option value="LONDON_INDEPENDENT" selected>1. London Area Independent Schools</option>
                       <option value="ALL_INDEPENDENT">2. All Independent Schools</option>
                       <option value="GRAMMAR">3. Selective Grammar Schools</option>
@@ -1036,7 +1037,7 @@
                   Multi-select &amp; batch modify
                 </span>
               </div>
-              <p class="helper-text">Select multiple schools using the checkboxes below to modify their shared attributes simultaneously. Apply batch updates across Ofsted ratings, school types, gender intakes, entrance exam types, boroughs, or status flags.</p>
+              <p class="helper-text">Select multiple schools using the checkboxes below to modify their shared attributes simultaneously. Apply batch updates across Ofsted ratings, school types, genders, entrance exam types, boroughs, or status flags.</p>
 
               <!-- Batch Action Bar (Active when items selected) -->
               <div class="bulk-action-bar" style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 1rem; margin-bottom: 1.2rem;">
@@ -1067,7 +1068,7 @@
                       <option value="">-- Choose Field to Batch Update --</option>
                       <option value="ofstedRating">Ofsted Rating</option>
                       <option value="schoolType">School Type</option>
-                      <option value="gender">Gender Intake</option>
+                      <option value="gender">Gender</option>
                       <option value="entranceExamType">Entrance Exam Type</option>
                       <option value="hot">Hot School Status Badge</option>
                       <option value="official">Official DfE Data Badge</option>
@@ -1610,10 +1611,13 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
                         <span style="font-size: 0.72rem; color: #64748b;">Gemini 3 API Series</span>
                       </label>
                       <select id="setting-gemini-model" style="width: 100%; padding: 0.55rem 0.75rem; font-size: 0.88rem; font-weight: 600; border-radius: 6px; border: 1px solid #cbd5e1; background: white; color: #1e293b;">
-                        <option value="gemini-3.6-flash" selected>gemini-3.6-flash (Recommended • Fast, Accurate &amp; Cost-Efficient)</option>
+                        <option value="gemini-3.7-flash">gemini-3.7-flash (Gemini 3.7 Flash • High-Speed Reasoning &amp; Multimodal)</option>
+                        <option value="gemini-3.6-flash" selected>gemini-3.6-flash (Gemini 3.6 Flash • Recommended Default)</option>
+                        <option value="gemini-3.5-flash">gemini-3.5-flash (Gemini 3.5 Flash)</option>
                         <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Gemini 3.5 Flash Lite • Ultra-Low Latency &amp; High Throughput)</option>
-                        <option value="gemini-3.6-flash-lite">gemini-3.6-flash-lite (Gemini 3.6 Flash Lite Tier)</option>
-                        <option value="gemini-3.0-flash">gemini-3.0-flash (Gemini 3.0 Flash Standard)</option>
+                        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Gemini 3.1 Flash Lite • High-Efficiency Lightweight)</option>
+                        <option value="gemini-2.5-flash">gemini-2.5-flash (Gemini 2.5 Flash)</option>
+                        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Gemini 2.5 Flash Lite)</option>
                       </select>
                     </div>
 
@@ -2038,7 +2042,7 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
             </select>
           </div>
           <div class="form-group">
-            <label>Gender Intake</label>
+            <label>Gender</label>
             <select id="add-gender">
               <option value="Girls">Girls</option>
               <option value="Boys">Boys</option>

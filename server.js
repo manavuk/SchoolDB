@@ -780,7 +780,7 @@ app.get('/api/admin/export', (req, res) => {
 
     const headers = [
       'ID', 'URN', 'School Name', 'Local Authority', 'Region', 'Postcode', 'Address',
-      'School Type', 'Gender Intake', 'Age Range', 'Pupil Count', 'Ofsted Rating',
+      'School Type', 'Gender', 'Age Range', 'Pupil Count', 'Ofsted Rating',
       'Progress 8', 'Attainment 8', 'EBacc Score', 'Entrance Exam Type',
       'Exam Registration Open', 'Exam Registration Deadline', 'Exam Date', 'Results Release Date',
       'GCSE Subjects Offered', 'Admissions Policy', 'Website', 'Phone', 'Email'

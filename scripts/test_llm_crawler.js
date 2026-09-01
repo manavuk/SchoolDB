@@ -189,6 +189,7 @@ async function runTests() {
     schoolType: 'Independent',
     website: 'https://completely-broken-offline-school-website-xyz.org.uk'
   };
+  db.insertSchool(mockBrokenSchool);
 
   // Simulate audit where website HTTP request fails/times out, but LLM mock responds with verified dates
   const mockLlmForBroken = {
@@ -216,6 +217,9 @@ async function runTests() {
   assert(auditResult.tags.includes('llm_enriched'), 'Must include llm_enriched tag');
   assert.strictEqual(auditResult.proposedDates.registrationDeadline, '10 November 2026');
   console.log('  ✓ Web crawl failure successfully recovered by LLM and marked llm_enriched.');
+
+  // Clean up mock broken school
+  db.deleteSchool('test_broken_web_school');
 
   // 7. Test System Settings LLM Persistence
   console.log('\n[7. System Settings LLM Persistence Test]');
@@ -293,6 +297,7 @@ async function runTests() {
     verification_tags: JSON.stringify(['llm_enriched', 'auto_verified']),
     verified_at: new Date().toISOString()
   };
+  db.insertSchool(mockEnrichedSchool);
 
   // Without forceRerun -> Must skip
   const skipResult = await scannerVerifier.auditAndVerifySchool(mockEnrichedSchool, { forceRerun: false });
@@ -316,6 +321,9 @@ async function runTests() {
   assert.strictEqual(rerunResult.skipped, undefined, 'Forced rerun must NOT be skipped');
   assert.strictEqual(rerunResult.status, 'llm_enriched', 'Must re-verify and mark llm_enriched');
   console.log('  ✓ School marked llm_enriched is skipped by default, and re-audited when forceRerun is true.');
+
+  // Clean up mock enriched school
+  db.deleteSchool('test_enriched_school_1');
 
     console.log('\n======================================================');
     console.log('🎉 ALL LLM CRAWLER & PROMPT INTELLIGENCE TESTS PASSED!');
