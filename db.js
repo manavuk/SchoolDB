@@ -662,6 +662,38 @@ function initTables() {
       reviewedAt TEXT NOT NULL,
       UNIQUE(schoolId, fieldName)
     );
+
+    CREATE TABLE IF NOT EXISTS audit.audit_actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS audit.audit_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS audit.audit_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id TEXT UNIQUE NOT NULL,
+      action_type_id INTEGER REFERENCES audit_actions(id),
+      applied_by_id INTEGER REFERENCES audit_users(id),
+      created_at TEXT,
+      rolled_back_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS audit.audit_fields (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      field_name TEXT UNIQUE NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS audit.crawl_prompt_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_hash TEXT UNIQUE NOT NULL,
+      model TEXT,
+      prompt_template TEXT NOT NULL
+    );
   `);
 
   // 11. Admin Audit Logs table for atomic history and 1-click rollback (auditdb)
@@ -672,7 +704,7 @@ function initTables() {
       batchId TEXT NOT NULL,
       schoolId TEXT,
       previousState TEXT NOT NULL,
-      newState TEXT NOT NULL,
+      newState TEXT,
       appliedBy TEXT NOT NULL,
       appliedAt TEXT NOT NULL,
       rolledBackAt TEXT
