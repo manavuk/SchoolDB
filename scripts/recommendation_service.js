@@ -73,40 +73,57 @@ function passesSchoolTypeFilter(school, requiredTypes) {
 }
 
 /**
- * Extract exam board/format signature from a school
+ * Extract exam format (exam type + consortium) combination from a school.
+ * Both exam type AND consortium must be identical for recommendation matching.
+ */
+function getExamFormat(school) {
+  if (!school) return null;
+
+  const typeId = (school.primary_exam_type_id !== null && school.primary_exam_type_id !== undefined && school.primary_exam_type_id !== '')
+    ? Number(school.primary_exam_type_id)
+    : null;
+
+  const consortiumId = (school.exam_consortium_id !== null && school.exam_consortium_id !== undefined && school.exam_consortium_id !== '')
+    ? Number(school.exam_consortium_id)
+    : null;
+
+  const rawType = (school.entranceExamType || '').toLowerCase().trim();
+  const rawConsortium = (school.examConsortium || school.exam_consortium || '').toLowerCase().trim();
+
+  // Normalize non-existent consortium strings
+  const normConsortium = (rawConsortium === 'none' || rawConsortium === 'null' || rawConsortium === 'na' || !rawConsortium)
+    ? 'none'
+    : rawConsortium;
+
+  const typeKey = typeId !== null ? `T:${typeId}` : (rawType ? `TN:${rawType}` : 'T:none');
+  const consortiumKey = consortiumId !== null ? `C:${consortiumId}` : `CN:${normConsortium}`;
+
+  // Composite format key: both exam type AND consortium
+  const formatKey = `${typeKey}|${consortiumKey}`;
+
+  let label = '';
+  if (school.examConsortium && normConsortium !== 'none') {
+    label = school.examConsortium;
+  } else if (school.entranceExamType && school.entranceExamType.toLowerCase() !== 'none') {
+    label = school.entranceExamType;
+  }
+
+  return {
+    typeId,
+    consortiumId,
+    rawType,
+    rawConsortium: normConsortium,
+    key: formatKey,
+    label
+  };
+}
+
+/**
+ * Extract exam board/format signature from a school (backward compatible)
  */
 function extractExamSignature(school) {
-  const parts = [];
-  const et = (school.entranceExamType || '').toLowerCase();
-  const s1 = (school.stage_one_format_and_subjects || '').toLowerCase();
-  const s2 = (school.stage_two_format_and_subjects || '').toLowerCase();
-  const dates = school.entranceExamDates || {};
-  const board = (dates.examBoard || '').toLowerCase();
-
-  const combined = `${et} ${s1} ${s2} ${board}`;
-
-  if (combined.includes('two-stage') || combined.includes('stage 2') || combined.includes('second stage') || school.second_stage_exam_required === 'Yes') {
-    parts.push('two_stage');
-  }
-  if (combined.includes('cem')) parts.push('cem');
-  if (combined.includes('gl assessment') || combined.includes('gl')) parts.push('gl');
-  if (combined.includes('iseb')) parts.push('iseb');
-  if (combined.includes('csse')) parts.push('csse');
-  if (combined.includes('set') || combined.includes('selective eligibility')) parts.push('sutton_set');
-  if (combined.includes('bexley')) parts.push('bexley');
-  if (combined.includes('kent')) parts.push('kent');
-  if (school.examConsortium) {
-    const ec = school.examConsortium.toLowerCase();
-    if (ec.includes('sutton')) parts.push('sutton_set');
-    if (ec.includes('kent')) parts.push('kent');
-    if (ec.includes('slough')) parts.push('slough');
-    if (ec.includes('bexley')) parts.push('bexley');
-    if (ec.includes('csse')) parts.push('csse');
-    if (ec.includes('trafford')) parts.push('trafford');
-    if (ec.includes('birmingham')) parts.push('birmingham');
-  }
-
-  return parts;
+  const format = getExamFormat(school);
+  return format ? [format.key] : [];
 }
 
 /**
@@ -152,6 +169,7 @@ function evaluateRecommendations({
   // -------------------------------------------------------------
   const shortlistGenders = new Set();
   const shortlistSchoolTypes = new Set();
+  const userExamFormats = new Map(); // formatKey -> formatObj
   const userExamSignatures = new Set();
   let userAvgAttainment = 0;
   let userAttainmentCount = 0;
@@ -174,8 +192,12 @@ function evaluateRecommendations({
     else if (st.includes('comprehensive') || st.includes('academy') || st.includes('community')) shortlistSchoolTypes.add('comprehensive');
     else if (st) shortlistSchoolTypes.add(st);
 
-    // Latent Exam Signatures
-    extractExamSignature(us).forEach(sig => userExamSignatures.add(sig));
+    // Latent Exam Formats (Both Exam Type AND Consortium must match)
+    const ef = getExamFormat(us);
+    if (ef && ef.key !== 'T:none|C:none') {
+      userExamFormats.set(ef.key, ef);
+      userExamSignatures.add(ef.key);
+    }
 
     // Academic Attainment
     if (typeof us.gcseAttainment8 === 'number') {
@@ -340,39 +362,43 @@ function evaluateRecommendations({
       }
     }
 
-    // --- Component 2: Elevated Entrance Exam Type Affinity (25% Weight) ---
+    // --- Component 2: Exam Format (Exam Type + Consortium) Combination Affinity (25% Weight) ---
+    // Both exam type and consortium need to be the same for the recommendation
     let examScore = 0.50;
-    const candidateExamSigs = extractExamSignature(candidate);
+    const candidateFormat = getExamFormat(candidate);
 
-    // Check user explicit exam format
+    // Check user explicit exam format filter
     const explicitExams = Array.isArray(binaryFilters.examFormats) ? binaryFilters.examFormats.filter(f => f && f !== 'NA' && f !== 'all') : [];
     if (explicitExams.length > 0) {
-      const et = (candidate.entranceExamType || '').toLowerCase();
-      const matchesExplicit = explicitExams.some(f => et.includes(f.toLowerCase()));
+      const cType = (candidate.entranceExamType || '').toLowerCase();
+      const cConsort = (candidate.examConsortium || candidate.exam_consortium || '').toLowerCase();
+      const matchesExplicit = explicitExams.some(f => {
+        const needle = f.toLowerCase().trim();
+        return cType.includes(needle) || cConsort.includes(needle);
+      });
+
       if (matchesExplicit) {
         examScore = 1.00;
-        reasons.push(`Matches requested exam format: ${candidate.entranceExamType}`);
-      } else if (userExamSignatures.size > 0 && candidateExamSigs.some(s => userExamSignatures.has(s))) {
+        const examLabel = candidateFormat?.label || candidate.examConsortium || candidate.entranceExamType;
+        reasons.unshift(`Matches requested exam format: ${examLabel}`);
+      } else if (candidateFormat && userExamFormats.has(candidateFormat.key)) {
+        // Union with shortlisted schools' exam format with secondary weightage
         examScore = 0.80;
-        reasons.push('Compatible admissions format from shortlisted schools');
+        const examLabel = candidateFormat.label || 'Shortlist compatible admissions format';
+        reasons.unshift(`Shares exam format with shortlisted schools (${examLabel})`);
       } else {
         examScore = 0.40;
       }
-    } else if (userExamSignatures.size > 0 && candidateExamSigs.length > 0) {
-      // Check intersection with shortlisted schools
-      const matchingSigs = candidateExamSigs.filter(s => userExamSignatures.has(s));
-      if (matchingSigs.length > 0) {
+    } else if (userExamFormats.size > 0 && candidateFormat) {
+      // In absence of explicit filter: BOTH exam type AND consortium must be the same!
+      if (userExamFormats.has(candidateFormat.key)) {
         examScore = 0.95;
-        if (matchingSigs.includes('two_stage')) {
-          reasons.push('Compatible admissions format: 11+ Two-Stage Assessment');
-        } else if (matchingSigs.includes('sutton_set')) {
-          reasons.push('Shares Sutton Selective Eligibility Test (SET)');
-        } else if (matchingSigs.includes('cem')) {
-          reasons.push('Shares CEM 11+ entrance assessment');
-        } else if (matchingSigs.includes('gl')) {
-          reasons.push('Shares GL Assessment 11+ format');
+        const matchFormat = userExamFormats.get(candidateFormat.key);
+        const formatLabel = candidateFormat.label || matchFormat.label || candidate.examConsortium || candidate.entranceExamType;
+        if (candidate.examConsortium && candidate.examConsortium.toLowerCase() !== 'none') {
+          reasons.unshift(`Shares ${candidate.examConsortium} admissions format`);
         } else {
-          reasons.push('Matches entrance exam type of your shortlisted schools');
+          reasons.unshift(`Matches entrance exam format: ${formatLabel}`);
         }
       } else {
         examScore = 0.40;
@@ -556,5 +582,6 @@ module.exports = {
   passesGenderFilter,
   passesSchoolTypeFilter,
   extractExamSignature,
+  getExamFormat,
   evaluateRecommendations
 };

@@ -4,7 +4,7 @@
 
 const assert = require('assert');
 const db = require('../db');
-const { passesGenderFilter, passesSchoolTypeFilter, extractExamSignature, evaluateRecommendations } = require('./recommendation_service');
+const { passesGenderFilter, passesSchoolTypeFilter, extractExamSignature, getExamFormat, evaluateRecommendations } = require('./recommendation_service');
 
 console.log('=== TEST SUITE: Intelligent School Recommendation Service ===\n');
 
@@ -299,13 +299,17 @@ async function runTests() {
   console.log('  ✓ Asymmetric Ofsted scoring confirmed.');
 
   // -------------------------------------------------------------
-  // Test 4: Elevated Entrance Exam Type Affinity
+  // Test 4: Exam Format (Exam Type + Consortium) Combination Affinity
   // -------------------------------------------------------------
-  console.log('\n[4. Testing Elevated Entrance Exam Type Affinity]');
+  console.log('\n[4. Testing Exam Format (Exam Type + Consortium) Combination]');
 
-  // School with 11+ Two-Stage assessment saved in userSchools (e.g. Wilson's School)
-  const wilsons = allSchools.find(s => s.name.includes("Wilson's School"));
+  // School with Sutton SET assessment saved in userSchools (Wilson's School)
+  const wilsons = allSchools.find(s => s.name.startsWith("Wilson's School"));
   assert(wilsons, "Wilson's School must exist");
+  const wilsonsFormat = getExamFormat(wilsons);
+  assert(wilsonsFormat, "Wilson's format must exist");
+  assert.strictEqual(wilsonsFormat.typeId, 7, 'Wilson exam type should be Sutton SET (id: 7)');
+  assert.strictEqual(wilsonsFormat.consortiumId, 1, 'Wilson consortium should be Sutton SET Consortium (id: 1)');
 
   const recsWithWilsons = evaluateRecommendations({
     allSchools,
@@ -316,15 +320,45 @@ async function runTests() {
 
   // Check top recommendations
   const topRec = recsWithWilsons.recommendations[0];
-  console.log(`  - Saved School: ${wilsons.name} (Exam: ${wilsons.entranceExamType})`);
+  console.log(`  - Saved School: ${wilsons.name} (Format: ${wilsonsFormat.key} - ${wilsonsFormat.label})`);
   console.log(`  - Top Recommendation: ${topRec.school.name} (Score: ${topRec.matchScore}%)`);
   console.log(`    Reasons: ${topRec.reasons.join('; ')}`);
 
-  const hasExamReason = recsWithWilsons.recommendations.slice(0, 5).some(r =>
-    r.reasons.some(re => re.toLowerCase().includes('exam') || re.toLowerCase().includes('two-stage') || re.toLowerCase().includes('set'))
+  // Top recommendation (Wallington County Grammar School) must have identical format key (both exam type AND consortium)
+  const topRecFormat = getExamFormat(topRec.school);
+  assert.strictEqual(topRecFormat.key, wilsonsFormat.key, `Top recommendation must have identical exam format key (expected: ${wilsonsFormat.key}, got: ${topRecFormat.key})`);
+  assert.strictEqual(topRecFormat.typeId, wilsonsFormat.typeId, 'Exam type must be identical');
+  assert.strictEqual(topRecFormat.consortiumId, wilsonsFormat.consortiumId, 'Consortium must be identical');
+
+  const hasExamReason = topRec.reasons.some(re =>
+    re.includes('Sutton Selective Eligibility Test Consortium') || re.toLowerCase().includes('admissions format')
   );
-  assert(hasExamReason, 'Top recommendations must cite compatible entrance exam formats');
-  console.log('  ✓ Elevated Entrance Exam Affinity and explanation generation confirmed.');
+  assert(hasExamReason, 'Top recommendation must cite shared Sutton SET Consortium admissions format');
+  console.log('  ✓ Verified exact match: Wallington shares identical exam type AND consortium with Wilson\'s School.');
+
+  // Negative test: Beths Grammar (Bexley) vs Judd School (Kent) - both use GL Assessment but different consortia
+  const judd = allSchools.find(s => s.name.startsWith('Judd'));
+  const beths = allSchools.find(s => s.name.startsWith('Beths'));
+  assert(judd && beths, 'Judd and Beths must exist in database');
+
+  const juddFormat = getExamFormat(judd);
+  const bethsFormat = getExamFormat(beths);
+  assert.strictEqual(juddFormat.typeId, 2, 'Judd uses GL Assessment (typeId: 2)');
+  assert.strictEqual(bethsFormat.typeId, 2, 'Beths uses GL Assessment (typeId: 2)');
+  assert.notStrictEqual(juddFormat.consortiumId, bethsFormat.consortiumId, 'Consortia must be different (Kent vs Bexley)');
+  assert.notStrictEqual(juddFormat.key, bethsFormat.key, 'Format keys must differ when consortium is different');
+
+  const recsWithJudd = evaluateRecommendations({
+    allSchools,
+    userSchools: [judd],
+    genderChoice: 'boys'
+  });
+  const bethsRec = recsWithJudd.recommendations.find(r => r.school.id === beths.id);
+  if (bethsRec) {
+    const bethsHasExamReason = bethsRec.reasons.some(re => re.includes('Kent PESE') || re.includes('admissions format'));
+    assert.strictEqual(bethsHasExamReason, false, 'Beths (Bexley) must NOT cite Kent PESE admissions format when Judd (Kent) is shortlisted');
+  }
+  console.log('  ✓ Verified negative test: schools sharing GL Assessment but different consortia do NOT match (both must be the same).');
 
   // -------------------------------------------------------------
   // Test 5: Elevated Child Ability & Academic Matching
