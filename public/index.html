@@ -344,7 +344,7 @@
                   <p style="font-size: 0.82rem; color: #64748b; margin-top: 0.15rem;">Ordered by highest match score. Click "+ Add to Shortlist" on any school to save it.</p>
                 </div>
                 <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                  <button id="btn-retrigger-wizard" class="btn" style="background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%); border: 1px solid #c7d2fe; color: #4338ca; font-weight: 700; font-size: 0.8rem; padding: 0.4rem 0.85rem; border-radius: 8px; display: inline-flex; align-items: center; gap: 0.45rem; cursor: pointer; transition: all 0.2s;" title="Update your family preferences and portfolio criteria">
+                  <button id="btn-retrigger-wizard" class="btn" onclick="openPortfolioWizard({ isFirstTime: false })" style="background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%); border: 1px solid #c7d2fe; color: #4338ca; font-weight: 700; font-size: 0.8rem; padding: 0.4rem 0.85rem; border-radius: 8px; display: inline-flex; align-items: center; gap: 0.45rem; cursor: pointer; transition: all 0.2s;" title="Update your family preferences and portfolio criteria">
                     <i class="fa-solid fa-wand-magic-sparkles" style="color: #6366f1;"></i> Portfolio Matchmaker
                   </button>
                   <button id="refresh-rec-btn" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
@@ -2333,6 +2333,8 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
       </div>
 
     </section>
+  </div>
+
   <!-- Portfolio Onboarding Wizard Modal -->
   <div id="portfolio-wizard-modal" class="portfolio-wizard-overlay" style="display: none;">
     <div class="portfolio-wizard-card">

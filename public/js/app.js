@@ -7665,6 +7665,9 @@ function closePortfolioWizard() {
   if (modal) modal.style.display = 'none';
 }
 
+window.openPortfolioWizard = openPortfolioWizard;
+window.closePortfolioWizard = closePortfolioWizard;
+
 function syncWizardUiToState() {
   // Page 1: Gender cards
   const boyCard = document.getElementById('pw-opt-gender-boy');
