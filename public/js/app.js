@@ -4811,6 +4811,10 @@ async function loadRecWeights() {
     if (document.getElementById('weight-val-ofsted')) document.getElementById('weight-val-ofsted').textContent = `${ofst}%`;
     if (document.getElementById('weight-val-type')) document.getElementById('weight-val-type').textContent = `${type}%`;
 
+    const recLimit = typeof data.recommendationLimit === 'number' ? data.recommendationLimit : 10;
+    if (document.getElementById('setting-rec-limit')) document.getElementById('setting-rec-limit').value = recLimit;
+    if (document.getElementById('weight-val-limit')) document.getElementById('weight-val-limit').textContent = `${recLimit} schools`;
+
     updateTotalWeightsPill();
   } catch (err) {
     console.error('Failed to load recommendation weights:', err);
@@ -4848,15 +4852,17 @@ async function saveRecWeights(e) {
     ofstedRating: parseInt(document.getElementById('weight-ofsted').value) || 0,
     schoolType: parseInt(document.getElementById('weight-type').value) || 0
   };
+  const recLimit = parseInt(document.getElementById('setting-rec-limit')?.value || '10', 10);
+  const finalLimit = isNaN(recLimit) ? 10 : Math.max(1, Math.min(100, recLimit));
 
   try {
     const res = await fetch('/api/recommendation-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ weights })
+      body: JSON.stringify({ weights, limit: finalLimit })
     });
     if (res.ok) {
-      showToast('Algorithm weights updated successfully!', 'success');
+      showToast('Algorithm weights and limit updated successfully!', 'success');
       fetchRecommendations();
     } else {
       showToast('Failed to save algorithm weights', 'error');
@@ -5055,6 +5061,13 @@ async function loadLlmSettings() {
       updateTotalWeightsPill();
     }
 
+    // Recommendation Limit (range: 1 - 100, default: 10)
+    const recLimit = typeof settings.recommendationLimit === 'number' ? settings.recommendationLimit : 10;
+    const recLimitInput = document.getElementById('setting-rec-limit');
+    if (recLimitInput) recLimitInput.value = recLimit;
+    const recLimitVal = document.getElementById('weight-val-limit');
+    if (recLimitVal) recLimitVal.textContent = `${recLimit} schools`;
+
     // Completeness Weights
     if (settings.completenessWeights) {
       const cw = settings.completenessWeights;
@@ -5233,6 +5246,18 @@ function initSettingsStudioListeners() {
       });
     }
   });
+
+  const recLimitInput = document.getElementById('setting-rec-limit');
+  if (recLimitInput) {
+    recLimitInput.addEventListener('input', () => {
+      const val = parseInt(recLimitInput.value, 10);
+      const recLimitVal = document.getElementById('weight-val-limit');
+      if (recLimitVal && !isNaN(val)) {
+        recLimitVal.textContent = `${val} schools`;
+      }
+      setAdminSettingsDirty(true);
+    });
+  }
 
   // Completeness sliders dirty tracking & live point updates
   const compFields = ['website', 'examDates', 'examFormat', 'schoolClassification', 'academicOfsted', 'contactChannels', 'addressGeography', 'leadershipCapacity'];
@@ -5605,6 +5630,9 @@ async function saveLlmSettingsHandler() {
     leadershipCapacity: parseInt(document.getElementById('cweight-leadershipCapacity')?.value || '6', 10)
   };
 
+  const recLimit = parseInt(document.getElementById('setting-rec-limit')?.value || '10', 10);
+  const finalRecLimit = isNaN(recLimit) ? 10 : Math.max(1, Math.min(100, recLimit));
+
   const payload = {
     llmProvider: provider,
     geminiModel,
@@ -5613,6 +5641,7 @@ async function saveLlmSettingsHandler() {
     scannerDelaySeconds: isNaN(delaySec) ? 20 : Math.max(0, Math.min(300, delaySec)),
     llmPromptTemplate: promptTemplate,
     recWeights,
+    recommendationLimit: finalRecLimit,
     completenessWeights
   };
 

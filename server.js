@@ -1063,18 +1063,29 @@ function writeRecSettings(settings) {
   }
 }
 
-// GET /api/recommendation-settings - Get current recommendation weights
+// GET /api/recommendation-settings - Get current recommendation weights and limit
 app.get('/api/recommendation-settings', (req, res) => {
-  res.json(readRecSettings());
+  const settings = readRecSettings();
+  const adminSettings = db.getAdminSettings();
+  res.json({ ...settings, recommendationLimit: adminSettings?.recommendationLimit || 10 });
 });
 
-// POST /api/recommendation-settings - Save recommendation weights (Admin only)
+// POST /api/recommendation-settings - Save recommendation weights and limit (Admin only)
 app.post('/api/recommendation-settings', (req, res) => {
-  const { weights } = req.body;
-  if (!weights) return res.status(400).json({ error: 'Weights configuration required' });
+  const { weights, limit } = req.body;
+  if (!weights && limit === undefined) return res.status(400).json({ error: 'Weights or limit configuration required' });
 
-  if (writeRecSettings({ weights })) {
-    res.json({ message: 'Recommendation settings updated successfully', settings: { weights } });
+  let savedRec = true;
+  if (weights) {
+    savedRec = writeRecSettings({ weights });
+  }
+  if (limit !== undefined) {
+    db.saveAdminSettings({ recommendationLimit: limit });
+  }
+
+  if (savedRec) {
+    const adminSettings = db.getAdminSettings();
+    res.json({ message: 'Recommendation settings updated successfully', settings: { weights, recommendationLimit: adminSettings?.recommendationLimit || 10 } });
   } else {
     res.status(500).json({ error: 'Failed to save settings' });
   }
@@ -3671,7 +3682,7 @@ app.post('/api/user-recommendations/preferences', requireAuth, (req, res) => {
 // POST /api/recommendations - Personalized Multi-Dimensional Smart Recommendation Engine
 app.post('/api/recommendations', (req, res) => {
   try {
-    const { userSchools = [], targetLocation = '', removedSchoolIds = [], genderChoice = 'all', preferencesOverride = null } = req.body;
+    const { userSchools = [], targetLocation = '', removedSchoolIds = [], genderChoice = 'all', preferencesOverride = null, limit: customLimit } = req.body;
     const allSchools = readData();
 
     // Load authenticated parent's saved qualitative preferences if available
@@ -3681,6 +3692,16 @@ app.post('/api/recommendations', (req, res) => {
       userPrefs = { ...userPrefs, ...preferencesOverride };
     }
 
+    const adminSettings = db.getAdminSettings();
+    const defaultLimit = adminSettings?.recommendationLimit || 10;
+    let limit = defaultLimit;
+    if (customLimit !== undefined && customLimit !== null) {
+      const parsed = parseInt(customLimit, 10);
+      if (!isNaN(parsed)) {
+        limit = Math.max(1, Math.min(100, parsed));
+      }
+    }
+
     const { evaluateRecommendations } = require('./scripts/recommendation_service');
     const result = evaluateRecommendations({
       allSchools,
@@ -3688,7 +3709,8 @@ app.post('/api/recommendations', (req, res) => {
       targetLocation,
       removedSchoolIds,
       genderChoice,
-      preferencesOverride: userPrefs
+      preferencesOverride: userPrefs,
+      limit
     });
 
     res.json(result);

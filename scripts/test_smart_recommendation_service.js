@@ -182,17 +182,22 @@ async function runTests() {
   });
 
   assert(mixedRecs.length > 0, 'Should have mixed recommendations');
-  // Check reasons for explicit filter match vs shortlist profile match
+  // Check reasons for explicit filter match vs shortlist profile match:
+  // Obvious implicit reasons (like gender) must NOT be shown.
   const sampleMixed = mixedRecs[0];
-  const hasExplicitGenderReason = sampleMixed.reasons.some(re => re.includes('Matches requested gender'));
-  assert.strictEqual(hasExplicitGenderReason, true, 'Explicit match should cite Matches requested gender');
+  const hasExplicitGenderReason = sampleMixed.reasons.some(re => re.toLowerCase().includes('gender'));
+  assert.strictEqual(hasExplicitGenderReason, false, 'Explicit match should not show obvious gender reason');
 
   if (boysRecs.length > 0) {
     const sampleBoys = boysRecs[0];
-    const hasShortlistGenderReason = sampleBoys.reasons.some(re => re.includes('Matches gender of your shortlisted schools'));
-    assert.strictEqual(hasShortlistGenderReason, true, 'Shortlist union match should cite Matches gender of your shortlisted schools');
+    const hasShortlistGenderReason = sampleBoys.reasons.some(re => re.toLowerCase().includes('gender'));
+    assert.strictEqual(hasShortlistGenderReason, false, 'Shortlist union match should not show obvious gender reason');
   }
-  console.log(`  ✓ Higher weightage and reason attribution for explicit filter over shortlist union confirmed.`);
+
+  // Differentiating reasons that moved it up should be present
+  assert(sampleMixed.reasons.length > 0, 'Sample recommendation should still have differentiating reasons');
+  console.log(`    Sample mixed rec reasons: ${sampleMixed.reasons.join('; ')}`);
+  console.log(`  ✓ Higher weightage for explicit filter over shortlist union confirmed without polluting card reasons with obvious gender.`);
 
   // -------------------------------------------------------------
   // Test 2: Adaptive School Type Filter with Shortlist Union
@@ -381,7 +386,7 @@ async function runTests() {
     (r.school.gcseAttainment8 && r.school.gcseAttainment8 >= 70)
   ).length;
   console.log(`  - top_class recommendation top tier league table / high attainment schools: ${topRankedCount} / ${topClassRecs.recommendations.length}`);
-  assert(topRankedCount >= 15, 'top_class child should strongly match Top tier league table schools');
+  assert(topRankedCount >= 7, 'top_class child should strongly match Top tier league table schools');
 
   // Child Ability: below_average (Nurturing & Progress 8 Growth)
   const growthRecs = evaluateRecommendations({
@@ -395,7 +400,7 @@ async function runTests() {
 
   const highProgressCount = growthRecs.recommendations.filter(r => r.school.gcseProgress8 !== null && r.school.gcseProgress8 >= 0.3).length;
   console.log(`  - below_average child recommendations with high Progress 8: ${highProgressCount} / ${growthRecs.recommendations.length}`);
-  assert(highProgressCount >= 15, 'Growth-focused child should prioritize high Progress 8 value-add');
+  assert(highProgressCount >= 7, 'Growth-focused child should prioritize high Progress 8 value-add');
   console.log('  ✓ Child Ability alignment across high-academic and high-progress profiles confirmed.');
 
   // -------------------------------------------------------------
@@ -419,6 +424,78 @@ async function runTests() {
   assert(sampleRec.school.distanceMiles !== undefined, 'distanceMiles must be attached');
   assert(sampleRec.school.distanceMiles <= 15, `Nearest recommendations should be within commute range (got ${sampleRec.school.distanceMiles} mi)`);
   console.log('  ✓ Soft postcode proximity confirmed with exact distance in miles and no substring exclusion.');
+
+  // -------------------------------------------------------------
+  // Test 7: Recommendation Limit (Default 10, Range 1 - 100) & Omission of Implicit Reasons
+  // -------------------------------------------------------------
+  console.log('\n[7. Testing Configurable Recommendation Limit (Range 1-100, Default 10)]');
+
+  // 1. Default limit = 10
+  const defaultLimitRecs = evaluateRecommendations({
+    allSchools,
+    userSchools: [],
+    targetLocation: 'SW19 4TT'
+  });
+  assert.strictEqual(defaultLimitRecs.recommendations.length, 10, 'Default recommendation count must be exactly 10');
+  console.log(`  ✓ Default recommendation limit is 10 (got: ${defaultLimitRecs.recommendations.length})`);
+
+  // 2. Custom limit = 5
+  const customLimit5 = evaluateRecommendations({
+    allSchools,
+    userSchools: [],
+    targetLocation: 'SW19 4TT',
+    limit: 5
+  });
+  assert.strictEqual(customLimit5.recommendations.length, 5, 'Custom limit of 5 must return exactly 5 recommendations');
+  console.log(`  ✓ Custom limit=5 returned ${customLimit5.recommendations.length} schools`);
+
+  // 3. Custom limit = 25
+  const customLimit25 = evaluateRecommendations({
+    allSchools,
+    userSchools: [],
+    targetLocation: 'SW19 4TT',
+    limit: 25
+  });
+  assert.strictEqual(customLimit25.recommendations.length, 25, 'Custom limit of 25 must return exactly 25 recommendations');
+  console.log(`  ✓ Custom limit=25 returned ${customLimit25.recommendations.length} schools`);
+
+  // 4. Clamping: limit < 1 clamped to 1
+  const clampedLow = evaluateRecommendations({
+    allSchools,
+    userSchools: [],
+    targetLocation: 'SW19 4TT',
+    limit: 0
+  });
+  assert.strictEqual(clampedLow.recommendations.length, 1, 'Limit < 1 must be clamped to 1');
+  console.log(`  ✓ Clamped minimum limit (< 1 -> 1) returned ${clampedLow.recommendations.length} school`);
+
+  // 5. Clamping: limit > 100 clamped to 100
+  const clampedHigh = evaluateRecommendations({
+    allSchools,
+    userSchools: [],
+    targetLocation: 'SW19 4TT',
+    limit: 200
+  });
+  assert(clampedHigh.recommendations.length <= 100, 'Limit > 100 must be clamped to at most 100');
+  console.log(`  ✓ Clamped maximum limit (> 100 -> 100) returned ${clampedHigh.recommendations.length} schools`);
+
+  // 6. Global check: none of the recommendations should include obvious implicit gender reasons
+  for (const r of customLimit25.recommendations) {
+    const hasGenderInReasons = r.reasons.some(re => re.toLowerCase().includes('gender'));
+    assert.strictEqual(hasGenderInReasons, false, `School ${r.school.name} should not show obvious gender in reasons: ${r.reasons.join(', ')}`);
+  }
+  console.log(`  ✓ Verified all 25 recommendations contain zero obvious implicit gender reasons.`);
+
+  // 7. Verify Admin Settings persistence for recommendationLimit
+  const initialAdminSettings = db.getAdminSettings();
+  assert(typeof initialAdminSettings.recommendationLimit === 'number', 'recommendationLimit should exist in admin settings');
+  db.saveAdminSettings({ recommendationLimit: 15 });
+  const updatedAdminSettings = db.getAdminSettings();
+  assert.strictEqual(updatedAdminSettings.recommendationLimit, 15, 'Admin settings should persist recommendationLimit');
+  // Reset back to default 10
+  db.saveAdminSettings({ recommendationLimit: 10 });
+  assert.strictEqual(db.getAdminSettings().recommendationLimit, 10, 'Admin settings should reset to 10');
+  console.log(`  ✓ Verified admin settings get/save for recommendationLimit with persistence.`);
 
   console.log('\n=== ALL RECOMMENDATION SERVICE TESTS PASSED SUCCESSFULLY ===');
 }

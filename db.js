@@ -1595,7 +1595,8 @@ const DEFAULT_ADMIN_SETTINGS = {
     contactChannels: 8,
     addressGeography: 6,
     leadershipCapacity: 6
-  }
+  },
+  recommendationLimit: 10
 };
 
 /**
@@ -1651,6 +1652,14 @@ function getAdminSettings() {
     llmPromptTemplate = DEFAULT_LLM_PROMPT_TEMPLATE;
   }
 
+  // Recommendation limit (range: 1 - 100, default: 10)
+  let recommendationLimit = DEFAULT_ADMIN_SETTINGS.recommendationLimit;
+  if (typeof rawMap.recommendationLimit === 'number') {
+    recommendationLimit = Math.max(1, Math.min(100, Math.round(rawMap.recommendationLimit)));
+  } else if (rawMap.recommendationLimit !== undefined && rawMap.recommendationLimit !== null && !isNaN(parseInt(rawMap.recommendationLimit, 10))) {
+    recommendationLimit = Math.max(1, Math.min(100, parseInt(rawMap.recommendationLimit, 10)));
+  }
+
   return {
     llmProvider,
     geminiModel,
@@ -1662,6 +1671,7 @@ function getAdminSettings() {
     llmPromptTemplate,
     recWeights,
     completenessWeights,
+    recommendationLimit,
     // Client Display Helper Metadata
     hasGeminiKey: Boolean(geminiApiKey || process.env.GEMINI_API_KEY),
     geminiKeyMasked: geminiApiKey ? ('••••••••' + geminiApiKey.slice(-4)) : (process.env.GEMINI_API_KEY ? '••••••••' + process.env.GEMINI_API_KEY.slice(-4) : ''),
@@ -1786,6 +1796,12 @@ function updateEnvVariable(key, val) {
       try {
         sqlite.prepare('INSERT OR REPLACE INTO recommendation_settings (key, weights) VALUES (?, ?)').run('default', JSON.stringify(mergedWeights));
       } catch (e) {}
+    }
+
+    if (typeof updates.recommendationLimit !== 'undefined') {
+      const num = parseInt(updates.recommendationLimit, 10);
+      const finalLimit = isNaN(num) ? 10 : Math.max(1, Math.min(100, num));
+      stmt.run('recommendationLimit', JSON.stringify(finalLimit));
     }
 
     if (updates.completenessWeights && typeof updates.completenessWeights === 'object') {

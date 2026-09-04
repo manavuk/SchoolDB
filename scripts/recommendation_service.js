@@ -152,7 +152,8 @@ function evaluateRecommendations({
   targetLocation = '',
   removedSchoolIds = [],
   genderChoice = 'all',
-  preferencesOverride = null
+  preferencesOverride = null,
+  limit = 10
 }) {
   const removedSet = new Set(removedSchoolIds);
   const userSchoolSet = new Set(userSchools.map(s => s.id));
@@ -519,13 +520,8 @@ function evaluateRecommendations({
     if (hasExplicitGenderFilter) {
       if (passesGenderFilter(candidate, explicitGenderList)) {
         genderExplicitBonus = 8;
-        reasons.unshift(`Matches requested gender: ${candidate.gender}`);
-      } else if (shortlistGenders.size > 0 && passesGenderFilter(candidate, Array.from(shortlistGenders))) {
-        genderExplicitBonus = 0;
-        reasons.unshift(`Matches gender of your shortlisted schools (${candidate.gender})`);
+        // Omit obvious implicit reasons (like same gender) from card display
       }
-    } else if (shortlistGenders.size > 0) {
-      reasons.unshift(`Matches gender of your shortlisted schools (${candidate.gender})`);
     }
 
     // --- Weighted Composite Calculation ---
@@ -548,7 +544,7 @@ function evaluateRecommendations({
     let finalScore = Math.round(rawComposite + ofstedBonusOrPenalty + genderExplicitBonus);
     finalScore = Math.max(15, Math.min(99, finalScore)); // Clamp between 15% and 99%
 
-    // Deduplicate reasons and keep top 4
+    // Deduplicate reasons and keep top 4 differentiating factors
     const uniqueReasons = [...new Set(reasons)].slice(0, 4);
     if (uniqueReasons.length === 0) {
       uniqueReasons.push(candidate.schoolType ? `${candidate.schoolType} secondary school` : 'High school recommendation');
@@ -572,9 +568,12 @@ function evaluateRecommendations({
   // Sort highest match score first
   scored.sort((a, b) => b.matchScore - a.matchScore);
 
+  const parsedLimit = parseInt(limit, 10);
+  const effectiveLimit = isNaN(parsedLimit) ? 10 : Math.max(1, Math.min(100, parsedLimit));
+
   return {
     totalCandidates: candidates.length,
-    recommendations: scored.slice(0, 30)
+    recommendations: scored.slice(0, effectiveLimit)
   };
 }
 
