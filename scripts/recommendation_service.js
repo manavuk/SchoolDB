@@ -95,9 +95,16 @@ function extractExamSignature(school) {
   if (combined.includes('set') || combined.includes('selective eligibility')) parts.push('sutton_set');
   if (combined.includes('bexley')) parts.push('bexley');
   if (combined.includes('kent')) parts.push('kent');
-  if (combined.includes('slough')) parts.push('slough');
-  if (combined.includes('consortium')) parts.push('consortium');
-  if (combined.includes('11+') || et.includes('11+')) parts.push('11plus');
+  if (school.examConsortium) {
+    const ec = school.examConsortium.toLowerCase();
+    if (ec.includes('sutton')) parts.push('sutton_set');
+    if (ec.includes('kent')) parts.push('kent');
+    if (ec.includes('slough')) parts.push('slough');
+    if (ec.includes('bexley')) parts.push('bexley');
+    if (ec.includes('csse')) parts.push('csse');
+    if (ec.includes('trafford')) parts.push('trafford');
+    if (ec.includes('birmingham')) parts.push('birmingham');
+  }
 
   return parts;
 }

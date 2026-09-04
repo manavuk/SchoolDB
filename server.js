@@ -120,6 +120,16 @@ app.get('/api/schools', (req, res) => {
     schools = schools.filter(s => s.entranceExamType && s.entranceExamType.toLowerCase().includes(exam.toLowerCase()));
   }
 
+  if (req.query.examConsortium) {
+    const ec = req.query.examConsortium.toLowerCase();
+    schools = schools.filter(s => s.examConsortium && s.examConsortium.toLowerCase().includes(ec));
+  }
+
+  if (req.query.governingBody) {
+    const gb = req.query.governingBody.toLowerCase();
+    schools = schools.filter(s => s.governingBody && s.governingBody.toLowerCase().includes(gb));
+  }
+
   if (la) {
     schools = schools.filter(s => s.la && s.la.toLowerCase() === la.toLowerCase());
   }
@@ -406,6 +416,7 @@ app.get('/api/schools/:id', (req, res) => {
       }
     }
 
+    school.stages = db.getSchoolExamStages(school.id);
     return res.json({
       ...school,
       userReports: userReportsMap,
@@ -413,7 +424,38 @@ app.get('/api/schools/:id', (req, res) => {
     });
   }
 
+  school.stages = db.getSchoolExamStages(school.id);
   res.json(school);
+});
+
+// GET /api/schools/:id/stages - Stages breakdown for school
+app.get('/api/schools/:id/stages', (req, res) => {
+  const stages = db.getSchoolExamStages(req.params.id);
+  res.json(stages);
+});
+
+// GET /api/schools/:id/audit-crawl-report - Full crawler audit report from auditdb
+app.get('/api/schools/:id/audit-crawl-report', (req, res) => {
+  const report = db.getSchoolCrawlAuditReport(req.params.id);
+  if (!report) {
+    return res.status(404).json({ error: 'Audit crawl report not found' });
+  }
+  res.json(report);
+});
+
+// GET /api/exam-types - Canonical exam types list
+app.get('/api/exam-types', (req, res) => {
+  res.json(db.getExamTypes());
+});
+
+// GET /api/exam-consortiums - Admissions & testing consortia list
+app.get('/api/exam-consortiums', (req, res) => {
+  res.json(db.getExamConsortiums());
+});
+
+// GET /api/governing-bodies - Operating trusts, foundations & governing bodies
+app.get('/api/governing-bodies', (req, res) => {
+  res.json(db.getGoverningBodies());
 });
 
 // POST /api/schools - Add single school

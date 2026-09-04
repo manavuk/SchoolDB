@@ -371,6 +371,72 @@ function initTables() {
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN gcse_rank_england INTEGER;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN a_level_rank_england INTEGER;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN completeness_score INTEGER DEFAULT 0;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN primary_exam_type_id INTEGER;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN exam_consortium TEXT;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN exam_consortium_id INTEGER;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN governing_body TEXT;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN governing_body_id INTEGER;`); } catch (e) {}
+
+  // Multi-stage Exam Types, Exam Consortia & Governing Bodies tables
+  try {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS exam_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        category TEXT NOT NULL,
+        is_selective INTEGER NOT NULL DEFAULT 0,
+        typical_stages INTEGER DEFAULT 1,
+        description TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_exam_types_code ON exam_types(code);
+      CREATE INDEX IF NOT EXISTS idx_exam_types_cat ON exam_types(category);
+
+      CREATE TABLE IF NOT EXISTS exam_consortiums (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        region TEXT,
+        default_exam_type_id INTEGER REFERENCES exam_types(id),
+        description TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_exam_consortiums_code ON exam_consortiums(code);
+
+      CREATE TABLE IF NOT EXISTS governing_bodies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        governance_type TEXT NOT NULL,
+        website TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_governing_bodies_code ON governing_bodies(code);
+
+      CREATE TABLE IF NOT EXISTS school_exam_stages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        school_id TEXT NOT NULL REFERENCES schools(id),
+        stage_number INTEGER NOT NULL,
+        stage_name TEXT,
+        exam_type_id INTEGER REFERENCES exam_types(id),
+        exam_consortium_id INTEGER REFERENCES exam_consortiums(id),
+        paper_format TEXT,
+        subjects_json TEXT,
+        is_sifting INTEGER DEFAULT 0,
+        qualifying_notes TEXT,
+        UNIQUE(school_id, stage_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_school_exam_stages_sch ON school_exam_stages(school_id);
+
+      CREATE TABLE IF NOT EXISTS audit.audit_crawl_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        school_id TEXT NOT NULL,
+        school_name TEXT,
+        report_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS audit.idx_crawl_reports_sch ON audit_crawl_reports(school_id);
+    `);
+  } catch (e) {}
 
   // High-performance single and composite indexes
   sqlite.exec(`
@@ -388,6 +454,9 @@ function initTables() {
     CREATE INDEX IF NOT EXISTS idx_schools_completeness ON schools(completeness_score);
     CREATE INDEX IF NOT EXISTS idx_schools_type_region ON schools(schoolType, region);
     CREATE INDEX IF NOT EXISTS idx_schools_status_region ON schools(verification_status, region);
+    CREATE INDEX IF NOT EXISTS idx_schools_primary_exam_type ON schools(primary_exam_type_id);
+    CREATE INDEX IF NOT EXISTS idx_schools_exam_consortium ON schools(exam_consortium_id);
+    CREATE INDEX IF NOT EXISTS idx_schools_governing_body ON schools(governing_body_id);
   `);
 
   // Ensure postcode_cache table and index exist for exact spatial distance calculations
@@ -804,7 +873,14 @@ function recordToSchool(row) {
     stage_two_format_and_subjects: row.stage_two_format_and_subjects || '',
     national_rank_england: (row.national_rank_england !== null && row.national_rank_england !== undefined && !isNaN(parseInt(row.national_rank_england, 10))) ? parseInt(row.national_rank_england, 10) : null,
     gcse_rank_england: (row.gcse_rank_england !== null && row.gcse_rank_england !== undefined && !isNaN(parseInt(row.gcse_rank_england, 10))) ? parseInt(row.gcse_rank_england, 10) : null,
-    a_level_rank_england: (row.a_level_rank_england !== null && row.a_level_rank_england !== undefined && !isNaN(parseInt(row.a_level_rank_england, 10))) ? parseInt(row.a_level_rank_england, 10) : null
+    a_level_rank_england: (row.a_level_rank_england !== null && row.a_level_rank_england !== undefined && !isNaN(parseInt(row.a_level_rank_england, 10))) ? parseInt(row.a_level_rank_england, 10) : null,
+    primary_exam_type_id: row.primary_exam_type_id || null,
+    exam_consortium: row.exam_consortium || null,
+    exam_consortium_id: row.exam_consortium_id || null,
+    governing_body: row.governing_body || null,
+    governing_body_id: row.governing_body_id || null,
+    examConsortium: row.exam_consortium || null,
+    governingBody: row.governing_body || null
   };
 
   school.official = row.official !== undefined && row.official !== null ? Boolean(row.official) : true;
@@ -3607,6 +3683,69 @@ function runFullDatabaseEnrichment(adminUser = 'Admin') {
   return getDataQualitySummary();
 }
 
+function getExamTypes() {
+  const database = getDb();
+  return database.prepare('SELECT * FROM exam_types ORDER BY is_selective DESC, name ASC').all();
+}
+
+function getExamConsortiums() {
+  const database = getDb();
+  return database.prepare(`
+    SELECT ec.*, et.name as default_exam_type_name 
+    FROM exam_consortiums ec 
+    LEFT JOIN exam_types et ON ec.default_exam_type_id = et.id 
+    ORDER BY ec.name ASC
+  `).all();
+}
+
+function getGoverningBodies() {
+  const database = getDb();
+  return database.prepare('SELECT * FROM governing_bodies ORDER BY governance_type ASC, name ASC').all();
+}
+
+function getSchoolExamStages(schoolId) {
+  const database = getDb();
+  const stages = database.prepare(`
+    SELECT ses.*, et.code as exam_type_code, et.name as exam_type_name, et.provider as exam_provider, ec.name as exam_consortium_name
+    FROM school_exam_stages ses
+    LEFT JOIN exam_types et ON ses.exam_type_id = et.id
+    LEFT JOIN exam_consortiums ec ON ses.exam_consortium_id = ec.id
+    WHERE ses.school_id = ?
+    ORDER BY ses.stage_number ASC
+  `).all(schoolId);
+
+  return stages.map(st => {
+    let subjects = [];
+    try { subjects = JSON.parse(st.subjects_json); } catch (e) { subjects = []; }
+    return {
+      id: st.id,
+      stageNumber: st.stage_number,
+      stageName: st.stage_name,
+      examTypeId: st.exam_type_id,
+      examTypeCode: st.exam_type_code,
+      examTypeName: st.exam_type_name,
+      examProvider: st.exam_provider,
+      examConsortiumId: st.exam_consortium_id,
+      examConsortiumName: st.exam_consortium_name,
+      paperFormat: st.paper_format,
+      subjects,
+      isSifting: Boolean(st.is_sifting),
+      qualifyingNotes: st.qualifying_notes
+    };
+  });
+}
+
+function getSchoolCrawlAuditReport(schoolId) {
+  const database = getDb();
+  try {
+    const row = database.prepare('SELECT * FROM audit.audit_crawl_reports WHERE school_id = ? ORDER BY id DESC LIMIT 1').get(schoolId);
+    if (row && row.report_json) {
+      return JSON.parse(row.report_json);
+    }
+  } catch (e) {}
+  return null;
+}
+
 module.exports = {
   getDb,
   getAllSchools,
@@ -3685,7 +3824,12 @@ module.exports = {
   getReviewedDuplicatePairKeys,
   getReviewedDuplicatePairs,
   markDuplicatePairReviewed,
-  unmarkDuplicatePairReviewed
+  unmarkDuplicatePairReviewed,
+  getExamTypes,
+  getExamConsortiums,
+  getGoverningBodies,
+  getSchoolExamStages,
+  getSchoolCrawlAuditReport
 };
 
 
