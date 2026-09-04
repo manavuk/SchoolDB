@@ -120,6 +120,7 @@ async function initApp() {
   const activeTab = localStorage.getItem('app_active_primary_tab');
   if (activeTab !== 'admin') {
     await fetchRecommendations();
+    checkAutoLaunchPortfolioWizard();
   }
 
   // 7. Check and restore active background scanner/crawler state immediately on load
@@ -2076,6 +2077,9 @@ function setupEventListeners() {
 
   const refreshRecBtn = document.getElementById('refresh-rec-btn');
   if (refreshRecBtn) refreshRecBtn.addEventListener('click', fetchRecommendations);
+
+  // Portfolio Onboarding Wizard Listeners
+  initPortfolioWizardListeners();
 
   const finishSelBtn = document.getElementById('btn-finish-selection');
   if (finishSelBtn) finishSelBtn.addEventListener('click', () => switchClassicSubTab('shortlist'));
@@ -7575,6 +7579,464 @@ async function saveParent2WizardProfile() {
   } catch (err) {
     console.error('Error saving wizard preferences:', err);
   }
+}
+
+/* ==========================================================================
+   PORTFOLIO ONBOARDING WIZARD & MATCHMAKER CONTROLLER
+   ========================================================================== */
+
+const DISTANCE_STEPS = ['< 1 mile', '3 miles', '5 miles', '10 miles', '15 miles', 'Any distance'];
+
+let wizardState = {
+  gender: 'boys',               // 'boys' | 'girls'
+  includeCoed: true,           // boolean
+  ability: 'great',             // 'great' | 'good' | 'average'
+  locations: '',                // string (comma separated)
+  distanceIndex: 2,             // 0..5 (default 2 -> '5 miles')
+  includeState: true,           // boolean
+  independentOption: 'support',  // 'support' | 'all' | 'exclude'
+  currentStep: 1                // 1, 2, 3
+};
+
+function openPortfolioWizard(options = {}) {
+  const { isFirstTime = false } = options;
+  const modal = document.getElementById('portfolio-wizard-modal');
+  if (!modal) return;
+
+  // If re-triggering (not first-time), pre-populate from current UI filters
+  if (!isFirstTime) {
+    // 1. Gender & Co-ed
+    const checkedGenders = Array.from(document.querySelectorAll('.rec-gender-chk:checked')).map(c => c.value);
+    if (checkedGenders.includes('girls') && !checkedGenders.includes('boys')) {
+      wizardState.gender = 'girls';
+    } else {
+      wizardState.gender = 'boys';
+    }
+    wizardState.includeCoed = checkedGenders.includes('mixed') || checkedGenders.includes('NA') || checkedGenders.length === 0;
+
+    // 2. Ability
+    const currentAbility = document.getElementById('rec-child-ability')?.value;
+    if (currentAbility === 'top_class') {
+      wizardState.ability = 'great';
+    } else if (currentAbility === 'above_average') {
+      wizardState.ability = 'good';
+    } else if (currentAbility === 'average' || currentAbility === 'below_average') {
+      wizardState.ability = 'average';
+    } else {
+      wizardState.ability = 'great';
+    }
+
+    // 3. Locations
+    const currentLoc = document.getElementById('rec-target-locations')?.value || localStorage.getItem('user_home_postcode') || '';
+    wizardState.locations = currentLoc;
+
+    // 4. Distance
+    const currentDist = document.getElementById('rec-max-distance-select')?.value;
+    if (currentDist === '3') wizardState.distanceIndex = 1;
+    else if (currentDist === '5') wizardState.distanceIndex = 2;
+    else if (currentDist === '10') wizardState.distanceIndex = 3;
+    else if (currentDist === '15') wizardState.distanceIndex = 4;
+    else if (currentDist === '') wizardState.distanceIndex = 5;
+    else wizardState.distanceIndex = 2;
+
+    // 5. School types
+    const checkedTypes = Array.from(document.querySelectorAll('.rec-school-type-chk:checked')).map(c => c.value);
+    const hasGrammarOrComp = checkedTypes.includes('Grammar') || checkedTypes.includes('Comprehensive') || checkedTypes.includes('NA') || checkedTypes.length === 0;
+    const hasIndep = checkedTypes.includes('Independent');
+
+    wizardState.includeState = hasGrammarOrComp;
+    wizardState.independentOption = hasIndep ? 'support' : 'exclude';
+  } else {
+    // Default location from user postcode if available
+    const savedPc = localStorage.getItem('user_home_postcode') || '';
+    if (savedPc) wizardState.locations = savedPc;
+  }
+
+  // Set step to 1 and sync UI controls
+  wizardState.currentStep = 1;
+  syncWizardUiToState();
+  updateWizardStepView(1);
+
+  modal.style.display = 'flex';
+}
+
+function closePortfolioWizard() {
+  const modal = document.getElementById('portfolio-wizard-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function syncWizardUiToState() {
+  // Page 1: Gender cards
+  const boyCard = document.getElementById('pw-opt-gender-boy');
+  const girlCard = document.getElementById('pw-opt-gender-girl');
+  if (boyCard && girlCard) {
+    if (wizardState.gender === 'girls') {
+      boyCard.classList.remove('selected');
+      girlCard.classList.add('selected');
+    } else {
+      boyCard.classList.add('selected');
+      girlCard.classList.remove('selected');
+    }
+  }
+  const coedChk = document.getElementById('pw-chk-coed');
+  if (coedChk) coedChk.checked = wizardState.includeCoed;
+
+  // Page 1: Ability cards
+  ['great', 'good', 'average'].forEach(ab => {
+    const card = document.getElementById(`pw-opt-ability-${ab}`);
+    if (card) {
+      if (wizardState.ability === ab) card.classList.add('selected');
+      else card.classList.remove('selected');
+    }
+  });
+
+  // Page 2: Location and Distance
+  const locInput = document.getElementById('pw-input-locations');
+  if (locInput) locInput.value = wizardState.locations;
+
+  const slider = document.getElementById('pw-slider-distance');
+  if (slider) slider.value = wizardState.distanceIndex;
+  const distVal = document.getElementById('pw-val-distance');
+  if (distVal) distVal.textContent = DISTANCE_STEPS[wizardState.distanceIndex] || '5 miles';
+
+  // Page 3: State switch
+  const stateBtns = document.querySelectorAll('#pw-switch-state .pw-segment-btn');
+  stateBtns.forEach(btn => {
+    const val = btn.getAttribute('data-value');
+    if ((val === 'include' && wizardState.includeState) || (val === 'exclude' && !wizardState.includeState)) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+
+  // Page 3: Independent switch
+  const indBtns = document.querySelectorAll('#pw-switch-independent .pw-segment-btn');
+  indBtns.forEach(btn => {
+    const val = btn.getAttribute('data-value');
+    if (val === wizardState.independentOption) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+
+  // Hide warning
+  const warn = document.getElementById('pw-empty-sector-warning');
+  if (warn) warn.style.display = 'none';
+}
+
+function updateWizardStepView(stepNumber) {
+  wizardState.currentStep = stepNumber;
+
+  // Update step indicator pills
+  for (let i = 1; i <= 3; i++) {
+    const pill = document.getElementById(`pw-step-indicator-${i}`);
+    if (pill) {
+      pill.classList.remove('active', 'completed');
+      const badge = pill.querySelector('span');
+      if (i < stepNumber) {
+        pill.classList.add('completed');
+        if (badge) {
+          badge.innerHTML = '<i class="fa-solid fa-check" style="font-size: 0.65rem;"></i>';
+          badge.style.background = '#16a34a';
+        }
+      } else if (i === stepNumber) {
+        pill.classList.add('active');
+        if (badge) {
+          badge.textContent = i;
+          badge.style.background = '#2563eb';
+        }
+      } else {
+        if (badge) {
+          badge.textContent = i;
+          badge.style.background = '#cbd5e1';
+        }
+      }
+    }
+  }
+
+  // Toggle pages
+  for (let i = 1; i <= 3; i++) {
+    const page = document.getElementById(`pw-page-${i}`);
+    if (page) {
+      if (i === stepNumber) page.classList.add('active');
+      else page.classList.remove('active');
+    }
+  }
+
+  // Update buttons
+  const backBtn = document.getElementById('btn-pw-back');
+  const nextBtn = document.getElementById('btn-pw-next');
+  if (backBtn) {
+    backBtn.style.display = stepNumber > 1 ? 'inline-flex' : 'none';
+  }
+  if (nextBtn) {
+    if (stepNumber === 3) {
+      nextBtn.innerHTML = 'Show Matching Schools <i class="fa-solid fa-rocket" style="margin-left: 0.35rem;"></i>';
+      nextBtn.style.background = '#4338ca';
+      nextBtn.style.borderColor = '#4338ca';
+    } else {
+      nextBtn.innerHTML = 'Continue <i class="fa-solid fa-arrow-right" style="margin-left: 0.35rem;"></i>';
+      nextBtn.style.background = '#2563eb';
+      nextBtn.style.borderColor = '#2563eb';
+    }
+  }
+}
+
+function handleWizardNext() {
+  const step = wizardState.currentStep;
+
+  if (step === 1) {
+    updateWizardStepView(2);
+  } else if (step === 2) {
+    const locInput = document.getElementById('pw-input-locations');
+    if (locInput) wizardState.locations = locInput.value.trim();
+    updateWizardStepView(3);
+  } else if (step === 3) {
+    // Validate sector selection
+    if (!wizardState.includeState && wizardState.independentOption === 'exclude') {
+      const warn = document.getElementById('pw-empty-sector-warning');
+      if (warn) warn.style.display = 'block';
+      return;
+    }
+    applyWizardToFiltersAndSearch();
+  }
+}
+
+function handleWizardBack() {
+  if (wizardState.currentStep > 1) {
+    updateWizardStepView(wizardState.currentStep - 1);
+  }
+}
+
+function handleWizardSkip() {
+  try {
+    localStorage.setItem('schooldb_portfolio_wizard_status', 'skipped');
+  } catch (e) {}
+  closePortfolioWizard();
+  showToast('You can launch the Portfolio Matchmaker anytime from the toolbar.', 'info');
+}
+
+function applyWizardToFiltersAndSearch() {
+  // 1. Gender Multi-Select
+  const genderChks = document.querySelectorAll('.rec-gender-chk');
+  genderChks.forEach(chk => chk.checked = false);
+
+  if (wizardState.gender === 'boys') {
+    const bChk = document.querySelector('.rec-gender-chk[value="boys"]');
+    if (bChk) bChk.checked = true;
+    if (wizardState.includeCoed) {
+      const mChk = document.querySelector('.rec-gender-chk[value="mixed"]');
+      if (mChk) mChk.checked = true;
+    }
+  } else {
+    const gChk = document.querySelector('.rec-gender-chk[value="girls"]');
+    if (gChk) gChk.checked = true;
+    if (wizardState.includeCoed) {
+      const mChk = document.querySelector('.rec-gender-chk[value="mixed"]');
+      if (mChk) mChk.checked = true;
+    }
+  }
+  updateGenderDropdownLabel();
+
+  // 2. Locations
+  const locInput = document.getElementById('rec-target-locations');
+  if (locInput) locInput.value = wizardState.locations;
+  const filterPc = document.getElementById('filter-user-postcode');
+  if (filterPc) filterPc.value = wizardState.locations;
+  if (wizardState.locations) {
+    try { localStorage.setItem('user_home_postcode', wizardState.locations); } catch (e) {}
+  }
+
+  // 3. Distance Radius & Proximity Slider
+  const distSelect = document.getElementById('rec-max-distance-select');
+  const proxSlider = document.getElementById('rec-qual-prox-slider');
+  switch (wizardState.distanceIndex) {
+    case 0: // < 1 mi
+      if (distSelect) distSelect.value = '3';
+      if (proxSlider) proxSlider.value = 4;
+      break;
+    case 1: // 3 mi
+      if (distSelect) distSelect.value = '3';
+      if (proxSlider) proxSlider.value = 3;
+      break;
+    case 2: // 5 mi
+      if (distSelect) distSelect.value = '5';
+      if (proxSlider) proxSlider.value = 2;
+      break;
+    case 3: // 10 mi
+      if (distSelect) distSelect.value = '10';
+      if (proxSlider) proxSlider.value = 1;
+      break;
+    case 4: // 15 mi
+      if (distSelect) distSelect.value = '15';
+      if (proxSlider) proxSlider.value = 1;
+      break;
+    case 5: // Any distance
+    default:
+      if (distSelect) distSelect.value = '';
+      if (proxSlider) proxSlider.value = 0;
+      break;
+  }
+
+  // 4. School Types
+  const typeChks = document.querySelectorAll('.rec-school-type-chk');
+  typeChks.forEach(chk => chk.checked = false);
+
+  if (wizardState.includeState) {
+    const gramChk = document.querySelector('.rec-school-type-chk[value="Grammar"]');
+    const compChk = document.querySelector('.rec-school-type-chk[value="Comprehensive"]');
+    if (gramChk) gramChk.checked = true;
+    if (compChk) compChk.checked = true;
+  }
+
+  if (wizardState.independentOption !== 'exclude') {
+    const indChk = document.querySelector('.rec-school-type-chk[value="Independent"]');
+    if (indChk) indChk.checked = true;
+  }
+  updateSchoolTypeDropdownLabel();
+
+  // 5. Child Ability & Qualitative Sliders
+  const abilitySelect = document.getElementById('rec-child-ability');
+  const acadSlider = document.getElementById('rec-qual-acad-slider');
+  const progSlider = document.getElementById('rec-qual-prog-slider');
+
+  if (wizardState.ability === 'great') {
+    if (abilitySelect) abilitySelect.value = 'top_class';
+    if (acadSlider) acadSlider.value = 4;
+    if (progSlider) progSlider.value = 2;
+  } else if (wizardState.ability === 'good') {
+    if (abilitySelect) abilitySelect.value = 'above_average';
+    if (acadSlider) acadSlider.value = 3;
+    if (progSlider) progSlider.value = 3;
+  } else {
+    if (abilitySelect) abilitySelect.value = 'average';
+    if (acadSlider) acadSlider.value = 1;
+    if (progSlider) progSlider.value = 4;
+  }
+  updatePrioritySlidersUI();
+
+  // 6. Close Modal & Persist Status
+  closePortfolioWizard();
+  try {
+    localStorage.setItem('schooldb_portfolio_wizard_status', 'completed');
+  } catch (e) {}
+
+  // 7. Ensure Find subtab is active and fetch recommendations
+  switchClassicSubTab('find');
+  saveUserRecProfile();
+  showToast('Personalized school recommendations are ready!', 'success');
+}
+
+function initPortfolioWizardListeners() {
+  // Option Cards: Gender
+  const boyCard = document.getElementById('pw-opt-gender-boy');
+  const girlCard = document.getElementById('pw-opt-gender-girl');
+  if (boyCard && girlCard) {
+    boyCard.addEventListener('click', () => {
+      wizardState.gender = 'boys';
+      boyCard.classList.add('selected');
+      girlCard.classList.remove('selected');
+    });
+    girlCard.addEventListener('click', () => {
+      wizardState.gender = 'girls';
+      girlCard.classList.add('selected');
+      boyCard.classList.remove('selected');
+    });
+  }
+
+  // Checkbox: Co-ed
+  const coedChk = document.getElementById('pw-chk-coed');
+  if (coedChk) {
+    coedChk.addEventListener('change', () => {
+      wizardState.includeCoed = coedChk.checked;
+    });
+  }
+
+  // Option Cards: Ability
+  ['great', 'good', 'average'].forEach(ab => {
+    const card = document.getElementById(`pw-opt-ability-${ab}`);
+    if (card) {
+      card.addEventListener('click', () => {
+        wizardState.ability = ab;
+        ['great', 'good', 'average'].forEach(other => {
+          const oc = document.getElementById(`pw-opt-ability-${other}`);
+          if (oc) oc.classList.toggle('selected', other === ab);
+        });
+      });
+    }
+  });
+
+  // Slider: Distance
+  const slider = document.getElementById('pw-slider-distance');
+  const distVal = document.getElementById('pw-val-distance');
+  if (slider) {
+    slider.addEventListener('input', () => {
+      wizardState.distanceIndex = parseInt(slider.value, 10) || 0;
+      if (distVal) distVal.textContent = DISTANCE_STEPS[wizardState.distanceIndex] || '5 miles';
+    });
+  }
+
+  // Location input
+  const locInput = document.getElementById('pw-input-locations');
+  if (locInput) {
+    locInput.addEventListener('input', () => {
+      wizardState.locations = locInput.value;
+    });
+  }
+
+  // Switch 1: State & Grammar
+  const stateBtns = document.querySelectorAll('#pw-switch-state .pw-segment-btn');
+  stateBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const val = btn.getAttribute('data-value');
+      wizardState.includeState = (val === 'include');
+      stateBtns.forEach(b => b.classList.toggle('active', b === btn));
+      const warn = document.getElementById('pw-empty-sector-warning');
+      if (warn) warn.style.display = 'none';
+    });
+  });
+
+  // Switch 2: Independent
+  const indBtns = document.querySelectorAll('#pw-switch-independent .pw-segment-btn');
+  indBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      wizardState.independentOption = btn.getAttribute('data-value');
+      indBtns.forEach(b => b.classList.toggle('active', b === btn));
+      const warn = document.getElementById('pw-empty-sector-warning');
+      if (warn) warn.style.display = 'none';
+    });
+  });
+
+  // Navigation Buttons
+  const nextBtn = document.getElementById('btn-pw-next');
+  if (nextBtn) nextBtn.addEventListener('click', handleWizardNext);
+
+  const backBtn = document.getElementById('btn-pw-back');
+  if (backBtn) backBtn.addEventListener('click', handleWizardBack);
+
+  // Skip Buttons
+  const skipTop = document.getElementById('btn-pw-skip-top');
+  if (skipTop) skipTop.addEventListener('click', handleWizardSkip);
+
+  const skipBottom = document.getElementById('btn-pw-skip-bottom');
+  if (skipBottom) skipBottom.addEventListener('click', handleWizardSkip);
+
+  // Re-trigger Button
+  const retriggerBtn = document.getElementById('btn-retrigger-wizard');
+  if (retriggerBtn) {
+    retriggerBtn.addEventListener('click', () => openPortfolioWizard({ isFirstTime: false }));
+  }
+}
+
+function checkAutoLaunchPortfolioWizard() {
+  try {
+    const status = localStorage.getItem('schooldb_portfolio_wizard_status');
+    if (!status) {
+      openPortfolioWizard({ isFirstTime: true });
+    }
+  } catch (e) {}
 }
 
 // Render Recommendations in Parent Portal 2.0 Feed with Plain-English Insights

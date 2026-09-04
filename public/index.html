@@ -343,9 +343,14 @@
                   </h3>
                   <p style="font-size: 0.82rem; color: #64748b; margin-top: 0.15rem;">Ordered by highest match score. Click "+ Add to Shortlist" on any school to save it.</p>
                 </div>
-                <button id="refresh-rec-btn" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
-                  <i class="fa-solid fa-rotate-right"></i> Refresh Recommendations
-                </button>
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                  <button id="btn-retrigger-wizard" class="btn" style="background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%); border: 1px solid #c7d2fe; color: #4338ca; font-weight: 700; font-size: 0.8rem; padding: 0.4rem 0.85rem; border-radius: 8px; display: inline-flex; align-items: center; gap: 0.45rem; cursor: pointer; transition: all 0.2s;" title="Update your family preferences and portfolio criteria">
+                    <i class="fa-solid fa-wand-magic-sparkles" style="color: #6366f1;"></i> Portfolio Matchmaker
+                  </button>
+                  <button id="refresh-rec-btn" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                    <i class="fa-solid fa-rotate-right"></i> Refresh Recommendations
+                  </button>
+                </div>
               </div>
 
               <!-- 2-Line Row Layout Container -->
@@ -2328,6 +2333,243 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
       </div>
 
     </section>
+  <!-- Portfolio Onboarding Wizard Modal -->
+  <div id="portfolio-wizard-modal" class="portfolio-wizard-overlay" style="display: none;">
+    <div class="portfolio-wizard-card">
+      
+      <!-- Wizard Header -->
+      <div class="pw-header">
+        <div class="pw-header-top">
+          <div class="pw-title">
+            <i class="fa-solid fa-wand-magic-sparkles" style="color: #6366f1;"></i>
+            <span>School Portfolio Matchmaker</span>
+          </div>
+          <button type="button" class="pw-btn-skip" id="btn-pw-skip-top" title="Skip setup and browse schools directly">
+            I know what I want &times;
+          </button>
+        </div>
+
+        <!-- 3-Step Pill Bar -->
+        <div class="pw-steps-indicator">
+          <div class="pw-step-pill active" id="pw-step-indicator-1">
+            <span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: #2563eb; color: white; font-size: 0.68rem;">1</span>
+            <span>About Child</span>
+          </div>
+          <div class="pw-step-pill" id="pw-step-indicator-2">
+            <span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: #cbd5e1; color: white; font-size: 0.68rem;">2</span>
+            <span>Location</span>
+          </div>
+          <div class="pw-step-pill" id="pw-step-indicator-3">
+            <span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: #cbd5e1; color: white; font-size: 0.68rem;">3</span>
+            <span>School Types</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wizard Scrollable Body -->
+      <div class="pw-body">
+
+        <!-- PAGE 1: ABOUT CHILD -->
+        <div class="pw-page active" id="pw-page-1">
+          
+          <!-- 1a. Gender -->
+          <div style="margin-bottom: 1.3rem;">
+            <div class="pw-section-title">
+              <i class="fa-solid fa-child" style="color: #6366f1;"></i>
+              <span>Who is this search for?</span>
+            </div>
+            <div class="pw-section-desc">Select your child's gender to tailor admissions criteria.</div>
+            
+            <div class="pw-grid-2">
+              <div class="pw-option-card selected" id="pw-opt-gender-boy" data-gender="boys">
+                <div class="pw-option-icon">👦</div>
+                <div class="pw-option-title">
+                  <span>A Boy</span>
+                  <i class="fa-solid fa-circle-check pw-option-check"></i>
+                </div>
+                <div class="pw-option-desc">Boys-only and co-educational schools</div>
+              </div>
+
+              <div class="pw-option-card" id="pw-opt-gender-girl" data-gender="girls">
+                <div class="pw-option-icon">👧</div>
+                <div class="pw-option-title">
+                  <span>A Girl</span>
+                  <i class="fa-solid fa-circle-check pw-option-check"></i>
+                </div>
+                <div class="pw-option-desc">Girls-only and co-educational schools</div>
+              </div>
+            </div>
+
+            <!-- Include Co-Ed Checkbox Button -->
+            <label class="pw-coed-toggle-wrap" id="pw-coed-toggle-label">
+              <div>
+                <strong style="font-size: 0.85rem; color: #1e293b; display: flex; align-items: center; gap: 0.35rem;">
+                  <i class="fa-solid fa-users" style="color: #059669;"></i> Include Co-Ed / Mixed Schools
+                </strong>
+                <div style="font-size: 0.76rem; color: #64748b; margin-top: 0.15rem;">Also include schools that admit both boys and girls</div>
+              </div>
+              <input type="checkbox" id="pw-chk-coed" class="pw-toggle-checkbox" checked>
+            </label>
+          </div>
+
+          <!-- 1b. Academic Standing -->
+          <div>
+            <div class="pw-section-title">
+              <i class="fa-solid fa-graduation-cap" style="color: #d97706;"></i>
+              <span>How are they doing in class right now?</span>
+            </div>
+            <div class="pw-section-desc">Helps match academic pace, competitive testing, or nurturing teacher-led growth.</div>
+
+            <div class="pw-grid-3">
+              <div class="pw-option-card selected" id="pw-opt-ability-great" data-ability="great">
+                <div class="pw-option-icon">🚀</div>
+                <div class="pw-option-title">
+                  <span>Great</span>
+                  <i class="fa-solid fa-circle-check pw-option-check"></i>
+                </div>
+                <div class="pw-option-desc">Near top of class; loves academic challenges and fast pace</div>
+              </div>
+
+              <div class="pw-option-card" id="pw-opt-ability-good" data-ability="good">
+                <div class="pw-option-icon">⚖️</div>
+                <div class="pw-option-title">
+                  <span>Good</span>
+                  <i class="fa-solid fa-circle-check pw-option-check"></i>
+                </div>
+                <div class="pw-option-desc">Solid grasping of concepts; steady, capable learner</div>
+              </div>
+
+              <div class="pw-option-card" id="pw-opt-ability-average" data-ability="average">
+                <div class="pw-option-icon">🌱</div>
+                <div class="pw-option-title">
+                  <span>Average</span>
+                  <i class="fa-solid fa-circle-check pw-option-check"></i>
+                </div>
+                <div class="pw-option-desc">Flourishes best with supportive, high-growth teaching</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- PAGE 2: LOCATION & COMMUTE -->
+        <div class="pw-page" id="pw-page-2">
+          
+          <div style="margin-bottom: 1.5rem;">
+            <div class="pw-section-title">
+              <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i>
+              <span>Where will your child travel from?</span>
+            </div>
+            <div class="pw-section-desc">Enter your home postcode or key areas of interest (comma-separated).</div>
+            
+            <div style="position: relative;">
+              <input type="text" id="pw-input-locations" placeholder="e.g. SW19 4TT, Wimbledon, Kingston" style="width: 100%; padding: 0.65rem 0.85rem; border: 1.5px solid #cbd5e1; border-radius: 10px; font-size: 0.92rem; font-weight: 600; color: #0f172a; background: #ffffff;">
+              <div style="font-size: 0.74rem; color: #64748b; margin-top: 0.35rem; display: flex; align-items: center; gap: 0.3rem;">
+                <i class="fa-solid fa-circle-info" style="color: #3b82f6;"></i>
+                <span>You can list multiple postcodes or boroughs separated by commas.</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="pw-section-title">
+              <i class="fa-solid fa-route" style="color: #2563eb;"></i>
+              <span>How far are you willing to travel?</span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.45rem;">
+              <span style="font-size: 0.82rem; color: #64748b;">Maximum commute radius:</span>
+              <span id="pw-val-distance" style="font-size: 0.86rem; font-weight: 800; color: #2563eb; background: #eff6ff; padding: 0.2rem 0.6rem; border-radius: 6px; border: 1px solid #bfdbfe;">5 miles</span>
+            </div>
+
+            <input type="range" id="pw-slider-distance" min="0" max="5" step="1" value="2" style="width: 100%; accent-color: #2563eb; cursor: pointer;">
+            
+            <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #94a3b8; font-weight: 600; margin-top: 0.2rem;">
+              <span>&lt; 1 mi</span>
+              <span>3 mi</span>
+              <span>5 mi</span>
+              <span>10 mi</span>
+              <span>15 mi</span>
+              <span>Any distance</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- PAGE 3: SCHOOL TYPES & SECTOR PREFERENCES -->
+        <div class="pw-page" id="pw-page-3">
+          
+          <div class="pw-section-title" style="margin-bottom: 0.85rem;">
+            <i class="fa-solid fa-sliders" style="color: #6366f1;"></i>
+            <span>Which school types should be included?</span>
+          </div>
+
+          <!-- Switch 1: State & Grammar -->
+          <div style="margin-bottom: 1.25rem; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1rem;">
+            <div style="margin-bottom: 0.5rem;">
+              <strong style="font-size: 0.92rem; color: #0f172a; display: flex; align-items: center; gap: 0.4rem;">
+                <i class="fa-solid fa-building-columns" style="color: #2563eb;"></i> 1. State &amp; Grammar Schools
+              </strong>
+              <div style="font-size: 0.76rem; color: #64748b; margin-top: 0.15rem;">Tuition-free state-funded grammar (11+) &amp; comprehensive schools</div>
+            </div>
+
+            <div class="pw-segmented-wrap" id="pw-switch-state">
+              <button type="button" class="pw-segment-btn active" data-value="include">
+                <i class="fa-solid fa-circle-check"></i> Include
+              </button>
+              <button type="button" class="pw-segment-btn" data-value="exclude">
+                <i class="fa-solid fa-circle-xmark"></i> Exclude
+              </button>
+            </div>
+          </div>
+
+          <!-- Switch 2: Independent Schools -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1rem;">
+            <div style="margin-bottom: 0.5rem;">
+              <strong style="font-size: 0.92rem; color: #0f172a; display: flex; align-items: center; gap: 0.4rem;">
+                <i class="fa-solid fa-graduation-cap" style="color: #7c3aed;"></i> 2. Independent Schools
+              </strong>
+              <div style="font-size: 0.76rem; color: #64748b; margin-top: 0.15rem;">Fee-paying private schools, bursaries &amp; academic scholarships</div>
+            </div>
+
+            <div class="pw-segmented-wrap" id="pw-switch-independent">
+              <button type="button" class="pw-segment-btn active" data-value="support">
+                <i class="fa-solid fa-hand-holding-dollar"></i> With Financial Support
+              </button>
+              <button type="button" class="pw-segment-btn" data-value="all">
+                <i class="fa-solid fa-globe"></i> Include All
+              </button>
+              <button type="button" class="pw-segment-btn" data-value="exclude">
+                <i class="fa-solid fa-circle-xmark"></i> Exclude
+              </button>
+            </div>
+          </div>
+
+          <!-- Empty sector safeguard warning -->
+          <div id="pw-empty-sector-warning" style="display: none; margin-top: 0.85rem; padding: 0.6rem 0.85rem; background: #fef2f2; border: 1px solid #fecdd3; border-radius: 8px; color: #991b1b; font-size: 0.78rem; font-weight: 600;">
+            <i class="fa-solid fa-triangle-exclamation"></i> Please include at least one school sector to find recommendations.
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Wizard Footer Controls -->
+      <div class="pw-footer">
+        <button type="button" class="pw-btn-skip" id="btn-pw-skip-bottom" title="Skip wizard and browse full school directory">
+          I know what I want
+        </button>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <button type="button" class="btn btn-outline" id="btn-pw-back" style="display: none; font-size: 0.85rem; padding: 0.5rem 1rem;">
+            <i class="fa-solid fa-chevron-left"></i> Back
+          </button>
+          <button type="button" class="btn btn-primary" id="btn-pw-next" style="font-size: 0.85rem; padding: 0.5rem 1.25rem; font-weight: 700; background: #2563eb; border-color: #2563eb;">
+            Continue <i class="fa-solid fa-arrow-right"></i>
+          </button>
+        </div>
+      </div>
+
+    </div>
   </div>
 
   <!-- School Detail Modal -->
