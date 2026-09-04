@@ -148,22 +148,74 @@ function evaluateRecommendations({
   const childAbility = preferencesOverride?.childAbilityLevel || 'NA';
 
   // -------------------------------------------------------------
+  // LATENT SHORTLIST ATTRIBUTE EXTRACTION
+  // -------------------------------------------------------------
+  const shortlistGenders = new Set();
+  const shortlistSchoolTypes = new Set();
+  const userExamSignatures = new Set();
+  let userAvgAttainment = 0;
+  let userAttainmentCount = 0;
+
+  userSchools.forEach(us => {
+    // Latent Gender
+    const g = (us.gender || '').toLowerCase().trim();
+    if (g.includes('girl') && !g.includes('boy')) {
+      shortlistGenders.add('girls');
+    } else if (g.includes('boy') && !g.includes('girl')) {
+      shortlistGenders.add('boys');
+    } else if (g.includes('mixed') || g.includes('co-ed') || g.includes('coeducational')) {
+      shortlistGenders.add('mixed');
+    }
+
+    // Latent School Type
+    const st = (us.schoolType || '').toLowerCase().trim();
+    if (st.includes('grammar')) shortlistSchoolTypes.add('grammar');
+    else if (st.includes('independent')) shortlistSchoolTypes.add('independent');
+    else if (st.includes('comprehensive') || st.includes('academy') || st.includes('community')) shortlistSchoolTypes.add('comprehensive');
+    else if (st) shortlistSchoolTypes.add(st);
+
+    // Latent Exam Signatures
+    extractExamSignature(us).forEach(sig => userExamSignatures.add(sig));
+
+    // Academic Attainment
+    if (typeof us.gcseAttainment8 === 'number') {
+      userAvgAttainment += us.gcseAttainment8;
+      userAttainmentCount++;
+    }
+  });
+
+  const benchmarkAttainment = userAttainmentCount > 0 ? (userAvgAttainment / userAttainmentCount) : 65;
+
+  // -------------------------------------------------------------
   // STAGE 1: HARD BINARY FILTERS
   // -------------------------------------------------------------
 
-  // 1. Strict Gender Filter
-  let genderList = [];
+  // 1. Strict Gender Filter with Shortlist Attribute Union
+  let explicitGenderList = [];
   const rawGender = binaryFilters.gender && binaryFilters.gender !== 'NA' ? binaryFilters.gender : genderChoice;
   if (Array.isArray(rawGender)) {
-    genderList = rawGender.filter(g => g && g !== 'NA');
-  } else if (typeof rawGender === 'string' && rawGender !== 'all' && rawGender !== 'NA') {
-    genderList = rawGender.split(',').map(s => s.trim().toLowerCase());
+    explicitGenderList = rawGender.filter(g => g && g !== 'NA' && g !== 'all');
+  } else if (typeof rawGender === 'string' && rawGender !== 'all' && rawGender !== 'NA' && rawGender !== '') {
+    explicitGenderList = rawGender.split(',').map(s => s.trim().toLowerCase()).filter(g => g && g !== 'na' && g !== 'all');
   }
 
-  candidates = candidates.filter(s => passesGenderFilter(s, genderList));
+  const hasExplicitGenderFilter = explicitGenderList.length > 0;
+  let effectiveGenderList = [];
 
-  // 2. Adaptive School Type Filter
-  // If user explicitly checked school types (and it's not 'NA'), it acts as a strict HARD filter
+  if (hasExplicitGenderFilter) {
+    // If a filter is set, still use the 'union' of selected filters and shortlisted schools
+    const unionGenders = new Set([...explicitGenderList, ...shortlistGenders]);
+    effectiveGenderList = Array.from(unionGenders);
+  } else if (shortlistGenders.size > 0) {
+    // In absence of filter selections, use the 'union' of selected school attributes for recommendation
+    effectiveGenderList = Array.from(shortlistGenders);
+  }
+
+  if (effectiveGenderList.length > 0) {
+    candidates = candidates.filter(s => passesGenderFilter(s, effectiveGenderList));
+  }
+
+  // 2. Adaptive School Type Filter with Shortlist Union
   const rawTypes = binaryFilters.schoolTypes;
   let isExplicitTypeFilter = false;
   let explicitTypes = [];
@@ -171,12 +223,14 @@ function evaluateRecommendations({
     explicitTypes = rawTypes.filter(t => t && t !== 'NA' && t !== 'all');
     if (explicitTypes.length > 0) isExplicitTypeFilter = true;
   } else if (typeof rawTypes === 'string' && rawTypes !== 'NA' && rawTypes !== 'all' && rawTypes !== '') {
-    explicitTypes = [rawTypes];
+    explicitTypes = [rawTypes.trim()];
     isExplicitTypeFilter = true;
   }
 
   if (isExplicitTypeFilter) {
-    candidates = candidates.filter(s => passesSchoolTypeFilter(s, explicitTypes));
+    // If a filter is set, use the 'union' of selected filters and shortlisted schools
+    const unionTypes = new Set([...explicitTypes.map(t => t.toLowerCase().trim()), ...shortlistSchoolTypes]);
+    candidates = candidates.filter(s => passesSchoolTypeFilter(s, Array.from(unionTypes)));
   }
 
   // 3. Ofsted Floor (if explicitly set)
@@ -228,23 +282,6 @@ function evaluateRecommendations({
       };
     }
   }
-
-  // Latent Exam Formats from User Shortlisted Schools
-  const userExamSignatures = new Set();
-  const userSchoolTypes = new Set();
-  let userAvgAttainment = 0;
-  let userAttainmentCount = 0;
-
-  userSchools.forEach(us => {
-    extractExamSignature(us).forEach(sig => userExamSignatures.add(sig));
-    if (us.schoolType) userSchoolTypes.add(us.schoolType.toLowerCase());
-    if (typeof us.gcseAttainment8 === 'number') {
-      userAvgAttainment += us.gcseAttainment8;
-      userAttainmentCount++;
-    }
-  });
-
-  const benchmarkAttainment = userAttainmentCount > 0 ? (userAvgAttainment / userAttainmentCount) : 65;
 
   // -------------------------------------------------------------
   // STAGE 3: MULTI-DIMENSIONAL SCORING ENGINE (0-100%)
@@ -308,13 +345,18 @@ function evaluateRecommendations({
     const candidateExamSigs = extractExamSignature(candidate);
 
     // Check user explicit exam format
-    const explicitExams = Array.isArray(binaryFilters.examFormats) ? binaryFilters.examFormats.filter(f => f && f !== 'NA') : [];
+    const explicitExams = Array.isArray(binaryFilters.examFormats) ? binaryFilters.examFormats.filter(f => f && f !== 'NA' && f !== 'all') : [];
     if (explicitExams.length > 0) {
       const et = (candidate.entranceExamType || '').toLowerCase();
       const matchesExplicit = explicitExams.some(f => et.includes(f.toLowerCase()));
       if (matchesExplicit) {
         examScore = 1.00;
         reasons.push(`Matches requested exam format: ${candidate.entranceExamType}`);
+      } else if (userExamSignatures.size > 0 && candidateExamSigs.some(s => userExamSignatures.has(s))) {
+        examScore = 0.80;
+        reasons.push('Compatible admissions format from shortlisted schools');
+      } else {
+        examScore = 0.40;
       }
     } else if (userExamSignatures.size > 0 && candidateExamSigs.length > 0) {
       // Check intersection with shortlisted schools
@@ -412,12 +454,23 @@ function evaluateRecommendations({
       else progressScore = 0.35;
     }
 
-    // --- Component 5: Soft School Type Affinity (when unselected) ---
+    // --- Component 5: School Type Affinity with Filter Priority (15% Weight) ---
     let typeAffinityScore = 0.50;
-    if (!isExplicitTypeFilter && userSchoolTypes.size > 0 && candidate.schoolType) {
-      if (userSchoolTypes.has(candidate.schoolType.toLowerCase())) {
+    if (isExplicitTypeFilter) {
+      if (passesSchoolTypeFilter(candidate, explicitTypes)) {
+        typeAffinityScore = 1.00;
+        reasons.push(`Matches requested school type: ${candidate.schoolType}`);
+      } else if (passesSchoolTypeFilter(candidate, Array.from(shortlistSchoolTypes))) {
+        typeAffinityScore = 0.70;
+        reasons.push(`Shares school type with shortlisted schools (${candidate.schoolType})`);
+      } else {
+        typeAffinityScore = 0.40;
+      }
+    } else if (shortlistSchoolTypes.size > 0 && candidate.schoolType) {
+      if (passesSchoolTypeFilter(candidate, Array.from(shortlistSchoolTypes))) {
         typeAffinityScore = 0.90;
-      } else if (candidate.schoolType.includes('Grammar') && userSchoolTypes.has('independent')) {
+        reasons.push(`Matches school type of your shortlisted schools (${candidate.schoolType})`);
+      } else if (candidate.schoolType.includes('Grammar') && shortlistSchoolTypes.has('independent')) {
         typeAffinityScore = 0.75; // Selective grammar is good alternative to independent
       }
     }
@@ -433,6 +486,20 @@ function evaluateRecommendations({
       ofstedBonusOrPenalty = 2;
     } else if (ofstedStr.includes('requires improvement') || ofstedStr.includes('special measures') || ofstedStr.includes('inadequate')) {
       ofstedBonusOrPenalty = -30; // Heavy penalty
+    }
+
+    // --- Component 7: Gender Filter Priority Weightage ---
+    let genderExplicitBonus = 0;
+    if (hasExplicitGenderFilter) {
+      if (passesGenderFilter(candidate, explicitGenderList)) {
+        genderExplicitBonus = 8;
+        reasons.unshift(`Matches requested gender: ${candidate.gender}`);
+      } else if (shortlistGenders.size > 0 && passesGenderFilter(candidate, Array.from(shortlistGenders))) {
+        genderExplicitBonus = 0;
+        reasons.unshift(`Matches gender of your shortlisted schools (${candidate.gender})`);
+      }
+    } else if (shortlistGenders.size > 0) {
+      reasons.unshift(`Matches gender of your shortlisted schools (${candidate.gender})`);
     }
 
     // --- Weighted Composite Calculation ---
@@ -452,11 +519,11 @@ function evaluateRecommendations({
       (typeAffinityScore * weightType)
     ) / totalWeight * 100;
 
-    let finalScore = Math.round(rawComposite + ofstedBonusOrPenalty);
+    let finalScore = Math.round(rawComposite + ofstedBonusOrPenalty + genderExplicitBonus);
     finalScore = Math.max(15, Math.min(99, finalScore)); // Clamp between 15% and 99%
 
-    // Deduplicate reasons and keep top 3
-    const uniqueReasons = [...new Set(reasons)].slice(0, 3);
+    // Deduplicate reasons and keep top 4
+    const uniqueReasons = [...new Set(reasons)].slice(0, 4);
     if (uniqueReasons.length === 0) {
       uniqueReasons.push(candidate.schoolType ? `${candidate.schoolType} secondary school` : 'High school recommendation');
     }

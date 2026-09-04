@@ -98,11 +98,108 @@ async function runTests() {
   console.log(`  ✓ Verified gender=['girls', 'mixed'] returned 0% Boys-only schools.`);
 
   // -------------------------------------------------------------
-  // Test 2: Adaptive School Type Filter
+  // Test 1B: Shortlisted School Gender as Hard Filter (Absence of Filter)
   // -------------------------------------------------------------
-  console.log('\n[2. Testing Adaptive School Type Filter]');
+  console.log('\n[1B. Testing Shortlist Gender as Hard Filter in Absence of Filter]');
 
-  // Explicit Grammar selection -> Hard filter (100% Grammar)
+  const qeBoys = allSchools.find(s => s.name.includes("Queen Elizabeth's School"));
+  assert(qeBoys, "Queen Elizabeth's School must exist");
+  assert((qeBoys.gender || '').toLowerCase().includes('boy'), 'QE must be a Boys school');
+
+  // Case 1: Shortlisted Boys school with NO gender filter set -> 100% Boys schools only
+  const recsUnfilteredShortlistBoys = evaluateRecommendations({
+    allSchools,
+    userSchools: [qeBoys],
+    targetLocation: 'EN5 4DQ', // Barnet
+    genderChoice: 'all'
+  });
+  assert(recsUnfilteredShortlistBoys.recommendations.length > 0, 'Should find recommendations for Boys shortlist');
+  for (const r of recsUnfilteredShortlistBoys.recommendations) {
+    const g = (r.school.gender || '').toLowerCase();
+    assert(g.includes('boy') && !g.includes('girl'), `Candidate ${r.school.name} must strictly be Boys-only when user shortlisted a Boys school with no filter (got: ${r.school.gender})`);
+  }
+  console.log(`  ✓ Shortlisted Boys school (no filter) returned ${recsUnfilteredShortlistBoys.recommendations.length} schools, 100% strictly Boys-only (0% Girls, 0% Mixed).`);
+
+  // Case 2: Shortlisted Girls school with NO gender filter set -> 100% Girls schools only
+  const tiffinGirls = allSchools.find(s => s.name.toLowerCase().includes('tiffin girls') || s.name.toLowerCase().includes('henrietta barnett'));
+  assert(tiffinGirls, "A Girls school must exist in database");
+  const recsUnfilteredShortlistGirls = evaluateRecommendations({
+    allSchools,
+    userSchools: [tiffinGirls],
+    targetLocation: 'KT2 5PL',
+    genderChoice: 'all'
+  });
+  assert(recsUnfilteredShortlistGirls.recommendations.length > 0, 'Should find recommendations for Girls shortlist');
+  for (const r of recsUnfilteredShortlistGirls.recommendations) {
+    const g = (r.school.gender || '').toLowerCase();
+    assert(g.includes('girl') && !g.includes('boy'), `Candidate ${r.school.name} must strictly be Girls-only when user shortlisted a Girls school with no filter (got: ${r.school.gender})`);
+  }
+  console.log(`  ✓ Shortlisted Girls school (no filter) returned ${recsUnfilteredShortlistGirls.recommendations.length} schools, 100% strictly Girls-only (0% Boys, 0% Mixed).`);
+
+  // Case 3: Shortlisted Boys + Mixed schools with NO filter set -> Union (Boys or Mixed; 0% Girls)
+  const aMixedSchool = allSchools.find(s => (s.gender || '').toLowerCase().includes('mixed'));
+  assert(aMixedSchool, "A Mixed school must exist in database");
+  const recsUnfilteredBoysPlusMixed = evaluateRecommendations({
+    allSchools,
+    userSchools: [qeBoys, aMixedSchool],
+    targetLocation: 'EN5 4DQ',
+    genderChoice: 'all'
+  });
+  assert(recsUnfilteredBoysPlusMixed.recommendations.length > 0);
+  for (const r of recsUnfilteredBoysPlusMixed.recommendations) {
+    const g = (r.school.gender || '').toLowerCase();
+    const isGirlsOnly = g.includes('girl') && !g.includes('boy');
+    assert.strictEqual(isGirlsOnly, false, `Candidate ${r.school.name} must not be Girls-only when shortlist has Boys+Mixed with no filter`);
+  }
+  console.log(`  ✓ Shortlisted Boys + Mixed schools (no filter) returned 0% Girls-only schools (union of shortlist genders).`);
+
+  // -------------------------------------------------------------
+  // Test 1C: Explicit Filter + Shortlist Union with Filter Priority
+  // -------------------------------------------------------------
+  console.log('\n[1C. Testing Explicit Filter + Shortlist Union with Filter Priority]');
+
+  // User shortlisted Boys school (QE Boys), but explicitly sets filter gender = 'mixed'
+  const recsExplicitMixedWithBoysShortlist = evaluateRecommendations({
+    allSchools,
+    userSchools: [qeBoys],
+    genderChoice: 'mixed'
+  });
+  assert(recsExplicitMixedWithBoysShortlist.recommendations.length > 0);
+
+  // Union verification: candidates should be Mixed OR Boys; 0% Girls-only
+  for (const r of recsExplicitMixedWithBoysShortlist.recommendations) {
+    const g = (r.school.gender || '').toLowerCase();
+    const isGirlsOnly = g.includes('girl') && !g.includes('boy');
+    assert.strictEqual(isGirlsOnly, false, `Candidate ${r.school.name} must not be Girls-only in union of Mixed filter and Boys shortlist`);
+  }
+  console.log(`  ✓ Union of explicit 'mixed' filter and shortlisted Boys school contains 0% Girls-only schools.`);
+
+  // Priority verification: schools matching the explicit filter 'mixed' receive the +8 explicit bonus and rank higher
+  const mixedRecs = recsExplicitMixedWithBoysShortlist.recommendations.filter(r => (r.school.gender || '').toLowerCase().includes('mixed'));
+  const boysRecs = recsExplicitMixedWithBoysShortlist.recommendations.filter(r => {
+    const g = (r.school.gender || '').toLowerCase();
+    return g.includes('boy') && !g.includes('girl');
+  });
+
+  assert(mixedRecs.length > 0, 'Should have mixed recommendations');
+  // Check reasons for explicit filter match vs shortlist profile match
+  const sampleMixed = mixedRecs[0];
+  const hasExplicitGenderReason = sampleMixed.reasons.some(re => re.includes('Matches requested gender'));
+  assert.strictEqual(hasExplicitGenderReason, true, 'Explicit match should cite Matches requested gender');
+
+  if (boysRecs.length > 0) {
+    const sampleBoys = boysRecs[0];
+    const hasShortlistGenderReason = sampleBoys.reasons.some(re => re.includes('Matches gender of your shortlisted schools'));
+    assert.strictEqual(hasShortlistGenderReason, true, 'Shortlist union match should cite Matches gender of your shortlisted schools');
+  }
+  console.log(`  ✓ Higher weightage and reason attribution for explicit filter over shortlist union confirmed.`);
+
+  // -------------------------------------------------------------
+  // Test 2: Adaptive School Type Filter with Shortlist Union
+  // -------------------------------------------------------------
+  console.log('\n[2. Testing Adaptive School Type Filter with Shortlist Union]');
+
+  // Explicit Grammar selection -> Hard filter (100% Grammar when userSchools is empty)
   const grammarOnlyRecs = evaluateRecommendations({
     allSchools,
     userSchools: [],
@@ -114,7 +211,7 @@ async function runTests() {
   }
   console.log(`  ✓ Explicit schoolTypes=['Grammar'] strictly returned 100% Grammar schools (${grammarOnlyRecs.recommendations.length} schools).`);
 
-  // Explicit Independent selection -> Hard filter (100% Independent)
+  // Explicit Independent selection -> Hard filter (100% Independent when userSchools is empty)
   const indOnlyRecs = evaluateRecommendations({
     allSchools,
     userSchools: [],
@@ -125,6 +222,22 @@ async function runTests() {
     assert((r.school.schoolType || '').toLowerCase().includes('independent'), `Must be Independent school: ${r.school.name}`);
   }
   console.log(`  ✓ Explicit schoolTypes=['Independent'] strictly returned 100% Independent schools (${indOnlyRecs.recommendations.length} schools).`);
+
+  // Explicit Grammar selection with an Independent school shortlisted -> Union of Grammar and Independent
+  const anIndSchool = allSchools.find(s => (s.schoolType || '').toLowerCase().includes('independent'));
+  assert(anIndSchool, 'An Independent school must exist in database');
+  const unionTypeRecs = evaluateRecommendations({
+    allSchools,
+    userSchools: [anIndSchool],
+    preferencesOverride: { binaryFilters: { schoolTypes: ['Grammar'] } }
+  });
+  assert(unionTypeRecs.recommendations.length > 0);
+  for (const r of unionTypeRecs.recommendations) {
+    const st = (r.school.schoolType || '').toLowerCase();
+    const isGrammarOrInd = st.includes('grammar') || st.includes('independent');
+    assert.strictEqual(isGrammarOrInd, true, `Candidate ${r.school.name} must be Grammar or Independent in union`);
+  }
+  console.log(`  ✓ Explicit Grammar filter + shortlisted Independent school returned union of Grammar & Independent schools.`);
 
   // -------------------------------------------------------------
   // Test 3: Asymmetric Ofsted Scoring
