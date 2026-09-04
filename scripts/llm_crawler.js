@@ -24,6 +24,14 @@ try {
 // Public search reference URLs
 const GEMINI_PUBLIC_SEARCH_URL = 'https://gemini.google.com/app';
 const CHATGPT_PUBLIC_SEARCH_URL = 'https://chatgpt.com/';
+const GOOGLE_SEARCH_BASE_URL = 'https://www.google.com/search';
+
+function getGoogleSearchUrl(school) {
+  const name = school?.name || 'UK school';
+  const pc = school?.postcode || '';
+  const query = `"${name}" admissions "11+" entrance exam dates 2026 ${pc}`.trim();
+  return `${GOOGLE_SEARCH_BASE_URL}?q=${encodeURIComponent(query)}`;
+}
 
 function getGeminiSearchUrl(school, promptText = null) {
   const query = promptText || (school ? `Admissions 11+ entrance exam dates fees ${school.name} ${school.postcode || ''}` : '');
@@ -37,41 +45,52 @@ function getChatGPTSearchUrl(school, promptText = null) {
 
 function getLLMPublicSearchUrl(provider = 'gemini', school = null, promptText = null) {
   const prov = (provider || '').toLowerCase();
+  if (prov === 'google') {
+    return getGoogleSearchUrl(school);
+  }
   if (prov === 'chatgpt' || prov === 'openai') {
     return getChatGPTSearchUrl(school, promptText);
   }
   return getGeminiSearchUrl(school, promptText);
 }
 
-const DEFAULT_LLM_PROMPT_TEMPLATE = `You are an expert UK School Admissions Data Researcher and Verifier. Your task is to provide accurate, verified, and structured information for the following UK school:
+const DEFAULT_LLM_PROMPT_TEMPLATE = `You are an expert UK School Admissions Data Researcher and Verifier. Your task is to provide accurate, verified, and structured admissions intelligence for the following UK school using SEARCH-BASED ANSWERS:
 
-Target School Identification & Anchors:
+Target School:
 - School Name: {{school_name}}
 - City / Town: {{city}}
 - Local Authority / County: {{county}}
 - Postcode: {{postcode}}
 - Known Website: {{website}}
+- Reference DfE URN: {{urn}}
 
-CRITICAL ACCURACY & ANTI-HALLUCINATION RULES:
-1. STRICT DISAMBIGUATION: You must verify information ONLY for the specific UK school located at Postcode {{postcode}} in {{city}}, {{county}}. Do NOT confuse with schools of similar or identical names in other regions.
-2. ABSOLUTE ACCURACY OVER COMPLETENESS (ZERO GUESSWORK ON BASIC INFO): Never guess, estimate, or fabricate basic school details. If any field is unconfirmed, return null.
-3. STRICT GENDER POLICY & BASIC PROFILE INTEGRITY:
-   - 'gender': You MUST return "Girls", "Boys", or "Mixed" ONLY if 100% verified from official sources (such as DfE Get Information About Schools or official school website). NEVER default to "Mixed" or guess the gender policy. If single-sex girls, state "Girls"; if single-sex boys, state "Boys"; if co-educational, state "Mixed". If unconfirmed, set null.
-   - 'schoolType' / 'rawSchoolType': Return accurate classification ("Independent", "Grammar", "Comprehensive", or official DfE category).
-   - 'ageRange': Return official age range (e.g. "11 to 18", "4 to 11", "11 to 16", "3 to 19") if verified; otherwise set null.
-   - 'address': Return full official postal street address if known (e.g. including road/street name). Do not replace a detailed address with just a city name. If unknown, set null.
-   - 'description': Provide an accurate summary of the school and its ethos.
-   - 'website', 'phone', 'email': Return official contact info if known; otherwise null.
-4. 11+ ADMISSIONS CYCLE CONTEXT:
-   - Focus on Year 7 entry (11+ admissions). Dates must follow "Day Month Year" format (e.g. "6 November 2026").
-   - For Grammar / State Selective: Identify exact 11+ consortium/board (e.g. "GL Assessment", "CSSE 11+", "Kent 11+ PESE", "School's Own Exam"). Fees must be null.
-   - For Independent / Fee-Paying: Identify exam format (e.g. "ISEB Common Pre-Test", "London 11+ Consortium", "School's Own Assessment"), termly tuition fee (e.g. "£7,500"), and registration fee (e.g. "£150").
-   - For Comprehensive / Non-Selective State: Exam board is "Non-selective / DfE Coordinated Admissions", second_stage_exam_required is "No", fees are null.
-   - If specific Year 7 entrance exam dates are not applicable or unconfirmed (e.g. primary/special/non-selective), leave those date fields as null or empty arrays [].
-5. OFFICIAL ENGLAND RANKINGS:
-   - 'national_rank_england', 'gcse_rank_england', 'a_level_rank_england': Official integer rank in England if published; otherwise null.
+SEARCH-BASED KNOWLEDGE RETRIEVAL & CRITICAL ACCURACY DIRECTIVES:
+1. USE SEARCH-BASED ANSWERS (BROWSER SEARCH FIDELITY):
+   - You MUST answer as if performing a live browser-based Google search. Search official school web pages, published admissions policies, prospectus documents, and DfE GIAS registers to retrieve real, factual information.
+   - Prioritize live, verifiable facts published by the school over stale pre-training memory or generic estimates.
+   - Refer to these targeted search queries to resolve the school's official data:
+{{search_queries}}
 
-Output ONLY a valid JSON object matching this schema with no markdown formatting, code blocks, or preamble:
+2. 11+ ADMISSIONS PROFILE (Year 7 / 2026–2027 Entry):
+   - Entrance Exam Format: Name the specific exam board/consortium (e.g. "11+ GL Assessment", "ISEB Common Pre-Test", "CSSE 11+", "Kent PESE", "London 11+ Consortium", or "Non-selective (Local Authority CAF / Pan-London eAdmissions)").
+   - Milestone Dates (format as "Day Month Year", e.g. "15 October 2026"):
+     * Registration Opens & Deadline
+     * Stage 1 Exam Date, Format & Results Release Date
+     * Stage 2 Exam Required ("Yes" or "No"), Stage 2 Exam Date & Results Date
+     * Interview Dates, National Offer Date & Acceptance Deadline
+     * Open Events / Open Days dates
+   - ZERO GUESSWORK: If a specific date for 2026/2027 entry is not confirmed in search results, return null. NEVER invent, extrapolate, or reuse outdated dates from past academic years.
+
+3. FINANCIALS, GENDER & IDENTITY:
+   - Financials (Independent Schools): Exact termly tuition fee (e.g. "£7,500") and registration fee (e.g. "£150"). (For state schools, leave null).
+   - School Gender: Accurately state "Girls", "Boys", or "Mixed" from official DfE GIAS records or prospectus. NEVER guess or default.
+   - School Type: Identify "Grammar", "Independent", or "Comprehensive" (Academy / Community / Foundation).
+   - Contact & Identity: Official website URL, admissions phone, admissions email, and complete street address.
+   - Source URL: In "sourceUrl", cite the exact official webpage URL discovered via search where these admissions details are published.
+   - England Rankings: National rank in England, GCSE rank, and A-Level rank (if published in official tables; otherwise null).
+   - Provide a concise summary of the school and its 11+ admissions process in admissionsOverview (with bullet points for key admission milestones) and description. If a school has multiple examination dates, specify all dates.
+
+Return ONLY a valid JSON object matching this schema (use null for unconfirmed fields):
 
 {
   "name": "{{school_name}}",
@@ -91,14 +110,14 @@ Output ONLY a valid JSON object matching this schema with no markdown formatting
     "registrationOpen": null,
     "registrationDeadline": null,
     "registrationFee": null,
-    "stage_one_examDate": [],
+    "stage_one_examDate": null,
     "stage_one_format_and_subjects": null,
     "stage_one_resultDate": null,
-    "second_stage_exam_required": null,
-    "stage_two_examDate": [],
+    "second_stage_exam_required": "No",
+    "stage_two_examDate": null,
     "stage_two_format_and_subjects": null,
     "stage_two_resultDate": null,
-    "interviewDates": [],
+    "interviewDates": null,
     "offerDate": null,
     "acceptanceDeadline": null,
     "openEvents": null,
@@ -193,12 +212,34 @@ function renderPrompt(template, school) {
   const region = s.region || s.la || county || city || 'Greater London / UK';
   const website = (s.website && s.website !== 'N/A' && s.website !== 'null' && s.website !== 'Unknown') ? s.website : 'Not available';
 
+  let websiteDomain = '';
+  try {
+    if (website && website !== 'Not available') {
+      if (website.startsWith('http')) {
+        websiteDomain = new URL(website).hostname.replace(/^www\./, '');
+      } else {
+        websiteDomain = website.replace(/^(?:https?:\/\/)?(?:www\.)?/i, '').split('/')[0];
+      }
+    }
+  } catch (e) {}
+
+  const queries = [
+    `"${s.name || ''}" admissions "11+" OR "Year 7" key dates 2026 2027 ${s.postcode || ''}`.trim(),
+    `"${s.name || ''}" entrance exam format registration deadline ${city || county || region || ''}`.trim(),
+    `"${s.name || ''}" termly fees tuition 2025 2026 2027`.trim(),
+    websiteDomain ? `site:${websiteDomain} admissions OR "key dates" OR "entry 2026"` : `"${s.name || ''}" official prospectus admissions`,
+    s.urn && s.urn !== 'N/A' ? `"${s.name || ''}" DfE GIAS URN ${s.urn} gender age range` : `"${s.name || ''}" DfE GIAS school gender age range`
+  ];
+  const searchQueriesBlock = queries.map((q, idx) => `   * Search Query ${idx + 1}: ${q}`).join('\n');
+
   return template
     .replace(/\{\{school_name\}\}/gi, s.name || '')
     .replace(/\{\{city\}\}/gi, city)
     .replace(/\{\{county\}\}/gi, county)
     .replace(/\{\{region\}\}/gi, region)
     .replace(/\{\{website\}\}/gi, website)
+    .replace(/\{\{website_domain\}\}/gi, websiteDomain || 'school-website.co.uk')
+    .replace(/\{\{search_queries\}\}/gi, searchQueriesBlock)
     .replace(/\{\{urn\}\}/gi, s.urn && s.urn !== 'N/A' ? s.urn : 'N/A')
     .replace(/\{\{postcode\}\}/gi, s.postcode || '')
     .replace(/\{\{school_type\}\}/gi, s.schoolType || 'Independent')
@@ -229,13 +270,16 @@ async function makeJsonPost(urlString, headers = {}, bodyObj = {}, timeoutMs = 1
       clearTimeout(timer);
       const text = await response.text();
       let json = null;
-      try { json = JSON.parse(text); } catch (e) {}
+      try {
+        json = JSON.parse(text);
+      } catch (e) {}
+
       return {
         ok: response.ok,
         status: response.status,
         headers: Object.fromEntries(response.headers.entries()),
-        bodyText: text,
-        json
+        json,
+        bodyText: text
       };
     } catch (err) {
       clearTimeout(timer);
@@ -408,6 +452,8 @@ async function crawlSchoolWithGemini(school, options = {}) {
   const promptTemplate = options.promptTemplate || settings.llmPromptTemplate || DEFAULT_LLM_PROMPT_TEMPLATE;
   const prompt = renderPrompt(promptTemplate, school);
 
+  const googleSearchUrl = getGoogleSearchUrl(school);
+
   const exactRequestObj = {
     provider: 'gemini',
     model: requestedModel,
@@ -417,13 +463,16 @@ async function crawlSchoolWithGemini(school, options = {}) {
       'Content-Type': 'application/json'
     },
     promptText: prompt,
+    googleSearchUrl,
     schoolInput: {
       schoolName: school?.name || 'School',
       region: school?.region || school?.la || 'Greater London / UK',
+      postcode: school?.postcode || '',
       website: school?.website || 'Not available'
     },
     payload: {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      tools: [{ googleSearch: {} }],
       generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
     },
     timestamp: new Date().toISOString()
@@ -450,6 +499,7 @@ async function crawlSchoolWithGemini(school, options = {}) {
       },
       publicSearchUrl: GEMINI_PUBLIC_SEARCH_URL,
       queryUrl: getGeminiSearchUrl(school, prompt),
+      googleSearchUrl,
       crawledAt: new Date().toISOString()
     };
   }
@@ -479,7 +529,7 @@ async function crawlSchoolWithGemini(school, options = {}) {
     };
   }
 
-  // Model alias mapping for Gemini models to ensure non-existent models gracefully map to valid endpoints
+  // Model alias mapping for Gemini models
   const GEMINI_MODEL_ALIASES = {
     'gemini-3.6-flash-lite': 'gemini-3.5-flash-lite',
     'gemini-3.0-flash-lite': 'gemini-3.5-flash-lite',
@@ -495,7 +545,6 @@ async function crawlSchoolWithGemini(school, options = {}) {
     normalizedRequestedModel = GEMINI_MODEL_ALIASES[requestedModel];
   }
 
-  // Candidate models to try in case of 404 NOT_FOUND on a specific model alias
   const candidateModels = [
     normalizedRequestedModel,
     'gemini-3.6-flash',
@@ -518,19 +567,25 @@ async function crawlSchoolWithGemini(school, options = {}) {
 
     res = await makeJsonPost(endpoint, {}, exactRequestObj.payload, options.timeoutMs || 15000, options.fetchFn);
 
+    // If API rejects tools with responseMimeType (HTTP 400), gracefully fall back without tools parameter
+    if (!res.ok && res.status === 400 && res.bodyText && (res.bodyText.includes('tool') || res.bodyText.includes('Tool') || res.bodyText.includes('responseMimeType') || res.bodyText.includes('INVALID_ARGUMENT'))) {
+      const fallbackPayload = {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
+      };
+      res = await makeJsonPost(endpoint, {}, fallbackPayload, options.timeoutMs || 15000, options.fetchFn);
+    }
+
     if (res.ok) {
       break;
     }
 
-    // If rate-limited (HTTP 429 / RESOURCE_EXHAUSTED), wait 10 seconds and retry once
-    if (res.status === 429 || (res.bodyText && (res.bodyText.includes('RESOURCE_EXHAUSTED') || res.bodyText.includes('rate limit') || res.bodyText.includes('Quota exceeded')))) {
-      console.warn(`[LLM Crawler] Rate limit (HTTP 429) encountered for ${school?.name} with model ${m}. Pausing 10 seconds before retry...`);
-      await new Promise(r => setTimeout(r, 10000));
-      res = await makeJsonPost(endpoint, {}, exactRequestObj.payload, options.timeoutMs || 20000, options.fetchFn);
-      if (res.ok) break;
+    // If rate-limited, break
+    if (res.status === 429 || (res.bodyText && (res.bodyText.includes('RESOURCE_EXHAUSTED') || res.bodyText.includes('rate limit')))) {
+      console.warn(`[LLM Crawler] Rate limit (HTTP 429) encountered for ${school?.name} with model ${m}. Halting.`);
+      break;
     }
 
-    // If error is not a 404 NOT_FOUND, do not cycle through other models (e.g. 401/403/429)
     const isNotFound = res.status === 404 || (res.bodyText && (res.bodyText.includes('NOT_FOUND') || res.bodyText.includes('not found')));
     if (!isNotFound) {
       break;
@@ -547,17 +602,20 @@ async function crawlSchoolWithGemini(school, options = {}) {
       }, null, 2);
 
   if (!res.ok) {
+    const is429 = res.status === 429 || (res.bodyText && (res.bodyText.includes('RESOURCE_EXHAUSTED') || res.bodyText.includes('rate limit') || res.bodyText.includes('Quota exceeded') || res.bodyText.includes('rate_limit')));
     return {
       success: false,
-      error: res.json?.error?.message || res.json?.error?.code || `HTTP_${res.status}_ERROR`,
-      message: res.json?.error?.message || `Google Gemini API returned HTTP status ${res.status}`,
+      isRateLimited: is429,
+      httpStatus: is429 ? 429 : res.status,
+      error: is429 ? 'HTTP_429_TOO_MANY_REQUESTS' : (res.json?.error?.message || res.json?.error?.code || `HTTP_${res.status}_ERROR`),
+      message: is429 ? `Google Gemini API returned HTTP status 429 (Rate Limit Exceeded)` : (res.json?.error?.message || `Google Gemini API returned HTTP status ${res.status}`),
       provider: 'gemini',
       model: activeModel,
       schoolId: school?.id,
       exactRequest: exactRequestObj,
       exactResponse: {
-        status: res.status,
-        statusText: `${res.status} Error`,
+        status: is429 ? 429 : res.status,
+        statusText: is429 ? '429 Too Many Requests (Rate Limit)' : `${res.status} Error`,
         rawText: rawApiBody,
         candidateText: rawApiBody,
         parsedJson: res.json,
@@ -587,6 +645,17 @@ async function crawlSchoolWithGemini(school, options = {}) {
   let parsedData = extractJsonFromLlmText(candidateText);
   if (!parsedData && res.bodyText && res.bodyText !== candidateText) {
     parsedData = extractJsonFromLlmText(res.bodyText);
+  }
+
+  // Extract grounding metadata if Google Search Grounding was active
+  const grounding = res.json?.candidates?.[0]?.groundingMetadata;
+  const webSearchQueries = grounding?.webSearchQueries || [];
+  const groundingSources = (grounding?.groundingChunks || [])
+    .map(c => ({ uri: c.web?.uri, title: c.web?.title }))
+    .filter(c => Boolean(c.uri));
+
+  if (parsedData && (!parsedData.sourceUrl || parsedData.sourceUrl === 'null') && groundingSources.length > 0) {
+    parsedData.sourceUrl = groundingSources[0].uri;
   }
 
   if (!parsedData) {
@@ -622,10 +691,17 @@ async function crawlSchoolWithGemini(school, options = {}) {
       rawText: rawApiBody,
       candidateText,
       parsedJson: parsedData,
+      groundingMetadata: grounding || null,
+      searchQueries: webSearchQueries.length > 0 ? webSearchQueries : null,
+      groundingSources: groundingSources.length > 0 ? groundingSources : null,
       timestamp: new Date().toISOString()
     },
     publicSearchUrl: GEMINI_PUBLIC_SEARCH_URL,
     queryUrl: getGeminiSearchUrl(school, prompt),
+    googleSearchUrl,
+    groundingMetadata: grounding || null,
+    searchQueries: webSearchQueries.length > 0 ? webSearchQueries : null,
+    groundingSources: groundingSources.length > 0 ? groundingSources : null,
     crawledAt: new Date().toISOString()
   };
 }
@@ -639,6 +715,7 @@ async function crawlSchoolWithChatGPT(school, options = {}) {
   const model = options.model || settings.openaiModel || 'gpt-4o-mini';
   const promptTemplate = options.promptTemplate || settings.llmPromptTemplate || DEFAULT_LLM_PROMPT_TEMPLATE;
   const prompt = renderPrompt(promptTemplate, school);
+  const googleSearchUrl = getGoogleSearchUrl(school);
 
   const exactRequestObj = {
     provider: 'chatgpt',
@@ -650,15 +727,20 @@ async function crawlSchoolWithChatGPT(school, options = {}) {
       'Authorization': apiKey ? `Bearer ${apiKey.slice(0, 7)}...***` : 'Missing'
     },
     promptText: prompt,
+    googleSearchUrl,
     schoolInput: {
       schoolName: school?.name || 'School',
       region: school?.region || school?.la || 'Greater London / UK',
+      postcode: school?.postcode || '',
       website: school?.website || 'Not available'
     },
     payload: {
       model,
       messages: [
-        { role: 'system', content: 'You are an expert UK School Admissions Data Verifier. Respond strictly with a JSON object matching the requested schema.' },
+        { 
+          role: 'system', 
+          content: 'You are an expert UK School Admissions Data Verifier. Retrieve and verify admissions information using search-based answers reflecting real-time Google search results and official school websites. Always cite official source URLs and respond strictly with a JSON object matching the requested schema.' 
+        },
         { role: 'user', content: prompt }
       ],
       response_format: { type: 'json_object' },
@@ -688,6 +770,7 @@ async function crawlSchoolWithChatGPT(school, options = {}) {
       },
       publicSearchUrl: CHATGPT_PUBLIC_SEARCH_URL,
       queryUrl: getChatGPTSearchUrl(school, prompt),
+      googleSearchUrl,
       crawledAt: new Date().toISOString()
     };
   }
@@ -722,11 +805,9 @@ async function crawlSchoolWithChatGPT(school, options = {}) {
   const headers = { 'Authorization': `Bearer ${apiKey}` };
   let res = await makeJsonPost(endpoint, headers, exactRequestObj.payload, options.timeoutMs || 15000, options.fetchFn);
 
-  // If rate-limited (HTTP 429), wait 10 seconds and retry once
+  // If rate-limited (HTTP 429), log and immediately return rate limited result
   if (!res.ok && (res.status === 429 || (res.bodyText && (res.bodyText.includes('rate_limit') || res.bodyText.includes('Rate limit') || res.bodyText.includes('quota'))))) {
-    console.warn(`[LLM Crawler] Rate limit (HTTP 429) hit for ${school?.name} with OpenAI ${model}. Pausing 10 seconds before retry...`);
-    await new Promise(r => setTimeout(r, 10000));
-    res = await makeJsonPost(endpoint, headers, exactRequestObj.payload, options.timeoutMs || 20000, options.fetchFn);
+    console.warn(`[LLM Crawler] Rate limit (HTTP 429) encountered for ${school?.name} with OpenAI ${model}. Halting crawling immediately.`);
   }
 
   // Return exact raw response before applying any logic
@@ -739,17 +820,20 @@ async function crawlSchoolWithChatGPT(school, options = {}) {
       }, null, 2);
 
   if (!res.ok) {
+    const is429 = res.status === 429 || (res.bodyText && (res.bodyText.includes('rate_limit') || res.bodyText.includes('Rate limit') || res.bodyText.includes('quota') || res.bodyText.includes('insufficient_quota')));
     return {
       success: false,
-      error: res.json?.error?.message || res.json?.error?.code || `HTTP_${res.status}_ERROR`,
-      message: res.json?.error?.message || `OpenAI API returned HTTP status ${res.status}`,
+      isRateLimited: is429,
+      httpStatus: is429 ? 429 : res.status,
+      error: is429 ? 'HTTP_429_TOO_MANY_REQUESTS' : (res.json?.error?.message || res.json?.error?.code || `HTTP_${res.status}_ERROR`),
+      message: is429 ? `OpenAI API returned HTTP status 429 (Rate Limit Exceeded)` : (res.json?.error?.message || `OpenAI API returned HTTP status ${res.status}`),
       provider: 'chatgpt',
       model,
       schoolId: school?.id,
       exactRequest: exactRequestObj,
       exactResponse: {
-        status: res.status,
-        statusText: `${res.status} Error`,
+        status: is429 ? 429 : res.status,
+        statusText: is429 ? '429 Too Many Requests (Rate Limit)' : `${res.status} Error`,
         rawText: rawApiBody,
         candidateText: rawApiBody,
         parsedJson: res.json,
@@ -801,6 +885,7 @@ async function crawlSchoolWithChatGPT(school, options = {}) {
     },
     publicSearchUrl: CHATGPT_PUBLIC_SEARCH_URL,
     queryUrl: getChatGPTSearchUrl(school, prompt),
+    googleSearchUrl,
     crawledAt: new Date().toISOString()
   };
 }
@@ -864,14 +949,17 @@ function reconcileLlmSchoolPayload(rawData = {}, school = {}) {
   if (rawData.schoolType || rawData.type) {
     reconciled.schoolType = String(rawData.schoolType || rawData.type).trim();
   }
-  if (rawData.rawSchoolType || rawData.raw_school_type) {
-    reconciled.rawSchoolType = String(rawData.rawSchoolType || rawData.raw_school_type).trim();
+  if (rawData.rawSchoolType || rawData.raw_school_type || rawData.schoolTypeDetail || rawData.school_type_detail) {
+    reconciled.rawSchoolType = String(rawData.rawSchoolType || rawData.raw_school_type || rawData.schoolTypeDetail || rawData.school_type_detail).trim();
   }
   if (rawData.gender && (rawData.gender === 'Boys' || rawData.gender === 'Girls' || rawData.gender === 'Mixed')) {
     reconciled.gender = rawData.gender;
   }
   if (rawData.ageRange || rawData.age_range) {
     reconciled.ageRange = String(rawData.ageRange || rawData.age_range).trim();
+  }
+  if (rawData.description || rawData.summary || rawData.overview) {
+    reconciled.description = String(rawData.description || rawData.summary || rawData.overview).trim();
   }
 
   // 2. Admissions Overview & Policy Formatted Text
@@ -1327,8 +1415,79 @@ function applyLLMResultToSchool(schoolId, llmResult, adminUser = 'LLM AI Crawler
     }
   }
 
-  // STRICT REQUIREMENT: If no fields were added or updated, do NOT mark as llm_enriched
+  // Detect and track matching non-null fields confirmed by the query
+  const verifiedMatches = [];
+  if (data.website && (school.website || '').toLowerCase().replace(/\/$/, '') === String(data.website).toLowerCase().replace(/\/$/, '')) {
+    verifiedMatches.push('website');
+  }
+  if (data.entranceExamType && (school.entranceExamType || '').toLowerCase() === String(data.entranceExamType).toLowerCase()) {
+    verifiedMatches.push('entranceExamType');
+  }
+  if (data.gender && (school.gender || '').toLowerCase() === String(data.gender).toLowerCase()) {
+    verifiedMatches.push('gender');
+  }
+  if (data.phone && (school.phone || '').replace(/[\s()-]/g, '') === String(data.phone).replace(/[\s()-]/g, '')) {
+    verifiedMatches.push('phone');
+  }
+  if (data.email && (school.email || '').toLowerCase() === String(data.email).toLowerCase()) {
+    verifiedMatches.push('email');
+  }
+  if (data.postcode && (school.postcode || '').toUpperCase().replace(/\s+/g, '') === String(data.postcode).toUpperCase().replace(/\s+/g, '')) {
+    verifiedMatches.push('postcode');
+  }
+  if (data.entranceExamDates && typeof data.entranceExamDates === 'object') {
+    let sDates = {};
+    try { sDates = typeof school.entranceExamDates === 'string' ? JSON.parse(school.entranceExamDates) : (school.entranceExamDates || {}); } catch(e) {}
+    for (const [dk, dv] of Object.entries(data.entranceExamDates)) {
+      if (sDates[dk] && dv && String(sDates[dk]).trim() === String(dv).trim() && String(dv).trim() !== 'TBC') {
+        verifiedMatches.push(`entranceExamDates.${dk}`);
+      }
+    }
+  }
+
+  // If no fields were added or updated, check if query verified existing non-null fields
   if (updatedFieldNames.length === 0) {
+    if (verifiedMatches.length > 0) {
+      console.log(`[LLM Crawler] Query verified ${verifiedMatches.length} matching non-null fields for "${school.name}". Marking auto_verified.`);
+      
+      let existingTags = [];
+      if (Array.isArray(school.verification_tags)) {
+        existingTags = school.verification_tags;
+      } else if (typeof school.verification_tags === 'string' && school.verification_tags) {
+        try { existingTags = JSON.parse(school.verification_tags); } catch (e) { existingTags = school.verification_tags.split(',').map(t => t.trim()); }
+      }
+
+      const crawlTag = llmResult.provider === 'chatgpt' ? 'chatgpt_crawl' : 'gemini_crawl';
+      const newTags = Array.from(new Set([
+        ...existingTags,
+        crawlTag,
+        'llm_verified',
+        'auto_verified',
+        'p0_cycle_current',
+        'dates_verified'
+      ]));
+
+      sqlite.prepare(`
+        UPDATE schools
+        SET verification_status = ?, verification_tags = ?, verified_at = ?, confidence_score = ?
+        WHERE id = ?
+      `).run('auto_verified', JSON.stringify(newTags), now, Math.max(school.confidence_score || 85, 95), schoolId);
+
+      const updatedSchool = db.getSchoolById(schoolId);
+
+      return {
+        success: true,
+        updated: false,
+        verified: true,
+        matchingFields: verifiedMatches,
+        updatedSchool,
+        updatedFieldsCount: 0,
+        updatedFields: [],
+        verifiedFieldsCount: verifiedMatches.length,
+        verifiedFields: verifiedMatches
+      };
+    }
+
     console.log(`[LLM Crawler] No new or updated fields found for "${school.name}". Skipping llm_enriched tag.`);
     return {
       success: false,
@@ -1458,6 +1617,8 @@ function applyLLMResultToSchool(schoolId, llmResult, adminUser = 'LLM AI Crawler
 module.exports = {
   GEMINI_PUBLIC_SEARCH_URL,
   CHATGPT_PUBLIC_SEARCH_URL,
+  GOOGLE_SEARCH_BASE_URL,
+  getGoogleSearchUrl,
   getGeminiSearchUrl,
   getChatGPTSearchUrl,
   getLLMPublicSearchUrl,

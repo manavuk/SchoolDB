@@ -9,6 +9,7 @@ let compareList = []; // List of schools currently selected for comparison
 let currentSchools = []; // Active filtered schools list for directory view
 let allSchools = []; // Full schools dataset
 let currentViewMode = 'table'; // 'table' or 'cards'
+let currentDetailViewVersion = localStorage.getItem('schooldb_detail_view_version') || 'v2'; // 'v1' (classic) or 'v2' (timeline & summary)
 
 // Parent Portal 2.0 Dual-Track State
 let parent2State = {
@@ -84,6 +85,8 @@ async function initApp() {
 
   if (authenticated) {
     hideGatekeeperLoginScreen();
+    // Immediately apply UI permissions so admin portal is not delayed by heavy catalog loads
+    applyPermissionsUI();
   } else {
     showGatekeeperLoginScreen();
   }
@@ -92,21 +95,48 @@ async function initApp() {
   setupEventListeners();
 
   // 4. Fetch initial school catalog, stats & system settings before UI permission routing
-  await fetchSystemSettings();
-  await fetchStats();
-  await loadSchools();
-  loadAdminSettings();
-  populateManualMergeDropdowns();
+  try {
+    await fetchSystemSettings();
+    await fetchStats();
+    await loadSchools();
+    loadAdminSettings();
+    populateManualMergeDropdowns();
+  } catch (err) {
+    console.error('Initial data load error:', err);
+  }
 
-  // 5. Fetch user portfolio & load application data
+  // 5. Fetch user portfolio & refresh permissions with loaded settings
   if (authenticated) {
-    await loadUserPortfolio(currentUserAccount);
-    await loadUserRecProfile();
+    try {
+      await loadUserPortfolio(currentUserAccount);
+      await loadUserRecProfile();
+    } catch (err) {
+      console.error('Portfolio load error:', err);
+    }
     applyPermissionsUI();
   }
 
-  // 6. Always fetch & render recommendations on load so landing page is populated with top schools immediately
-  await fetchRecommendations();
+  // 6. Fetch recommendations if currently viewing parent/recommendations tab
+  const activeTab = localStorage.getItem('app_active_primary_tab');
+  if (activeTab !== 'admin') {
+    await fetchRecommendations();
+  }
+
+  // 7. Check and restore active background scanner/crawler state immediately on load
+  checkAndPollScannerStatus();
+
+  // 8. Restore active crawling state when user returns to window/tab
+  if (!window._scannerVisibilityBound) {
+    window._scannerVisibilityBound = true;
+    window.addEventListener('focus', () => {
+      checkAndPollScannerStatus();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        checkAndPollScannerStatus();
+      }
+    });
+  }
 }
 
 // Check active session with backend /api/auth/me
@@ -156,19 +186,65 @@ async function checkActiveSession() {
   return false;
 }
 
+// Open Sign In Modal Directly
+function openLoginModal(e) {
+  if (e) {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+  }
+  const modal = document.getElementById('auth-login-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.style.zIndex = '25000';
+    modal.classList.add('active');
+  }
+}
+
+// Close Sign In Modal Directly
+function closeLoginModal(e) {
+  if (e) {
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+  }
+  const modal = document.getElementById('auth-login-modal');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.remove('active');
+  }
+}
+
 // Trigger Google Sign-In Workflow across application
-function triggerGoogleSignInWorkflow(e) {
+async function triggerGoogleSignInWorkflow(e) {
   if (e) {
     if (typeof e.preventDefault === 'function') e.preventDefault();
     if (typeof e.stopPropagation === 'function') e.stopPropagation();
   }
 
-  const overlay = document.getElementById('auth-gatekeeper-overlay');
-  if (overlay) overlay.style.display = 'none';
+  try {
+    const res = await fetch('/api/auth/google/config');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.configured && data.authUrl) {
+        window.location.href = data.authUrl;
+        return;
+      }
+    }
+  } catch (err) {}
 
-  // Direct redirect to Google OAuth 2.0 Protocol for Google Verification
-  window.location.href = '/api/auth/google';
+  // If live Google OAuth server-side config is not present, open the Google SSO modal or gatekeeper
+  const googleSsoModal = document.getElementById('google-sso-modal');
+  if (googleSsoModal) {
+    googleSsoModal.style.display = 'flex';
+    googleSsoModal.classList.add('active');
+    googleSsoModal.style.zIndex = '25000';
+  } else {
+    openLoginModal();
+  }
 }
+
+window.openLoginModal = openLoginModal;
+window.closeLoginModal = closeLoginModal;
+window.triggerGoogleSignInWorkflow = triggerGoogleSignInWorkflow;
 
 // Show full-screen unauthenticated login screen
 function showGatekeeperLoginScreen() {
@@ -176,6 +252,7 @@ function showGatekeeperLoginScreen() {
   const overlay = document.getElementById('auth-gatekeeper-overlay');
   if (overlay) {
     overlay.style.display = 'flex';
+    overlay.classList.add('active');
     overlay.style.zIndex = '20000';
   }
 
@@ -192,11 +269,20 @@ function showGatekeeperLoginScreen() {
 function hideGatekeeperLoginScreen() {
   document.documentElement.classList.remove('session-pending');
   const overlay = document.getElementById('auth-gatekeeper-overlay');
-  if (overlay) overlay.style.display = 'none';
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlay.classList.remove('active');
+  }
   const loginModal = document.getElementById('auth-login-modal');
-  if (loginModal) loginModal.style.display = 'none';
+  if (loginModal) {
+    loginModal.style.display = 'none';
+    loginModal.classList.remove('active');
+  }
   const signupModal = document.getElementById('auth-signup-modal');
-  if (signupModal) signupModal.style.display = 'none';
+  if (signupModal) {
+    signupModal.style.display = 'none';
+    signupModal.classList.remove('active');
+  }
   updateAuthUserBadge();
 }
 
@@ -448,13 +534,17 @@ function applyPermissionsUI() {
   }
 
   // Landing page hierarchy:
-  // 1. Admin lands on Admin Portal
-  // 2. If Parent Portal 2.0 is enabled and user is logged in, land on Parent Portal 2.0
-  // 3. Otherwise land on Classic Portal (recommend)
+  // 1. If user previously selected a primary tab, restore that tab if allowed
+  // 2. Otherwise: Admin lands on Admin Portal, Parent lands on Parent Portal 2.0 or Classic
+  const savedPrimaryTab = localStorage.getItem('app_active_primary_tab');
   if (canViewAdmin) {
-    switchTab('admin');
+    if (savedPrimaryTab && ['admin', 'recommend', 'parent2'].includes(savedPrimaryTab)) {
+      switchTab(savedPrimaryTab);
+    } else {
+      switchTab('admin');
+    }
   } else if (isP2Enabled && currentUserAccount) {
-    switchTab('parent2');
+    switchTab(savedPrimaryTab === 'recommend' ? 'recommend' : 'parent2');
   } else {
     switchTab('recommend');
   }
@@ -479,6 +569,9 @@ function switchTab(tabName) {
   if (tabName === 'parent2' && !isP2Enabled && !canViewAdmin) {
     tabName = 'recommend';
   }
+
+  // Persist user selected primary tab
+  localStorage.setItem('app_active_primary_tab', tabName);
 
   // Reset tab button states
   [parent2TabBtn, recommendTabBtn, adminTabBtn, directoryTabBtn].forEach(btn => {
@@ -636,6 +729,14 @@ function switchAdminSubTab(subTabName) {
     renderBulkEditTable();
   } else if (subTabName === 'corrections') {
     loadAdminFieldReports();
+  } else if (subTabName === 'gias-backfill') {
+    initGiasBackfillTab();
+  } else if (subTabName === 'admissions-guardrails') {
+    initAdmissionsGuardrailsTab();
+  } else if (subTabName === 'website-health') {
+    initWebsiteHealthTab();
+  } else if (subTabName === 'deduplication' || subTabName === 'merge') {
+    initDeduplicationTab();
   } else if (subTabName === 'settings') {
     loadAdminSettings();
   }
@@ -880,10 +981,22 @@ async function loadSchools() {
   const fee = document.getElementById('fee-select') ? document.getElementById('fee-select').value.trim() : '';
   const hotSelect = document.getElementById('hot-select') ? document.getElementById('hot-select').value.trim() : '';
 
+  // Distance from User Home Postcode
+  const postcodeEl = document.getElementById('filter-user-postcode') || document.getElementById('rec-target-locations');
+  const userPostcode = postcodeEl ? postcodeEl.value.trim() : (localStorage.getItem('user_home_postcode') || '');
+  const distanceSelectEl = document.getElementById('filter-max-distance') || document.getElementById('rec-max-distance-select');
+  const maxDistance = distanceSelectEl ? distanceSelectEl.value.trim() : '';
+
+  if (userPostcode && userPostcode.length >= 2) {
+    try { localStorage.setItem('user_home_postcode', userPostcode); } catch (e) {}
+  }
+
   renderActiveFilterChips();
 
   const queryParams = new URLSearchParams();
   if (search) queryParams.append('search', search);
+  if (userPostcode) queryParams.append('userPostcode', userPostcode);
+  if (maxDistance) queryParams.append('maxDistance', maxDistance);
   if (tag) queryParams.append('tag', tag);
   if (region) queryParams.append('region', region);
   if (la) queryParams.append('la', la);
@@ -1013,6 +1126,15 @@ function renderSchools() {
     const hasFees = Boolean(school.feesTermly || school.registrationFee);
 
     let tagBadgesHtml = '';
+    const isAdminUser = Array.isArray(currentPermissions) && (currentPermissions.includes('admin:portal') || currentPermissions.includes('admin:edit'));
+    if (isAdminUser && typeof school.completeness_score === 'number') {
+      const cScore = school.completeness_score;
+      let bg = '#fef2f2', fg = '#991b1b', border = '#fecaca', label = 'Incomplete';
+      if (cScore >= 80) { bg = '#f0fdf4'; fg = '#166534'; border = '#bbf7d0'; label = 'High Quality'; }
+      else if (cScore >= 60) { bg = '#eff6ff'; fg = '#1e40af'; border = '#bfdbfe'; label = 'Good Quality'; }
+      else if (cScore >= 40) { bg = '#fffbeb'; fg = '#92400e'; border = '#fde68a'; label = 'Fair Quality'; }
+      tagBadgesHtml += `<span class="badge-tag" style="background:${bg}; color:${fg}; border:1px solid ${border}; font-weight:700;" title="Admin Completeness Score: ${cScore}% (${label})"><i class="fa-solid fa-chart-pie"></i> ${cScore}% Complete</span>`;
+    }
     if (isLLM) tagBadgesHtml += `<span class="badge-tag badge-tag-llm" data-tag-filter="llm_enriched" title="Filter by AI LLM Enriched"><i class="fa-solid fa-robot"></i> LLM Enriched</span>`;
     if (isAutoVerified) tagBadgesHtml += `<span class="badge-tag badge-tag-verified" data-tag-filter="auto_verified" title="Filter by Web Verified"><i class="fa-solid fa-circle-check"></i> Web Verified</span>`;
     if (hasDatesVerified) tagBadgesHtml += `<span class="badge-tag badge-tag-dates" data-tag-filter="dates_verified" title="Filter by Verified Admissions Dates"><i class="fa-regular fa-calendar-check"></i> Dates</span>`;
@@ -1024,11 +1146,18 @@ function renderSchools() {
       <div>
         <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.35rem;">
           <span class="school-type-pill ${pillClass}">${school.schoolType}</span>
+          ${school.active === false ? `<span class="badge-closed" style="background:#fee2e2; color:#991b1b; font-size:0.7rem; font-weight:700; padding:0.12rem 0.45rem; border-radius:999px; border:1px solid #fca5a5;"><i class="fa-solid fa-ban"></i> Closed</span>` : ''}
           ${school.hot ? `<span class="badge-hot"><i class="fa-solid fa-fire"></i> Hot</span>` : ''}
         </div>
         <h3 class="school-name">${school.name}</h3>
         <div class="school-location">
           <i class="fa-solid fa-location-dot"></i> ${school.la}, ${school.postcode || ''}
+          ${school.distanceMiles !== undefined ? `
+            <a href="${school.distanceDirectionsUrl || '#'}" target="_blank" rel="noopener noreferrer" class="school-distance-pill" style="display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.5rem; background: #ecfdf5; color: #047857; font-weight: 700; font-size: 0.75rem; padding: 0.15rem 0.55rem; border-radius: 9999px; text-decoration: none; border: 1px solid #a7f3d0;" title="Exact straight-line distance from your postcode. Click for Google Maps directions.">
+              <i class="fa-solid fa-route"></i> ${school.distanceFormatted || (school.distanceMiles + ' mi')}
+              <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.65rem; opacity: 0.8;"></i>
+            </a>
+          ` : ''}
         </div>
         
         <div class="card-badges-row">
@@ -1133,12 +1262,22 @@ function renderSchools() {
       <td class="nowrap-cell" title="${fullName.replace(/"/g, '&quot;')}">
         <div>
           <strong>${displayName}</strong>
+          ${school.active === false ? `<span class="badge-closed" style="font-size:0.65rem; padding:0.08rem 0.35rem; margin-left:0.35rem; background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; border-radius:999px; font-weight:700; display:inline-flex; align-items:center; gap:0.15rem;"><i class="fa-solid fa-ban"></i>&nbsp;Closed</span>` : ''}
           ${school.hot ? `<span class="badge-hot" style="font-size:0.68rem; padding:0.1rem 0.4rem; margin-left:0.4rem; display:inline-flex;"><i class="fa-solid fa-fire"></i>&nbsp;Hot</span>` : ''}
         </div>
         ${tagBadgesHtml ? `<div style="display:flex; gap:0.25rem; flex-wrap:wrap; margin-top:0.25rem;">${tagBadgesHtml}</div>` : ''}
       </td>
 
-      <td class="nowrap-cell" title="${fullLA.replace(/"/g, '&quot;')}">${displayLA}</td>
+      <td class="nowrap-cell" title="${fullLA.replace(/"/g, '&quot;')}">
+        <div>${displayLA}</div>
+        ${school.distanceMiles !== undefined ? `
+          <div style="margin-top: 0.2rem;">
+            <a href="${school.distanceDirectionsUrl || '#'}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.72rem; color: #047857; font-weight: 700; text-decoration: none;" title="Straight-line distance. Click for Google Maps directions.">
+              <i class="fa-solid fa-route"></i> ${school.distanceFormatted || (school.distanceMiles + ' mi')}
+            </a>
+          </div>
+        ` : ''}
+      </td>
 
       <td class="nowrap-cell" style="text-align: center;" title="${typeTitle.replace(/"/g, '&quot;')}">
         <span style="font-size: 1.1rem; cursor: help;">${typeIcon}</span>
@@ -1572,7 +1711,7 @@ function setupEventListeners() {
     openLoginBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      triggerGoogleSignInWorkflow();
+      openLoginModal(e);
     });
   }
 
@@ -2019,7 +2158,8 @@ function setupEventListeners() {
   const filterInputs = [
     'search-input', 'tag-select', 'region-select', 'la-select', 'hot-select',
     'type-select', 'gender-select', 'ofsted-select', 'exam-select',
-    'second-stage-select', 'confidence-select', 'fee-select'
+    'second-stage-select', 'confidence-select', 'fee-select',
+    'filter-user-postcode', 'filter-max-distance'
   ];
   filterInputs.forEach(id => {
     const el = document.getElementById(id);
@@ -2031,6 +2171,19 @@ function setupEventListeners() {
     searchInputEl.addEventListener('input', debounce(loadSchools, 300));
   }
 
+  const userPostcodeEl = document.getElementById('filter-user-postcode');
+  if (userPostcodeEl) {
+    const savedPc = localStorage.getItem('user_home_postcode');
+    if (savedPc && !userPostcodeEl.value) {
+      userPostcodeEl.value = savedPc;
+    }
+    userPostcodeEl.addEventListener('input', debounce(() => {
+      if (userPostcodeEl.value.trim().length >= 2 || userPostcodeEl.value.trim().length === 0) {
+        loadSchools();
+      }
+    }, 500));
+  }
+
   // Reset Filters
   const resetBtn = document.getElementById('reset-filters-btn');
   if (resetBtn) {
@@ -2039,6 +2192,7 @@ function setupEventListeners() {
         const el = document.getElementById(id);
         if (el) el.value = '';
       });
+      try { localStorage.removeItem('user_home_postcode'); } catch (e) {}
       loadSchools();
     });
   }
@@ -2103,6 +2257,7 @@ function setupEventListeners() {
       address: document.getElementById('add-address').value,
       postcode: document.getElementById('add-postcode').value,
       schoolType: document.getElementById('add-type').value,
+      active: document.getElementById('add-active') ? (document.getElementById('add-active').value === 'true') : true,
       gender: document.getElementById('add-gender').value,
       ageRange: document.getElementById('add-age-range').value,
       pupilCount: document.getElementById('add-pupils').value ? parseInt(document.getElementById('add-pupils').value, 10) : 0,
@@ -2495,9 +2650,15 @@ function openDbMergeModal(pairIdx, idA, idB) {
       <table class="merge-table">
         <thead>
           <tr>
-            <th>Field</th>
-            <th><span style="color:#2563eb;"><i class="fa-solid fa-a"></i></span> Record A — Primary (${recA.id})</th>
-            <th><span style="color:#7c3aed;"><i class="fa-solid fa-b"></i></span> Record B — Candidate (${recB.id})</th>
+            <th style="width: 25%;">Field</th>
+            <th style="width: 37.5%;">
+              <div style="color:#2563eb; font-weight:700;"><i class="fa-solid fa-a"></i> Record A — Primary (${recA.id})</div>
+              ${renderQuickAccessInvestigationLinks(recA)}
+            </th>
+            <th style="width: 37.5%;">
+              <div style="color:#7c3aed; font-weight:700;"><i class="fa-solid fa-b"></i> Record B — Candidate (${recB.id})</div>
+              ${renderQuickAccessInvestigationLinks(recB)}
+            </th>
           </tr>
         </thead>
         <tbody>${rowsHtml}</tbody>
@@ -3059,6 +3220,7 @@ function setAllMergeSelection(source) {
 function openAddModal() {
   document.getElementById('add-school-form').reset();
   document.getElementById('edit-school-id').value = '';
+  if (document.getElementById('add-active')) document.getElementById('add-active').value = 'true';
   document.getElementById('modal-title-text').innerHTML = '<i class="fa-solid fa-plus-circle"></i> Add New High School Entry';
   document.getElementById('modal-subtitle-text').textContent = 'Expand database records with new school data in England / Greater London';
   document.getElementById('add-modal').style.display = 'flex';
@@ -3088,6 +3250,9 @@ async function openEditModal(id) {
     document.getElementById('add-address').value = school.address || '';
     document.getElementById('add-postcode').value = school.postcode || '';
     document.getElementById('add-type').value = school.schoolType || 'Comprehensive';
+    if (document.getElementById('add-active')) {
+      document.getElementById('add-active').value = (school.active !== false && school.active !== 0 && school.active !== 'false') ? 'true' : 'false';
+    }
     document.getElementById('add-gender').value = school.gender || 'Mixed';
     document.getElementById('add-age-range').value = school.ageRange || '11-18';
     document.getElementById('add-pupils').value = school.pupilCount || '';
@@ -3180,6 +3345,144 @@ function renderFieldConfidenceBadge(schoolId, fieldName, confidenceStats) {
 // Bind event listeners to confidence vote buttons
 function bindConfidenceVoteEvents() {
   // Confidence icon indicators display confidence details on mouse hover
+}
+
+// Render Admissions Timeline Stepper (5 Chronological Milestones)
+function renderAdmissionsTimeline(dates, examType, secondStageRequired, openEvents, firstExamDate, secondExamDate, interviewInfo, offersInfo, regDeadline, regOpen, offerAcceptBy) {
+  const is2Stage = secondStageRequired && secondStageRequired.startsWith('Yes');
+
+  return `
+    <div class="admissions-timeline-container">
+      <div class="timeline-header-bar">
+        <h4 style="font-size: 0.95rem; font-weight: 800; color: #1e293b; margin: 0; display: flex; align-items: center; gap: 0.45rem;">
+          <i class="fa-solid fa-route" style="color: #4f46e5;"></i> 11+ Admissions Journey &amp; Milestones
+        </h4>
+        <span style="font-size: 0.72rem; font-weight: 700; color: #4338ca; background: #eef2ff; border: 1px solid #c7d2fe; padding: 0.15rem 0.55rem; border-radius: 6px;">
+          <i class="fa-solid fa-graduation-cap"></i> ${examType}
+        </span>
+      </div>
+
+      <div class="timeline-stepper">
+        <!-- Step 1: Open Events & Tours -->
+        <div class="timeline-step ${openEvents ? 'step-highlight' : ''}">
+          <div class="step-top-row">
+            <div class="step-icon-circle step-icon-open"><i class="fa-solid fa-door-open"></i></div>
+            <div class="step-title">1. Open Events</div>
+          </div>
+          <div class="step-date-pill ${openEvents ? 'has-date' : ''}">
+            ${openEvents || 'Dates on website'}
+          </div>
+          <div class="step-subtext">School tours &amp; talks</div>
+        </div>
+
+        <!-- Step 2: Registration Window -->
+        <div class="timeline-step ${regDeadline ? 'step-highlight' : ''}">
+          <div class="step-top-row">
+            <div class="step-icon-circle step-icon-reg"><i class="fa-solid fa-pen-to-square"></i></div>
+            <div class="step-title">2. Registration</div>
+          </div>
+          <div class="step-date-pill ${regDeadline ? 'is-deadline' : (regOpen ? 'has-date' : '')}">
+            ${regDeadline ? `Closes: ${regDeadline}` : (regOpen ? `Opens: ${regOpen}` : 'Standard cycle')}
+          </div>
+          <div class="step-subtext">${regOpen ? `Opens: ${regOpen}` : 'Application deadline'}</div>
+        </div>
+
+        <!-- Step 3: Stage 1 Exam -->
+        <div class="timeline-step ${firstExamDate ? 'step-highlight' : ''}">
+          <div class="step-top-row">
+            <div class="step-icon-circle step-icon-exam1"><i class="fa-solid fa-feather-pointed"></i></div>
+            <div class="step-title">3. Stage 1 Exam</div>
+          </div>
+          <div class="step-date-pill ${firstExamDate ? 'has-date' : ''}">
+            ${firstExamDate ? `Exam: ${firstExamDate}` : 'Autumn term'}
+          </div>
+          <div class="step-subtext">1st stage assessment</div>
+        </div>
+
+        <!-- Step 4: Stage 2 / Interview -->
+        <div class="timeline-step ${is2Stage ? 'step-highlight' : ''}">
+          <div class="step-top-row">
+            <div class="step-icon-circle step-icon-exam2"><i class="fa-solid ${is2Stage ? 'fa-bullseye' : 'fa-check'}"></i></div>
+            <div class="step-title">4. ${is2Stage ? 'Stage 2 &amp; Interview' : 'Stage 2'}</div>
+          </div>
+          <div class="step-date-pill ${secondExamDate || interviewInfo ? 'has-date' : ''}">
+            ${secondExamDate ? `2nd Exam: ${secondExamDate}` : (interviewInfo ? `Interview: ${interviewInfo}` : (is2Stage ? 'Selective 2nd Stage' : 'Single Stage Only'))}
+          </div>
+          <div class="step-subtext">${interviewInfo && secondExamDate ? `Interview: ${interviewInfo}` : (is2Stage ? 'For qualified candidates' : 'No 2nd stage required')}</div>
+        </div>
+
+        <!-- Step 5: Offers & Acceptance -->
+        <div class="timeline-step ${offersInfo || offerAcceptBy ? 'step-highlight' : ''}">
+          <div class="step-top-row">
+            <div class="step-icon-circle step-icon-offers"><i class="fa-solid fa-envelope-open-text"></i></div>
+            <div class="step-title">5. Offers &amp; Accept</div>
+          </div>
+          <div class="step-date-pill ${offersInfo || offerAcceptBy ? 'has-date' : ''}">
+            ${offersInfo ? `Offers: ${offersInfo}` : (offerAcceptBy ? `Accept: ${offerAcceptBy}` : '1 Mar (National Day)')}
+          </div>
+          <div class="step-subtext">${offerAcceptBy ? `Deadline: ${offerAcceptBy}` : 'National Offer Day'}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Render At-a-Glance Parent Summary Tiles
+function renderParentSummaryTiles(school, feesTermly, annualFeesEst, examType, examBoard, secondStageRequired) {
+  const isIndep = school.schoolType === 'Independent' || Boolean(feesTermly);
+  const isRanked = Boolean(school.national_rank_england);
+
+  const prog8Val = school.gcseProgress8 !== null && school.gcseProgress8 !== undefined && school.gcseProgress8 !== ''
+    ? (typeof school.gcseProgress8 === 'number' && school.gcseProgress8 > 0 ? `+${school.gcseProgress8}` : `${school.gcseProgress8}`)
+    : (school.gcseAttainment8 ? `Attain 8: ${school.gcseAttainment8}` : (school.ofstedRating ? `${school.ofstedRating}` : 'N/A'));
+
+  const prog8Sub = school.gcseProgress8 > 0.5 ? 'Well Above Average' : (school.gcseProgress8 >= 0 ? 'Above Average' : (school.ofstedRating ? 'Ofsted Graded' : 'Academic Rating'));
+
+  return `
+    <div class="parent-summary-grid">
+      <!-- Tile 1: National Secondary Rank -->
+      <div class="summary-tile tile-rank">
+        <div class="summary-tile-label"><i class="fa-solid fa-trophy" style="color: #d97706;"></i> National Rank</div>
+        <div class="summary-tile-value" style="color: ${isRanked ? '#b45309' : '#475569'};">
+          ${isRanked ? `#${school.national_rank_england}` : 'Unranked'}
+        </div>
+        <div class="summary-tile-sub">
+          ${school.gcse_rank_england ? `GCSE: #${school.gcse_rank_england} in England` : (isRanked ? 'England Secondary Rank' : 'Official State Register')}
+        </div>
+      </div>
+
+      <!-- Tile 2: Academic Progress 8 / Performance -->
+      <div class="summary-tile tile-progress">
+        <div class="summary-tile-label"><i class="fa-solid fa-arrow-trend-up" style="color: #059669;"></i> Progress 8</div>
+        <div class="summary-tile-value" style="color: #047857;">
+          ${prog8Val}
+        </div>
+        <div class="summary-tile-sub">${prog8Sub}</div>
+      </div>
+
+      <!-- Tile 3: Tuition Fees / Funding Status -->
+      <div class="summary-tile tile-fees">
+        <div class="summary-tile-label"><i class="fa-solid fa-coins" style="color: #059669;"></i> Funding &amp; Fees</div>
+        <div class="summary-tile-value" style="font-size: ${feesTermly ? '1.05rem' : '1.15rem'}; color: #0f172a;">
+          ${feesTermly || (isIndep ? 'Fee-Paying' : 'State Funded')}
+        </div>
+        <div class="summary-tile-sub">
+          ${annualFeesEst || (isIndep ? 'Termly Tuition Rate' : 'Free State Education')}
+        </div>
+      </div>
+
+      <!-- Tile 4: 11+ Entrance Assessment -->
+      <div class="summary-tile tile-exam">
+        <div class="summary-tile-label"><i class="fa-solid fa-clipboard-check" style="color: #4f46e5;"></i> Exam Format</div>
+        <div class="summary-tile-value" style="font-size: 0.95rem; color: #3730a3;">
+          ${examBoard ? `${examBoard}` : (school.entranceExamType || 'Standard Entry')}
+        </div>
+        <div class="summary-tile-sub">
+          ${secondStageRequired && secondStageRequired.startsWith('Yes') ? '2-Stage Selective Test' : 'Single Stage Assessment'}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 // Open School Detail View
@@ -3292,7 +3595,7 @@ async function openSchoolDetail(id) {
     const userReports = school.userReports || {};
     const userOverrides = school.userCustomOverrides || {};
 
-    const renderWidget = (fieldName, fieldLabel, origValue) => {
+    const renderWidget = (fieldName, fieldLabel, origValue, iconClass = '') => {
       const report = userReports[fieldName] || null;
       const isUp = report && report.status === 'up';
       const isDown = report && report.status === 'down';
@@ -3301,11 +3604,12 @@ async function openSchoolDetail(id) {
       const displayVal = isCustom ? customVal : (origValue !== null && origValue !== undefined && origValue !== '' ? origValue : 'N/A');
 
       const confBadge = typeof renderFieldConfidenceBadge === 'function' ? renderFieldConfidenceBadge(school.id, fieldName, confidenceStats) : '';
+      const iconHtml = iconClass ? `<i class="${iconClass}" style="color: #64748b; margin-right: 0.35rem; width: 14px; text-align: center;"></i>` : '';
 
       return `
         <div class="field-rating-row" style="display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; width: 100%; margin-bottom: 0.35rem; font-size: 0.85rem; color: #334155;">
           <div style="flex: 1; word-break: break-word;">
-            <span style="font-weight: 600; color: #475569;">${fieldLabel}:</span> <span style="font-weight: ${displayVal !== 'N/A' ? '700' : '400'}; color: ${displayVal !== 'N/A' ? '#0f172a' : '#94a3b8'};">${displayVal}</span> ${confBadge}
+            ${iconHtml}<span style="font-weight: 600; color: #475569;">${fieldLabel}:</span> <span style="font-weight: ${displayVal !== 'N/A' ? '700' : '400'}; color: ${displayVal !== 'N/A' ? '#0f172a' : '#94a3b8'};">${displayVal}</span> ${confBadge}
             ${isCustom ? `
               <span class="badge-custom-value" style="background:#fff7ed; color:#c2410c; border:1px solid #ffedd5; font-size:0.72rem; font-weight:700; padding:0.15rem 0.45rem; border-radius:999px; margin-left:0.35rem; display:inline-flex; align-items:center; gap:0.2rem;" title="Custom value updated in your personal record">
                 <i class="fa-solid fa-user-pen"></i> Custom Value Updated by You
@@ -3347,11 +3651,11 @@ async function openSchoolDetail(id) {
               <i class="fa-solid fa-file-pen"></i> Registration &amp; Deadlines
             </strong>
             <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-              ${renderWidget('entranceExamType', 'Exam Board / Format', examBoard ? `${examType} (${examBoard})` : examType)}
-              ${renderWidget('registrationStatus', 'Registration Status', regStatus || 'Active')}
-              ${renderWidget('registrationOpen', 'Registration Opens', regOpen)}
-              ${renderWidget('registrationDeadline', 'Registration Deadline', regDeadline)}
-              ${renderWidget('openDayEvening', 'Open Events / Tours', openEvents)}
+              ${renderWidget('entranceExamType', 'Exam Board / Format', examBoard ? `${examType} (${examBoard})` : examType, 'fa-solid fa-clipboard-check')}
+              ${renderWidget('registrationStatus', 'Registration Status', regStatus || 'Active', 'fa-solid fa-circle-info')}
+              ${renderWidget('registrationOpen', 'Registration Opens', regOpen, 'fa-solid fa-calendar-plus')}
+              ${renderWidget('registrationDeadline', 'Registration Deadline', regDeadline, 'fa-solid fa-calendar-xmark')}
+              ${renderWidget('openDayEvening', 'Open Events / Tours', openEvents, 'fa-solid fa-door-open')}
             </div>
           </div>
 
@@ -3361,9 +3665,9 @@ async function openSchoolDetail(id) {
               <i class="fa-solid fa-pen-nib"></i> 1st Stage Assessment
             </strong>
             <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-              ${renderWidget('firstExamDate', '1st Exam Date', firstExamDate)}
-              ${renderWidget('stage_one_format_and_subjects', 'Format & Subjects', firstExamSubjects)}
-              ${renderWidget('firstStageResult', 'Results Release Date', firstStageResult)}
+              ${renderWidget('firstExamDate', '1st Exam Date', firstExamDate, 'fa-solid fa-calendar-day')}
+              ${renderWidget('stage_one_format_and_subjects', 'Format & Subjects', firstExamSubjects, 'fa-solid fa-pen-ruler')}
+              ${renderWidget('firstStageResult', 'Results Release Date', firstStageResult, 'fa-solid fa-chart-pie')}
             </div>
           </div>
 
@@ -3373,13 +3677,13 @@ async function openSchoolDetail(id) {
               <i class="fa-solid fa-award"></i> Stage 2, Interview &amp; Offers
             </strong>
             <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-              ${renderWidget('second_stage_exam_required', '2nd Stage Required', secondStageRequired)}
-              ${renderWidget('secondExamDate', '2nd Exam Date', secondExamDate)}
-              ${renderWidget('stage_two_format_and_subjects', '2nd Exam Format', secondExamSubjects)}
-              ${renderWidget('secondStageResult', '2nd Stage Results', secondStageResult)}
-              ${renderWidget('interviewInfo', 'Interview / Audition', interviewInfo)}
-              ${renderWidget('offersInfo', 'Offers / Notification Date', offersInfo)}
-              ${renderWidget('offerAcceptBy', 'Acceptance Deadline', offerAcceptBy)}
+              ${renderWidget('second_stage_exam_required', '2nd Stage Required', secondStageRequired, 'fa-solid fa-bolt-lightning')}
+              ${renderWidget('secondExamDate', '2nd Exam Date', secondExamDate, 'fa-solid fa-calendar-days')}
+              ${renderWidget('stage_two_format_and_subjects', '2nd Exam Format', secondExamSubjects, 'fa-solid fa-dice-two')}
+              ${renderWidget('secondStageResult', '2nd Stage Results', secondStageResult, 'fa-solid fa-square-poll-vertical')}
+              ${renderWidget('interviewInfo', 'Interview / Audition', interviewInfo, 'fa-solid fa-comments')}
+              ${renderWidget('offersInfo', 'Offers / Notification Date', offersInfo, 'fa-solid fa-envelope-open-text')}
+              ${renderWidget('offerAcceptBy', 'Acceptance Deadline', offerAcceptBy, 'fa-solid fa-calendar-check')}
             </div>
           </div>
         </div>
@@ -3396,15 +3700,15 @@ async function openSchoolDetail(id) {
           <i class="fa-solid fa-sterling-sign"></i> Tuition Fees, Financials &amp; Scholarships
         </h4>
         <div style="display: flex; flex-direction: column; gap: 0.3rem;">
-          ${renderWidget('feesTermly', 'Termly Tuition Fee', feesTermly)}
+          ${renderWidget('feesTermly', 'Termly Tuition Fee', feesTermly, 'fa-solid fa-coins')}
           ${annualFeesEst ? `
             <div class="field-rating-row" style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #334155; margin-bottom: 0.35rem;">
-              <div><span style="font-weight: 600; color: #475569;">Annual Fee (Estimated):</span> <strong style="color: #059669;">${annualFeesEst}</strong></div>
+              <div><i class="fa-solid fa-calculator" style="color: #64748b; margin-right: 0.35rem; width: 14px; text-align: center;"></i><span style="font-weight: 600; color: #475569;">Annual Fee (Estimated):</span> <strong style="color: #059669;">${annualFeesEst}</strong></div>
             </div>
           ` : ''}
-          ${renderWidget('registrationFee', 'Registration Fee', regFee)}
-          ${renderWidget('scholarshipsOffered', 'Scholarships &amp; Bursaries', scholarships)}
-          ${bursaryDeadline ? renderWidget('bursaryDeadline', 'Bursary Deadline', bursaryDeadline) : ''}
+          ${renderWidget('registrationFee', 'Registration Fee', regFee, 'fa-solid fa-receipt')}
+          ${renderWidget('scholarshipsOffered', 'Scholarships &amp; Bursaries', scholarships, 'fa-solid fa-award')}
+          ${bursaryDeadline ? renderWidget('bursaryDeadline', 'Bursary Deadline', bursaryDeadline, 'fa-solid fa-clock-rotate-left') : ''}
         </div>
       </div>
     ` : '';
@@ -3419,9 +3723,9 @@ async function openSchoolDetail(id) {
           <i class="fa-solid fa-shield-halved"></i> Admissions Policy &amp; Catchment
         </h4>
         <div style="display: flex; flex-direction: column; gap: 0.3rem;">
-          ${renderWidget('admissionsPolicy', 'Admissions Policy Summary', admissionsPolicy || 'Standard 11+ entry policy.')}
-          ${catchmentInfo ? renderWidget('catchmentArea', 'Catchment Area / Criteria', catchmentInfo) : ''}
-          ${notes ? renderWidget('additionalNotes', 'Admissions Notes', notes) : ''}
+          ${renderWidget('admissionsPolicy', 'Admissions Policy Summary', admissionsPolicy || 'Standard 11+ entry policy.', 'fa-solid fa-scale-balanced')}
+          ${catchmentInfo ? renderWidget('catchmentArea', 'Catchment Area / Criteria', catchmentInfo, 'fa-solid fa-map-location-dot') : ''}
+          ${notes ? renderWidget('additionalNotes', 'Admissions Notes', notes, 'fa-solid fa-circle-info') : ''}
         </div>
       </div>
     ` : '';
@@ -3435,14 +3739,14 @@ async function openSchoolDetail(id) {
           <i class="fa-solid fa-chart-line"></i> Academic Metrics &amp; GCSE Performance
         </h4>
         <div style="display: flex; flex-direction: column; gap: 0.3rem;">
-          ${renderWidget('national_rank_england', 'National Rank in England', school.national_rank_england ? `#${school.national_rank_england} in England` : null)}
-          ${renderWidget('gcse_rank_england', 'GCSE Rank in England', school.gcse_rank_england ? `#${school.gcse_rank_england} in England` : null)}
-          ${renderWidget('a_level_rank_england', 'A-Level Rank in England', school.a_level_rank_england ? `#${school.a_level_rank_england} in England` : null)}
-          ${renderWidget('pupilCount', 'Total Pupil Roll', school.pupilCount ? `${school.pupilCount.toLocaleString()} pupils` : 'N/A')}
-          ${renderWidget('ageRange', 'Age Range', school.ageRange || '11 to 18')}
-          ${renderWidget('gcseAttainment8', 'GCSE Attainment 8 Score', school.gcseAttainment8 !== null && school.gcseAttainment8 !== undefined && school.gcseAttainment8 !== '' ? school.gcseAttainment8 : 'N/A')}
-          ${renderWidget('gcseProgress8', 'GCSE Progress 8 Score', school.gcseProgress8 !== null && school.gcseProgress8 !== undefined && school.gcseProgress8 !== '' ? school.gcseProgress8 : 'N/A')}
-          ${renderWidget('ebaccAveragePointScore', 'EBacc Average Point Score', school.ebaccAveragePointScore !== null && school.ebaccAveragePointScore !== undefined && school.ebaccAveragePointScore !== '' ? school.ebaccAveragePointScore : 'N/A')}
+          ${renderWidget('national_rank_england', 'National Rank in England', school.national_rank_england ? `#${school.national_rank_england} in England` : null, 'fa-solid fa-trophy')}
+          ${renderWidget('gcse_rank_england', 'GCSE Rank in England', school.gcse_rank_england ? `#${school.gcse_rank_england} in England` : null, 'fa-solid fa-medal')}
+          ${renderWidget('a_level_rank_england', 'A-Level Rank in England', school.a_level_rank_england ? `#${school.a_level_rank_england} in England` : null, 'fa-solid fa-award')}
+          ${renderWidget('pupilCount', 'Total Pupil Roll', school.pupilCount ? `${school.pupilCount.toLocaleString()} pupils` : 'N/A', 'fa-solid fa-users-line')}
+          ${renderWidget('ageRange', 'Age Range', school.ageRange || '11 to 18', 'fa-solid fa-id-badge')}
+          ${renderWidget('gcseAttainment8', 'GCSE Attainment 8 Score', school.gcseAttainment8 !== null && school.gcseAttainment8 !== undefined && school.gcseAttainment8 !== '' ? school.gcseAttainment8 : 'N/A', 'fa-solid fa-graduation-cap')}
+          ${renderWidget('gcseProgress8', 'GCSE Progress 8 Score', school.gcseProgress8 !== null && school.gcseProgress8 !== undefined && school.gcseProgress8 !== '' ? school.gcseProgress8 : 'N/A', 'fa-solid fa-arrow-trend-up')}
+          ${renderWidget('ebaccAveragePointScore', 'EBacc Average Point Score', school.ebaccAveragePointScore !== null && school.ebaccAveragePointScore !== undefined && school.ebaccAveragePointScore !== '' ? school.ebaccAveragePointScore : 'N/A', 'fa-solid fa-globe')}
         </div>
         <div style="margin-top: 0.8rem; border-top: 1px dashed #cbd5e1; padding-top: 0.6rem;">
           <div style="font-size: 0.85rem; font-weight: 700; color: #334155; margin-bottom: 0.35rem; display: flex; align-items: center; justify-content: space-between;">
@@ -3464,12 +3768,29 @@ async function openSchoolDetail(id) {
         </h4>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.75rem;">
           <div>
-            ${renderWidget('phone', 'Phone Number', school.phone)}
-            ${renderWidget('email', 'Email Address', school.email)}
+            ${renderWidget('phone', 'Phone Number', school.phone, 'fa-solid fa-phone-volume')}
+            ${renderWidget('email', 'Email Address', school.email, 'fa-solid fa-paper-plane')}
           </div>
           <div>
-            ${renderWidget('website', 'Official Website', school.website)}
-            ${renderWidget('address', 'Postal Address', school.address ? `${school.address}, ${school.postcode || ''}` : school.la)}
+            ${renderWidget('website', 'Official Website', school.website, 'fa-solid fa-globe')}
+            ${renderWidget('address', 'Postal Address', school.address ? `${school.address}, ${school.postcode || ''}` : school.la, 'fa-solid fa-location-dot')}
+            <!-- Interactive Exact Distance Calculator -->
+            <div id="modal-distance-calculator" style="margin-top: 0.65rem; padding: 0.65rem 0.85rem; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;">
+              <div style="font-size: 0.78rem; font-weight: 700; color: #166534; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem;">
+                <span><i class="fa-solid fa-route"></i> Distance From Your Postcode</span>
+                <span id="modal-distance-value" style="font-size: 0.85rem; font-weight: 800; color: #047857;">--</span>
+              </div>
+              <div style="display: flex; gap: 0.4rem; align-items: center;">
+                <input type="text" id="modal-user-postcode-input" placeholder="Enter your postcode (e.g. SW19 4TT)..." style="flex: 1; padding: 0.38rem 0.6rem; border: 1px solid #86efac; border-radius: 6px; font-size: 0.82rem; background: white;">
+                <button type="button" id="modal-btn-calc-distance" class="btn btn-sm" style="background: #16a34a; color: white; border: none; font-size: 0.78rem; padding: 0.38rem 0.75rem; border-radius: 6px; font-weight: 700; cursor: pointer;">
+                  <i class="fa-solid fa-calculator"></i> Calculate
+                </button>
+                <a id="modal-maps-link" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-sm" style="background: white; color: #15803d; border: 1px solid #86efac; font-size: 0.78rem; padding: 0.38rem 0.65rem; border-radius: 6px; text-decoration: none; font-weight: 700; display: none;">
+                  <i class="fa-solid fa-diamond-turn-right"></i> Maps
+                </a>
+              </div>
+              <div id="modal-distance-notes" style="font-size: 0.72rem; color: #15803d; margin-top: 0.3rem;"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -3516,6 +3837,23 @@ async function openSchoolDetail(id) {
           </div>
         </div>
 
+        <!-- Admin Data Completeness Breakdown Widget -->
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem 0.85rem; margin-bottom: 0.75rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <span style="font-size: 0.78rem; font-weight: 700; color: #334155;"><i class="fa-solid fa-chart-pie" style="color: #059669;"></i> Data Completeness Score:</span>
+            <span style="font-size: 0.88rem; font-weight: 800; color: ${(school.completeness_score || 0) >= 80 ? '#16a34a' : ((school.completeness_score || 0) >= 50 ? '#2563eb' : '#dc2626')};">${school.completeness_score || 0}% Complete</span>
+          </div>
+          <div style="height: 6px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin-bottom: 0.5rem;">
+            <div style="width: ${school.completeness_score || 0}%; height: 100%; background: ${(school.completeness_score || 0) >= 80 ? '#22c55e' : ((school.completeness_score || 0) >= 50 ? '#3b82f6' : '#ef4444')};"></div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.3rem; font-size: 0.72rem; color: #475569;">
+            <div><i class="fa-solid fa-${school.website ? 'check" style="color:#16a34a;"' : 'xmark" style="color:#dc2626;"'}></i> Website</div>
+            <div><i class="fa-solid fa-${(school.entranceExamDates && school.entranceExamDates !== '{}') ? 'check" style="color:#16a34a;"' : 'xmark" style="color:#dc2626;"'}></i> 11+ Exam Dates</div>
+            <div><i class="fa-solid fa-${school.entranceExamType ? 'check" style="color:#16a34a;"' : 'xmark" style="color:#dc2626;"'}></i> Exam Format</div>
+            <div><i class="fa-solid fa-${school.ofstedRating ? 'check" style="color:#16a34a;"' : 'xmark" style="color:#dc2626;"'}></i> Ofsted Rating</div>
+          </div>
+        </div>
+
         <div style="margin-bottom: 0.75rem;">
           <div style="font-size: 0.76rem; font-weight: 700; color: #475569; margin-bottom: 0.3rem;">System Verification Tags:</div>
           <div style="display: flex; flex-wrap: wrap; gap: 0.3rem;">
@@ -3531,81 +3869,220 @@ async function openSchoolDetail(id) {
     ` : '';
 
     // ----------------------------------------------------
-    // Assemble Full Modal Content
+    // Top-Left View Switcher Toolbar (v1 Classic vs v2 Timeline)
     // ----------------------------------------------------
-    detailContent.innerHTML = `
-      <div class="detail-header-hero" style="border-bottom: 1px solid #e2e8f0; padding-bottom: 1.25rem; margin-bottom: 1.5rem;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
-          <div>
-            <h2 style="font-size: 1.55rem; font-weight: 800; color: #0f172a; margin: 0 0 0.35rem 0; letter-spacing: -0.02em;">
-              ${school.name}
-            </h2>
-            <div style="color: #64748b; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-              <span><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> ${school.address || school.la}, ${school.postcode || ''}</span>
-              <span>•</span>
-              <span><strong>Region:</strong> ${school.region || school.la}</span>
+    const viewSwitcherToolbarHtml = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.6rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.6rem;">
+        <div class="view-toggle-container">
+          <button type="button" class="btn-toggle-view ${currentDetailViewVersion === 'v1' ? 'active v1-active' : ''}" data-version="v1" title="Switch to Classic Tabular View">
+            <i class="fa-solid fa-table-list"></i> Classic (v1)
+          </button>
+          <button type="button" class="btn-toggle-view ${currentDetailViewVersion === 'v2' ? 'active' : ''}" data-version="v2" title="Switch to Admissions Timeline View">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Timeline (v2)
+          </button>
+        </div>
+        <div style="font-size: 0.76rem; color: #64748b; font-weight: 600; display: flex; align-items: center; gap: 0.35rem;">
+          ${currentDetailViewVersion === 'v2'
+            ? '<span style="color: #4f46e5;"><i class="fa-solid fa-sparkles"></i> Interactive Admissions Timeline Active</span>'
+            : '<span><i class="fa-solid fa-table-cells"></i> Standard Classic View Active</span>'
+          }
+        </div>
+      </div>
+    `;
+
+    // ----------------------------------------------------
+    // Assemble Full Modal Content (v1 Classic vs v2 Enhanced Timeline)
+    // ----------------------------------------------------
+    if (currentDetailViewVersion === 'v2') {
+      // Version 2: Enhanced Visual Timeline + At-a-Glance Summary Tiles
+      const summaryTilesHtml = renderParentSummaryTiles(school, feesTermly, annualFeesEst, examType, examBoard, secondStageRequired);
+      const timelineStepperHtml = renderAdmissionsTimeline(dates, examType, secondStageRequired, openEvents, firstExamDate, secondExamDate, interviewInfo, offersInfo, regDeadline, regOpen, offerAcceptBy);
+
+      detailContent.innerHTML = `
+        ${viewSwitcherToolbarHtml}
+
+        <div class="detail-header-hero" style="border-bottom: 1px solid #e2e8f0; padding-bottom: 1.1rem; margin-bottom: 1.25rem;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+            <div>
+              <h2 style="font-size: 1.6rem; font-weight: 800; color: #0f172a; margin: 0 0 0.35rem 0; letter-spacing: -0.02em;">
+                ${school.name}
+              </h2>
+              <div style="color: #64748b; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <span><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> ${school.address || school.la}, ${school.postcode || ''}</span>
+                <span>•</span>
+                <span><i class="fa-solid fa-map" style="color: #3b82f6;"></i> <strong>Region:</strong> ${school.region || school.la}</span>
+                ${school.urn ? `<span>•</span><span><strong>URN:</strong> ${school.urn}</span>` : ''}
+              </div>
             </div>
+          </div>
+
+          <!-- Clean Parent-Relevant Tags with Rich Icons -->
+          <div class="detail-tags-row" style="display: flex; gap: 0.45rem; margin-top: 0.85rem; flex-wrap: wrap; align-items: center;">
+            <span class="badge-ofsted" style="font-size: 0.78rem;"><i class="fa-solid fa-star"></i> ${formatOfsted(userOverrides.ofstedRating || school.ofstedRating)}</span>
+            <span class="badge-exam" style="font-size: 0.78rem; background: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe;">
+              <i class="fa-solid ${school.schoolType === 'Grammar' ? 'fa-landmark' : (school.schoolType === 'Independent' ? 'fa-graduation-cap' : 'fa-school')}"></i> ${userOverrides.schoolType || school.rawSchoolType || school.schoolType}
+            </span>
+            <span class="badge-exam" style="font-size: 0.78rem; background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1;">
+              <i class="fa-solid ${school.gender === 'Girls' ? 'fa-venus' : (school.gender === 'Boys' ? 'fa-mars' : 'fa-venus-mars')}"></i> ${userOverrides.gender || school.gender}
+            </span>
+            ${school.ageRange ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-id-badge"></i> Age ${school.ageRange}</span>` : ''}
+            ${school.pupilCount ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-users-line"></i> ${school.pupilCount.toLocaleString()} pupils</span>` : ''}
+            ${school.hot ? `<span class="badge-hot" style="font-size: 0.76rem;"><i class="fa-solid fa-fire-flame-curved"></i> Hot School</span>` : ''}
+            ${school.active === false
+              ? '<span class="badge" style="font-size: 0.78rem; background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; font-weight: 700;"><i class="fa-solid fa-ban"></i> Permanently Closed / Inactive</span>'
+              : '<span class="badge" style="font-size: 0.78rem; background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; font-weight: 600;"><i class="fa-solid fa-circle-check"></i> Active School</span>'}
+            ${secondStageRequired.startsWith('Yes') ? `<span class="badge-exam" style="font-size: 0.76rem; background: #fef3c7; color: #92400e; border: 1px solid #fde68a;"><i class="fa-solid fa-bolt-lightning"></i> 2-Stage Selective Exam</span>` : ''}
+
+            <!-- Admin Quick Toggles (Admin Only) -->
+            ${currentPermissions.includes('admin:edit') ? `
+              <button type="button" class="btn" id="toggle-active-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Active/Closed status">
+                <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:${school.active === false ? '#fee2e2' : '#f0fdf4'}; color:${school.active === false ? '#991b1b' : '#166534'}; border:1px solid ${school.active === false ? '#fca5a5' : '#bbf7d0'};"><i class="fa-solid ${school.active === false ? 'fa-ban' : 'fa-circle-check'}"></i> ${school.active === false ? 'Status: Closed' : 'Status: Active'} ✏️</span>
+              </button>
+              <button type="button" class="btn" id="toggle-hot-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Hot status">
+                <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;"><i class="fa-solid fa-fire"></i> ${school.hot ? 'Hot (Active)' : 'Mark Hot'} ✏️</span>
+              </button>
+              <button type="button" class="btn" id="toggle-official-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Official status">
+                <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;"><i class="fa-solid fa-circle-check"></i> ${school.official ? 'Official DfE' : 'Unofficial'} ✏️</span>
+              </button>
+            ` : ''}
           </div>
         </div>
 
-        <!-- Clean Parent-Relevant Tags -->
-        <div class="detail-tags-row" style="display: flex; gap: 0.45rem; margin-top: 0.85rem; flex-wrap: wrap; align-items: center;">
-          <span class="badge-ofsted" style="font-size: 0.78rem;"><i class="fa-solid fa-star"></i> ${formatOfsted(userOverrides.ofstedRating || school.ofstedRating)}</span>
-          <span class="badge-exam" style="font-size: 0.78rem; background: #e0e7ff; color: #3730a3;"><i class="fa-solid fa-school"></i> ${userOverrides.schoolType || school.rawSchoolType || school.schoolType}</span>
-          <span class="badge-exam" style="font-size: 0.78rem; background: #f1f5f9; color: #334155;"><i class="fa-solid fa-venus-mars"></i> ${userOverrides.gender || school.gender}</span>
-          ${school.ageRange ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-user-group"></i> Age ${school.ageRange}</span>` : ''}
-          ${school.pupilCount ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-users"></i> ${school.pupilCount.toLocaleString()} pupils</span>` : ''}
-          ${school.hot ? `<span class="badge-hot" style="font-size: 0.76rem;"><i class="fa-solid fa-fire"></i> Hot School</span>` : ''}
-          ${secondStageRequired.startsWith('Yes') ? `<span class="badge-exam" style="font-size: 0.76rem; background: #fef3c7; color: #92400e; border: 1px solid #fde68a;"><i class="fa-solid fa-award"></i> 2-Stage Selective Exam</span>` : ''}
+        <!-- At-a-Glance Parent Summary Tiles (v2) -->
+        ${summaryTilesHtml}
 
-          <!-- Admin Quick Toggles (Admin Only) -->
-          ${currentPermissions.includes('admin:edit') ? `
-            <button type="button" class="btn" id="toggle-hot-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Hot status">
-              <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;"><i class="fa-solid fa-fire"></i> ${school.hot ? 'Hot (Active)' : 'Mark Hot'} ✏️</span>
+        <!-- Chronological Admissions Timeline Stepper (v2) -->
+        ${timelineStepperHtml}
+
+        <p style="margin-bottom: 1.25rem; color: #334155; font-size: 0.92rem; line-height: 1.5; background: #f8fafc; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid #e2e8f0;">
+          ${school.description || 'Comprehensive admissions and curriculum profile verified across UK official educational registers and examination guides.'}
+        </p>
+
+        <div class="detail-sections-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.1rem;">
+          ${admissionsUnifiedHtml}
+          ${financialsHtml}
+          ${academicMetricsHtml}
+          ${policyHtml}
+          ${adminQualityHtml}
+          ${contactHtml}
+        </div>
+
+        <div style="margin-top: 1.5rem; display: flex; gap: 0.65rem; flex-wrap:wrap; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 1.25rem;">
+          <button type="button" class="btn ${userSelectedSchools.some(u => u.id === school.id) ? 'btn-primary' : 'btn-outline'}" id="detail-shortlist-btn" style="${userSelectedSchools.some(u => u.id === school.id) ? 'background:#059669; border-color:#059669;' : 'color:#059669; border-color:#6ee7b7;'}">
+            <i class="fa-solid ${userSelectedSchools.some(u => u.id === school.id) ? 'fa-check' : 'fa-plus'}"></i> ${userSelectedSchools.some(u => u.id === school.id) ? 'Shortlisted' : 'Add to Shortlist'}
+          </button>
+
+          ${school.website ? `<a href="${school.website}" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-globe"></i> Official Website</a>` : ''}
+          ${school.compareSchoolPerformanceUrl ? `<a href="${school.compareSchoolPerformanceUrl}" target="_blank" class="btn btn-outline" style="color:#059669; border-color:#6ee7b7; display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-chart-bar"></i> Compare Performance</a>` : ''}
+          ${school.phone ? `<a href="tel:${school.phone}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-phone"></i> ${school.phone}</a>` : ''}
+          ${school.email ? `<a href="mailto:${school.email}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-envelope"></i> Email School</a>` : ''}
+
+          ${isAdminUser ? `
+            <button type="button" class="btn btn-outline" id="detail-edit-specs-btn" style="color:#0284c7; border-color:#bae6fd; margin-left:auto; display: inline-flex; align-items: center; gap: 0.35rem;">
+              <i class="fa-solid fa-pen-to-square"></i> Edit Specs
             </button>
-            <button type="button" class="btn" id="toggle-official-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Official status">
-              <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;"><i class="fa-solid fa-circle-check"></i> ${school.official ? 'Official DfE' : 'Unofficial'} ✏️</span>
+            <button type="button" class="btn btn-outline" id="detail-version-history-btn" style="color:#4f46e5; border-color:#c7d2fe; display: inline-flex; align-items: center; gap: 0.35rem;">
+              <i class="fa-solid fa-clock-rotate-left"></i> Version History
+            </button>
+            <button type="button" class="btn btn-primary" id="detail-merge-btn" style="background:#7c3aed; border-color:#7c3aed; display: inline-flex; align-items: center; gap: 0.35rem;">
+              <i class="fa-solid fa-code-merge"></i> Merge Record
             </button>
           ` : ''}
         </div>
-      </div>
+      `;
+    } else {
+      // Version 1: Classic Tabular View
+      detailContent.innerHTML = `
+        ${viewSwitcherToolbarHtml}
 
-      <p style="margin-bottom: 1.25rem; color: #334155; font-size: 0.92rem; line-height: 1.5; background: #f8fafc; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid #e2e8f0;">
-        ${school.description || 'Comprehensive admissions and curriculum profile verified across UK official educational registers and examination guides.'}
-      </p>
+        <div class="detail-header-hero" style="border-bottom: 1px solid #e2e8f0; padding-bottom: 1.25rem; margin-bottom: 1.5rem;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+            <div>
+              <h2 style="font-size: 1.55rem; font-weight: 800; color: #0f172a; margin: 0 0 0.35rem 0; letter-spacing: -0.02em;">
+                ${school.name}
+              </h2>
+              <div style="color: #64748b; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <span><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> ${school.address || school.la}, ${school.postcode || ''}</span>
+                <span>•</span>
+                <span><strong>Region:</strong> ${school.region || school.la}</span>
+              </div>
+            </div>
+          </div>
 
-      <div class="detail-sections-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.1rem;">
-        ${admissionsUnifiedHtml}
-        ${financialsHtml}
-        ${academicMetricsHtml}
-        ${policyHtml}
-        ${adminQualityHtml}
-        ${contactHtml}
-      </div>
+          <!-- Clean Parent-Relevant Tags -->
+          <div class="detail-tags-row" style="display: flex; gap: 0.45rem; margin-top: 0.85rem; flex-wrap: wrap; align-items: center;">
+            <span class="badge-ofsted" style="font-size: 0.78rem;"><i class="fa-solid fa-star"></i> ${formatOfsted(userOverrides.ofstedRating || school.ofstedRating)}</span>
+            <span class="badge-exam" style="font-size: 0.78rem; background: #e0e7ff; color: #3730a3;"><i class="fa-solid fa-school"></i> ${userOverrides.schoolType || school.rawSchoolType || school.schoolType}</span>
+            <span class="badge-exam" style="font-size: 0.78rem; background: #f1f5f9; color: #334155;"><i class="fa-solid fa-venus-mars"></i> ${userOverrides.gender || school.gender}</span>
+            ${school.ageRange ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-user-group"></i> Age ${school.ageRange}</span>` : ''}
+            ${school.pupilCount ? `<span class="badge-exam" style="font-size: 0.78rem; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;"><i class="fa-solid fa-users"></i> ${school.pupilCount.toLocaleString()} pupils</span>` : ''}
+            ${school.hot ? `<span class="badge-hot" style="font-size: 0.76rem;"><i class="fa-solid fa-fire"></i> Hot School</span>` : ''}
+            ${school.active === false
+              ? '<span class="badge" style="font-size: 0.78rem; background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; font-weight: 700;"><i class="fa-solid fa-ban"></i> Permanently Closed / Inactive</span>'
+              : '<span class="badge" style="font-size: 0.78rem; background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; font-weight: 600;"><i class="fa-solid fa-circle-check"></i> Active School</span>'}
+            ${secondStageRequired.startsWith('Yes') ? `<span class="badge-exam" style="font-size: 0.76rem; background: #fef3c7; color: #92400e; border: 1px solid #fde68a;"><i class="fa-solid fa-award"></i> 2-Stage Selective Exam</span>` : ''}
 
-      <div style="margin-top: 1.5rem; display: flex; gap: 0.65rem; flex-wrap:wrap; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 1.25rem;">
-        <button type="button" class="btn ${userSelectedSchools.some(u => u.id === school.id) ? 'btn-primary' : 'btn-outline'}" id="detail-shortlist-btn" style="${userSelectedSchools.some(u => u.id === school.id) ? 'background:#059669; border-color:#059669;' : 'color:#059669; border-color:#6ee7b7;'}">
-          <i class="fa-solid ${userSelectedSchools.some(u => u.id === school.id) ? 'fa-check' : 'fa-plus'}"></i> ${userSelectedSchools.some(u => u.id === school.id) ? 'Shortlisted' : 'Add to Shortlist'}
-        </button>
+            <!-- Admin Quick Toggles (Admin Only) -->
+            ${currentPermissions.includes('admin:edit') ? `
+              <button type="button" class="btn" id="toggle-active-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Active/Closed status">
+                <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:${school.active === false ? '#fee2e2' : '#f0fdf4'}; color:${school.active === false ? '#991b1b' : '#166534'}; border:1px solid ${school.active === false ? '#fca5a5' : '#bbf7d0'};"><i class="fa-solid ${school.active === false ? 'fa-ban' : 'fa-circle-check'}"></i> ${school.active === false ? 'Status: Closed' : 'Status: Active'} ✏️</span>
+              </button>
+              <button type="button" class="btn" id="toggle-hot-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Hot status">
+                <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;"><i class="fa-solid fa-fire"></i> ${school.hot ? 'Hot (Active)' : 'Mark Hot'} ✏️</span>
+              </button>
+              <button type="button" class="btn" id="toggle-official-btn" style="border:none; cursor:pointer; padding:0;" title="Click to toggle Official status">
+                <span style="font-size:0.72rem; padding:0.18rem 0.45rem; border-radius:999px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;"><i class="fa-solid fa-circle-check"></i> ${school.official ? 'Official DfE' : 'Unofficial'} ✏️</span>
+              </button>
+            ` : ''}
+          </div>
+        </div>
 
-        ${school.website ? `<a href="${school.website}" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-globe"></i> Official Website</a>` : ''}
-        ${school.compareSchoolPerformanceUrl ? `<a href="${school.compareSchoolPerformanceUrl}" target="_blank" class="btn btn-outline" style="color:#059669; border-color:#6ee7b7; display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-chart-bar"></i> Compare Performance</a>` : ''}
-        ${school.phone ? `<a href="tel:${school.phone}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-phone"></i> ${school.phone}</a>` : ''}
-        ${school.email ? `<a href="mailto:${school.email}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-envelope"></i> Email School</a>` : ''}
+        <p style="margin-bottom: 1.25rem; color: #334155; font-size: 0.92rem; line-height: 1.5; background: #f8fafc; padding: 0.85rem 1rem; border-radius: 8px; border: 1px solid #e2e8f0;">
+          ${school.description || 'Comprehensive admissions and curriculum profile verified across UK official educational registers and examination guides.'}
+        </p>
 
-        ${isAdminUser ? `
-          <button type="button" class="btn btn-outline" id="detail-edit-specs-btn" style="color:#0284c7; border-color:#bae6fd; margin-left:auto; display: inline-flex; align-items: center; gap: 0.35rem;">
-            <i class="fa-solid fa-pen-to-square"></i> Edit Specs
+        <div class="detail-sections-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.1rem;">
+          ${admissionsUnifiedHtml}
+          ${financialsHtml}
+          ${academicMetricsHtml}
+          ${policyHtml}
+          ${adminQualityHtml}
+          ${contactHtml}
+        </div>
+
+        <div style="margin-top: 1.5rem; display: flex; gap: 0.65rem; flex-wrap:wrap; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 1.25rem;">
+          <button type="button" class="btn ${userSelectedSchools.some(u => u.id === school.id) ? 'btn-primary' : 'btn-outline'}" id="detail-shortlist-btn" style="${userSelectedSchools.some(u => u.id === school.id) ? 'background:#059669; border-color:#059669;' : 'color:#059669; border-color:#6ee7b7;'}">
+            <i class="fa-solid ${userSelectedSchools.some(u => u.id === school.id) ? 'fa-check' : 'fa-plus'}"></i> ${userSelectedSchools.some(u => u.id === school.id) ? 'Shortlisted' : 'Add to Shortlist'}
           </button>
-          <button type="button" class="btn btn-outline" id="detail-version-history-btn" style="color:#4f46e5; border-color:#c7d2fe; display: inline-flex; align-items: center; gap: 0.35rem;">
-            <i class="fa-solid fa-clock-rotate-left"></i> Version History
-          </button>
-          <button type="button" class="btn btn-primary" id="detail-merge-btn" style="background:#7c3aed; border-color:#7c3aed; display: inline-flex; align-items: center; gap: 0.35rem;">
-            <i class="fa-solid fa-code-merge"></i> Merge Record
-          </button>
-        ` : ''}
-      </div>
-    `;
+
+          ${school.website ? `<a href="${school.website}" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-globe"></i> Official Website</a>` : ''}
+          ${school.compareSchoolPerformanceUrl ? `<a href="${school.compareSchoolPerformanceUrl}" target="_blank" class="btn btn-outline" style="color:#059669; border-color:#6ee7b7; display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-chart-bar"></i> Compare Performance</a>` : ''}
+          ${school.phone ? `<a href="tel:${school.phone}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-phone"></i> ${school.phone}</a>` : ''}
+          ${school.email ? `<a href="mailto:${school.email}" class="btn btn-outline" style="display: inline-flex; align-items: center; gap: 0.35rem;"><i class="fa-solid fa-envelope"></i> Email School</a>` : ''}
+
+          ${isAdminUser ? `
+            <button type="button" class="btn btn-outline" id="detail-edit-specs-btn" style="color:#0284c7; border-color:#bae6fd; margin-left:auto; display: inline-flex; align-items: center; gap: 0.35rem;">
+              <i class="fa-solid fa-pen-to-square"></i> Edit Specs
+            </button>
+            <button type="button" class="btn btn-outline" id="detail-version-history-btn" style="color:#4f46e5; border-color:#c7d2fe; display: inline-flex; align-items: center; gap: 0.35rem;">
+              <i class="fa-solid fa-clock-rotate-left"></i> Version History
+            </button>
+            <button type="button" class="btn btn-primary" id="detail-merge-btn" style="background:#7c3aed; border-color:#7c3aed; display: inline-flex; align-items: center; gap: 0.35rem;">
+              <i class="fa-solid fa-code-merge"></i> Merge Record
+            </button>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    // Wire view toggle buttons
+    detailContent.querySelectorAll('.btn-toggle-view').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        currentDetailViewVersion = e.currentTarget.dataset.version || 'v2';
+        localStorage.setItem('schooldb_detail_view_version', currentDetailViewVersion);
+        openSchoolDetail(school.id);
+      });
+    });
 
     // Wire Shortlist button listener
     const detailShortlistBtn = document.getElementById('detail-shortlist-btn');
@@ -3651,6 +4128,18 @@ async function openSchoolDetail(id) {
     }
 
     // Wire toggle listeners for admin:edit permission
+    const activeBtn = document.getElementById('toggle-active-btn');
+    if (activeBtn && currentPermissions.includes('admin:edit')) {
+      activeBtn.addEventListener('click', async () => {
+        const currentAct = (school.active !== false && school.active !== 0 && school.active !== 'false');
+        const newActive = !currentAct;
+        await updateSchoolPill(school.id, { active: newActive });
+        showToast(`School status updated: ${newActive ? 'Marked as Active (Open) ✓' : 'Marked as Inactive / Closed ⚠️'}`);
+        openSchoolDetail(school.id);
+        await loadSchools();
+      });
+    }
+
     const hotBtn = document.getElementById('toggle-hot-btn');
     if (hotBtn && currentPermissions.includes('admin:edit')) {
       hotBtn.addEventListener('click', async () => {
@@ -3749,6 +4238,77 @@ async function openSchoolDetail(id) {
         }
       });
     });
+
+    // Wire Modal Distance Calculator
+    const calcBtn = document.getElementById('modal-btn-calc-distance');
+    const pcInput = document.getElementById('modal-user-postcode-input');
+    const valSpan = document.getElementById('modal-distance-value');
+    const notesDiv = document.getElementById('modal-distance-notes');
+    const mapsLink = document.getElementById('modal-maps-link');
+
+    const runDistanceCalc = async () => {
+      const userPc = pcInput ? pcInput.value.trim() : '';
+      const schoolPc = school.postcode || '';
+
+      if (!userPc) {
+        if (notesDiv) notesDiv.textContent = 'Please enter your UK postcode.';
+        return;
+      }
+      if (!schoolPc) {
+        if (notesDiv) notesDiv.textContent = 'School does not have a recorded postcode.';
+        return;
+      }
+
+      if (valSpan) valSpan.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Calculating...';
+      if (notesDiv) notesDiv.textContent = '';
+
+      try {
+        const res = await fetch(`/api/distance?from=${encodeURIComponent(userPc)}&to=${encodeURIComponent(schoolPc)}`);
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          if (valSpan) valSpan.textContent = `${data.distanceMiles} mi (${data.distanceKm} km)`;
+          if (notesDiv) {
+            notesDiv.textContent = `${data.accuracyDescription} • Straight-line distance from ${data.from}`;
+          }
+          if (mapsLink) {
+            mapsLink.href = data.googleMapsDirectionsUrl;
+            mapsLink.style.display = 'inline-flex';
+          }
+          // Store user postcode persistently
+          try {
+            localStorage.setItem('user_home_postcode', data.from);
+            const mainPcInput = document.getElementById('filter-user-postcode');
+            if (mainPcInput && !mainPcInput.value) mainPcInput.value = data.from;
+          } catch (e) {}
+        } else {
+          if (valSpan) valSpan.textContent = 'Unavailable';
+          if (notesDiv) notesDiv.textContent = data.error || 'Could not calculate distance.';
+          if (mapsLink) mapsLink.style.display = 'none';
+        }
+      } catch (e) {
+        if (valSpan) valSpan.textContent = 'Error';
+        if (notesDiv) notesDiv.textContent = 'Connection error calculating distance.';
+      }
+    };
+
+    if (calcBtn) {
+      calcBtn.addEventListener('click', runDistanceCalc);
+    }
+    if (pcInput) {
+      pcInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          runDistanceCalc();
+        }
+      });
+      // Pre-fill from localStorage or filter
+      const storedPc = localStorage.getItem('user_home_postcode') || (document.getElementById('filter-user-postcode') ? document.getElementById('filter-user-postcode').value.trim() : '');
+      if (storedPc && school.postcode) {
+        pcInput.value = storedPc;
+        runDistanceCalc();
+      }
+    }
 
     bindConfidenceVoteEvents();
     const detailModal = document.getElementById('detail-modal');
@@ -4495,6 +5055,21 @@ async function loadLlmSettings() {
       updateTotalWeightsPill();
     }
 
+    // Completeness Weights
+    if (settings.completenessWeights) {
+      const cw = settings.completenessWeights;
+      const compFields = ['website', 'examDates', 'examFormat', 'schoolClassification', 'academicOfsted', 'contactChannels', 'addressGeography', 'leadershipCapacity'];
+      compFields.forEach(f => {
+        const el = document.getElementById(`cweight-${f}`);
+        if (el && typeof cw[f] !== 'undefined') {
+          el.value = cw[f];
+        }
+      });
+      updateCompletenessTotalPill();
+    }
+    loadCompletenessStatus();
+    loadTop100RankingsStatus();
+
     pendingClearedKeys = { gemini: false, openai: false };
     setAdminSettingsDirty(false);
 
@@ -4659,6 +5234,45 @@ function initSettingsStudioListeners() {
     }
   });
 
+  // Completeness sliders dirty tracking & live point updates
+  const compFields = ['website', 'examDates', 'examFormat', 'schoolClassification', 'academicOfsted', 'contactChannels', 'addressGeography', 'leadershipCapacity'];
+  compFields.forEach(f => {
+    const el = document.getElementById(`cweight-${f}`);
+    if (el) {
+      el.addEventListener('input', () => {
+        updateCompletenessTotalPill();
+        setAdminSettingsDirty(true);
+      });
+    }
+  });
+
+  // Reset completeness weights button
+  const btnResetComp = document.getElementById('btn-reset-completeness-weights');
+  if (btnResetComp) {
+    btnResetComp.addEventListener('click', () => {
+      const defaults = { website: 20, examDates: 25, examFormat: 15, schoolClassification: 10, academicOfsted: 10, contactChannels: 8, addressGeography: 6, leadershipCapacity: 6 };
+      Object.entries(defaults).forEach(([k, v]) => {
+        const el = document.getElementById(`cweight-${k}`);
+        if (el) el.value = v;
+      });
+      updateCompletenessTotalPill();
+      setAdminSettingsDirty(true);
+      showToast('Reset completeness weights to recommended defaults. Click Save & Recalculate to apply.', 'info');
+    });
+  }
+
+  // Recalculate completeness button
+  const btnSaveRecalcComp = document.getElementById('btn-save-recalc-completeness');
+  if (btnSaveRecalcComp) {
+    btnSaveRecalcComp.addEventListener('click', recalculateCompletenessScoresHandler);
+  }
+
+  // Top 500 Rankings sync button
+  const btnSyncRankings = document.getElementById('btn-sync-top-rankings');
+  if (btnSyncRankings) {
+    btnSyncRankings.addEventListener('click', syncTopRankingsHandler);
+  }
+
   // Toggle Password Key Visibility
   document.querySelectorAll('.btn-toggle-key-visibility').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -4810,6 +5424,158 @@ async function testLlmConnectionHandler() {
   }
 }
 
+function updateCompletenessTotalPill() {
+  const fields = ['website', 'examDates', 'examFormat', 'schoolClassification', 'academicOfsted', 'contactChannels', 'addressGeography', 'leadershipCapacity'];
+  let total = 0;
+  fields.forEach(f => {
+    const el = document.getElementById(`cweight-${f}`);
+    const valSpan = document.getElementById(`cweight-val-${f}`);
+    const val = parseInt(el?.value || '0', 10);
+    total += val;
+    if (valSpan) valSpan.textContent = `${val} Pts`;
+  });
+  const pill = document.getElementById('completeness-weights-total-pill');
+  if (pill) {
+    pill.textContent = `Total: ${total} Points`;
+    if (total === 100) {
+      pill.style.background = '#dcfce7';
+      pill.style.color = '#166534';
+      pill.style.borderColor = '#bbf7d0';
+    } else {
+      pill.style.background = '#fef3c7';
+      pill.style.color = '#92400e';
+      pill.style.borderColor = '#fde68a';
+    }
+  }
+}
+
+async function loadCompletenessStatus() {
+  try {
+    const res = await fetch('/api/admin/quality/completeness/status', {
+      headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.success) {
+      const avgEl = document.getElementById('completeness-metric-avg');
+      const excEl = document.getElementById('completeness-metric-excellent');
+      const goodEl = document.getElementById('completeness-metric-good');
+      const fairEl = document.getElementById('completeness-metric-fair');
+      const poorEl = document.getElementById('completeness-metric-poor');
+
+      if (avgEl) avgEl.textContent = `${data.avgScore}%`;
+      if (excEl) excEl.textContent = Number(data.distribution?.excellent || 0).toLocaleString();
+      if (goodEl) goodEl.textContent = Number(data.distribution?.good || 0).toLocaleString();
+      if (fairEl) fairEl.textContent = Number(data.distribution?.fair || 0).toLocaleString();
+      if (poorEl) poorEl.textContent = Number(data.distribution?.poor || 0).toLocaleString();
+    }
+  } catch (e) {
+    console.warn('Error loading completeness metrics:', e);
+  }
+}
+
+async function recalculateCompletenessScoresHandler() {
+  const btn = document.getElementById('btn-save-recalc-completeness');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Recalculating Completeness Scores...`;
+  }
+
+  const weights = {
+    website: parseInt(document.getElementById('cweight-website')?.value || '20', 10),
+    examDates: parseInt(document.getElementById('cweight-examDates')?.value || '25', 10),
+    examFormat: parseInt(document.getElementById('cweight-examFormat')?.value || '15', 10),
+    schoolClassification: parseInt(document.getElementById('cweight-schoolClassification')?.value || '10', 10),
+    academicOfsted: parseInt(document.getElementById('cweight-academicOfsted')?.value || '10', 10),
+    contactChannels: parseInt(document.getElementById('cweight-contactChannels')?.value || '8', 10),
+    addressGeography: parseInt(document.getElementById('cweight-addressGeography')?.value || '6', 10),
+    leadershipCapacity: parseInt(document.getElementById('cweight-leadershipCapacity')?.value || '6', 10)
+  };
+
+  try {
+    const res = await fetch('/api/admin/quality/completeness/recalculate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ completenessWeights: weights })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showToast(data.message || 'Completeness scores updated across all schools!', 'success');
+      await loadCompletenessStatus();
+      if (typeof loadSchools === 'function') loadSchools();
+    } else {
+      showToast(`Recalculation failed: ${data.error || 'Server error'}`, 'error');
+    }
+  } catch (err) {
+    showToast('Failed to connect to completeness calculation API', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fa-solid fa-arrows-rotate"></i> Save Weights & Recalculate Master Scores`;
+    }
+  }
+}
+
+async function loadTop100RankingsStatus() {
+  try {
+    const res = await fetch('/api/admin/rankings/status', {
+      headers: {
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.success) {
+      const gcseEl = document.getElementById('rankings-metric-gcse');
+      const alevelEl = document.getElementById('rankings-metric-alevel');
+      const nationalEl = document.getElementById('rankings-metric-national');
+      if (gcseEl) gcseEl.textContent = data.totalGcseRanked ?? '--';
+      if (alevelEl) alevelEl.textContent = data.totalALevelRanked ?? '--';
+      if (nationalEl) nationalEl.textContent = data.totalNationalRanked ?? '--';
+    }
+  } catch (e) {
+    console.warn('Error loading rankings status:', e);
+  }
+}
+
+async function syncTopRankingsHandler() {
+  const btn = document.getElementById('btn-sync-top-rankings');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Syncing UK Top 500 Rankings...`;
+  }
+
+  try {
+    const res = await fetch('/api/admin/rankings/update-top-500', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      }
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showToast(data.message || 'Successfully updated Top 500 rankings in database!', 'success');
+      await loadTop100RankingsStatus();
+      if (typeof loadSchools === 'function') loadSchools();
+    } else {
+      showToast(`Rankings sync failed: ${data.error || 'Server error'}`, 'error');
+    }
+  } catch (err) {
+    showToast('Failed to connect to rankings update API', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fa-solid fa-arrows-rotate"></i> Sync Top 500 National Rankings`;
+    }
+  }
+}
+
 async function saveLlmSettingsHandler() {
   const provider = document.querySelector('input[name="llm-provider-radio"]:checked')?.value || document.getElementById('setting-llm-provider')?.value || 'gemini';
   const geminiModel = document.getElementById('setting-gemini-model')?.value || 'gemini-3.6-flash';
@@ -4828,6 +5594,17 @@ async function saveLlmSettingsHandler() {
     schoolType: parseInt(document.getElementById('weight-type')?.value, 10) || 0
   };
 
+  const completenessWeights = {
+    website: parseInt(document.getElementById('cweight-website')?.value || '20', 10),
+    examDates: parseInt(document.getElementById('cweight-examDates')?.value || '25', 10),
+    examFormat: parseInt(document.getElementById('cweight-examFormat')?.value || '15', 10),
+    schoolClassification: parseInt(document.getElementById('cweight-schoolClassification')?.value || '10', 10),
+    academicOfsted: parseInt(document.getElementById('cweight-academicOfsted')?.value || '10', 10),
+    contactChannels: parseInt(document.getElementById('cweight-contactChannels')?.value || '8', 10),
+    addressGeography: parseInt(document.getElementById('cweight-addressGeography')?.value || '6', 10),
+    leadershipCapacity: parseInt(document.getElementById('cweight-leadershipCapacity')?.value || '6', 10)
+  };
+
   const payload = {
     llmProvider: provider,
     geminiModel,
@@ -4835,7 +5612,8 @@ async function saveLlmSettingsHandler() {
     scannerSkipDays: isNaN(skipDays) ? 10 : Math.max(0, Math.min(100, skipDays)),
     scannerDelaySeconds: isNaN(delaySec) ? 20 : Math.max(0, Math.min(300, delaySec)),
     llmPromptTemplate: promptTemplate,
-    recWeights
+    recWeights,
+    completenessWeights
   };
 
   if (pendingClearedKeys.gemini) {
@@ -6372,6 +7150,237 @@ async function loadAdminFieldReports() {
   } catch (err) {
     console.error('Error loading admin field reports:', err);
   }
+
+  // Also load system-detected data conflicts queue
+  await loadSystemCorrectionsQueue();
+}
+
+// Quick Access Investigation Links (Website, DfE GIAS, and Google Search in new tab)
+function renderQuickAccessInvestigationLinks(school) {
+  if (!school) return '';
+  const name = school.name || '';
+  const postcode = school.postcode || '';
+  const urn = (school.urn || '').toString().trim();
+  const website = (school.website || '').toString().trim();
+
+  const googleQuery = encodeURIComponent(`${name} ${postcode} school`);
+  const googleSearchUrl = `https://www.google.com/search?q=${googleQuery}`;
+  
+  const dfeUrl = urn && /^\d+$/.test(urn)
+    ? `https://www.get-information-schools.service.gov.uk/Establishments/Establishment/Details/${urn}`
+    : `https://www.get-information-schools.service.gov.uk/Search?SelectedTab=Establishments&SearchType=ByLocalAuthority&SearchLocation=${encodeURIComponent(name)}`;
+
+  return `
+    <div class="investigation-quick-links" style="display: flex; gap: 0.35rem; margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px dashed #e2e8f0; flex-wrap: wrap; align-items: center;">
+      ${website ? `
+        <a href="${escapeHtml(website)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="font-size: 0.72rem; padding: 0.2rem 0.5rem; color: #2563eb; border-color: #bfdbfe; background: #eff6ff; text-decoration: none; border-radius: 5px; font-weight: 600;" title="Open Official School Website in new tab">
+          <i class="fa-solid fa-globe"></i> Website <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.62rem; margin-left: 0.15rem;"></i>
+        </a>
+      ` : `
+        <span style="font-size: 0.72rem; color: #94a3b8; padding: 0.2rem 0.45rem; background: #f1f5f9; border-radius: 5px; border: 1px solid #e2e8f0;" title="No official website registered">
+          <i class="fa-solid fa-globe"></i> No Web
+        </span>
+      `}
+      <a href="${escapeHtml(dfeUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="font-size: 0.72rem; padding: 0.2rem 0.5rem; color: #0891b2; border-color: #a5f3fc; background: #ecfeff; text-decoration: none; border-radius: 5px; font-weight: 600;" title="View official government record on DfE GIAS">
+        <i class="fa-solid fa-landmark-dome"></i> DfE GIAS ${urn ? `(${escapeHtml(urn)})` : ''} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.62rem; margin-left: 0.15rem;"></i>
+      </a>
+      <a href="${escapeHtml(googleSearchUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="font-size: 0.72rem; padding: 0.2rem 0.5rem; color: #374151; border-color: #e5e7eb; background: #f9fafb; text-decoration: none; border-radius: 5px; font-weight: 600;" title="Google Search school name & postcode in new tab">
+        <i class="fa-brands fa-google" style="color: #ea4335;"></i> Google <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.62rem; margin-left: 0.15rem;"></i>
+      </a>
+    </div>
+  `;
+}
+
+// System-Detected Data Conflicts & Corrections Queue Controller
+async function loadSystemCorrectionsQueue(forceScan = false) {
+  const container = document.getElementById('admin-system-corrections-container');
+  if (!container) return;
+
+  const refreshBtn = document.getElementById('refresh-system-corrections-btn');
+  const statusLabel = document.getElementById('system-corrections-scan-status');
+  if (refreshBtn && !refreshBtn._bound) {
+    refreshBtn._bound = true;
+    refreshBtn.addEventListener('click', () => loadSystemCorrectionsQueue(true));
+  }
+
+  if (forceScan) {
+    if (refreshBtn) {
+      refreshBtn.disabled = true;
+      refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Scanning 6,489 Schools...';
+    }
+    container.innerHTML = '<div style="text-align: center; color: #ea580c; padding: 1.5rem;"><i class="fa-solid fa-circle-notch fa-spin"></i> Running multi-attribute overlap algorithm across database...</div>';
+  } else {
+    container.innerHTML = '<div style="text-align: center; color: #94a3b8; padding: 1.5rem;"><i class="fa-solid fa-circle-notch fa-spin"></i> Reading persisted conflict records...</div>';
+  }
+
+  try {
+    const url = forceScan ? '/api/admin/quality/corrections/scan' : '/api/admin/quality/corrections/queue';
+    const res = await fetch(url, {
+      method: forceScan ? 'POST' : 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      }
+    });
+
+    if (!res.ok) {
+      container.innerHTML = '<div style="color: #ef4444; padding: 1rem;">Failed to load system data conflicts queue.</div>';
+      return;
+    }
+
+    const data = await res.json();
+    const queue = data.correctionsQueue || [];
+    window._qualityCorrectionsQueue = queue;
+
+    if (statusLabel) {
+      if (data.scannedAt) {
+        statusLabel.innerHTML = `<i class="fa-solid fa-clock-rotate-left"></i> Last Scanned: <strong>${new Date(data.scannedAt).toLocaleString()}</strong> (${data.totalSchools || 6489} schools checked)`;
+      } else {
+        statusLabel.innerHTML = `<i class="fa-solid fa-info-circle"></i> No scan executed yet. Click "Run Conflict & Overlap Scan" to analyze.`;
+      }
+    }
+
+    // Update corrections badge count on side tab if needed
+    const badge = document.getElementById('corrections-badge-count');
+    if (badge) {
+      badge.textContent = queue.length;
+      badge.style.display = queue.length > 0 ? 'inline-block' : 'none';
+    }
+
+    if (data.hasScanned === false && queue.length === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 2.5rem 1rem; background: #fff7ed; border-radius: 10px; border: 1px solid #fed7aa;">
+          <i class="fa-solid fa-shield-halved" style="font-size:2.2rem; color:#ea580c; display:block; margin-bottom:0.6rem;"></i>
+          <strong style="color: #9a3412; font-size: 1rem;">Multi-Attribute Conflict Scan Not Executed Yet</strong>
+          <p style="color: #c2410c; font-size: 0.85rem; margin-top: 0.35rem; max-width: 520px; margin-left: auto; margin-right: auto;">
+            Click <strong>"Run Conflict &amp; Overlap Scan"</strong> above to cross-reference all 6,489 schools for identifier discrepancies, shared URN anomalies, and duplicate listings.
+          </p>
+          <button type="button" class="btn btn-primary" onclick="loadSystemCorrectionsQueue(true)" style="background: #ea580c; border-color: #ea580c; margin-top: 0.5rem; font-size: 0.85rem; padding: 0.45rem 1.1rem;">
+            <i class="fa-solid fa-play"></i> Run Conflict &amp; Overlap Scan Now
+          </button>
+        </div>
+      `;
+      return;
+    }
+
+    if (queue.length === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 2rem 1rem; background: #f0fdf4; border-radius: 10px; border: 1px solid #bbf7d0;">
+          <i class="fa-solid fa-circle-check" style="font-size:2rem; color:#22c55e; display:block; margin-bottom:0.4rem;"></i>
+          <strong style="color: #166534; font-size: 0.95rem;">No System-Detected Data Conflicts</strong>
+          <p style="color: #15803d; font-size: 0.85rem; margin-top: 0.2rem;">All school profiles and DfE URN identifiers are fully consistent in persisted scan.</p>
+        </div>
+      `;
+      return;
+    }
+
+    let html = `
+      <div style="margin-bottom: 0.75rem; font-size: 0.85rem; color: #64748b; display: flex; justify-content: space-between; align-items: center;">
+        <span>Found <strong>${queue.length}</strong> conflicting records requiring admin resolution:</span>
+        <span style="background: #fff7ed; color: #c2410c; padding: 0.2rem 0.5rem; border-radius: 6px; font-weight: 700; font-size: 0.75rem;">
+          <i class="fa-solid fa-flag"></i> Action Required
+        </span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+    `;
+
+    queue.forEach((c, idx) => {
+      const isUrnConflict = (c.schoolA.urn && c.schoolB.urn && c.schoolA.urn === c.schoolB.urn);
+      html += `
+        <div style="background: #ffffff; border: 1px solid #fed7aa; border-radius: 10px; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+            <span style="font-weight: 700; color: #ea580c; font-size: 0.85rem;">
+              <i class="fa-solid fa-triangle-exclamation"></i> Conflict #${idx + 1}: ${escapeHtml(c.reason)}
+            </span>
+            <div style="display: flex; gap: 0.4rem; align-items: center;">
+              <button class="btn btn-outline" onclick="openSchoolDetail('${c.schoolA.id}')" style="font-size: 0.75rem; padding: 0.25rem 0.55rem;">
+                <i class="fa-solid fa-eye"></i> Inspect A
+              </button>
+              <button class="btn btn-outline" onclick="openSchoolDetail('${c.schoolB.id}')" style="font-size: 0.75rem; padding: 0.25rem 0.55rem;">
+                <i class="fa-solid fa-eye"></i> Inspect B
+              </button>
+              <button class="btn btn-outline" onclick="markPairAsReviewed('${c.schoolA.id}', '${c.schoolB.id}')" style="font-size: 0.75rem; padding: 0.25rem 0.55rem; color: #059669; border-color: #a7f3d0;" title="Dismiss conflict & mark as reviewed distinct schools">
+                <i class="fa-solid fa-shield-check"></i> Not Duplicate
+              </button>
+              ${isUrnConflict ? `
+                <button class="btn btn-primary" onclick="clearConflictingUrn('${c.schoolB.id}')" style="background: #ea580c; border-color: #ea580c; font-size: 0.75rem; padding: 0.25rem 0.55rem;">
+                  <i class="fa-solid fa-eraser"></i> Clear URN on B
+                </button>
+              ` : ''}
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.75rem; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: #2563eb; margin-bottom: 0.25rem;">RECORD A</div>
+                <div style="font-weight: 600; color: #1e293b;">${escapeHtml(c.schoolA.name)}</div>
+                <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.25rem;">
+                  Postcode: <strong>${escapeHtml(c.schoolA.postcode || 'N/A')}</strong> | URN: <strong>${escapeHtml(c.schoolA.urn || 'N/A')}</strong> | Type: <strong>${escapeHtml(c.schoolA.schoolType || 'N/A')}</strong>
+                </div>
+              </div>
+              ${renderQuickAccessInvestigationLinks(c.schoolA)}
+            </div>
+            <div style="background: #fff7ed; border: 1px solid #ffedd5; border-radius: 8px; padding: 0.75rem; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: #ea580c; margin-bottom: 0.25rem;">RECORD B</div>
+                <div style="font-weight: 600; color: #1e293b;">${escapeHtml(c.schoolB.name)}</div>
+                <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.25rem;">
+                  Postcode: <strong>${escapeHtml(c.schoolB.postcode || 'N/A')}</strong> | URN: <strong>${escapeHtml(c.schoolB.urn || 'N/A')}</strong> | Type: <strong>${escapeHtml(c.schoolB.schoolType || 'N/A')}</strong>
+                </div>
+              </div>
+              ${renderQuickAccessInvestigationLinks(c.schoolB)}
+            </div>
+          </div>
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+    if (forceScan) {
+      showToast(data.message || 'Conflict scan completed and persisted.', 'success');
+    }
+  } catch (err) {
+    console.error('Error loading system corrections queue:', err);
+    container.innerHTML = '<div style="color: #ef4444; padding: 1rem;">Error connecting to corrections queue.</div>';
+  } finally {
+    if (refreshBtn) {
+      refreshBtn.disabled = false;
+      refreshBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Run Conflict &amp; Overlap Scan';
+    }
+  }
+}
+
+async function clearConflictingUrn(schoolId, schoolName = '') {
+  let displayName = schoolName;
+  if (!displayName && Array.isArray(window._qualityCorrectionsQueue)) {
+    const item = window._qualityCorrectionsQueue.find(c => c.schoolB?.id === schoolId || c.schoolA?.id === schoolId);
+    if (item) displayName = item.schoolB?.id === schoolId ? item.schoolB?.name : item.schoolA?.name;
+  }
+  if (!confirm(`Clear conflicting DfE URN for ${displayName || schoolId}? The record will be preserved and flagged for official GIAS re-scan.`)) return;
+
+  try {
+    const res = await fetch('/api/admin/quality/corrections/clear-urn', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ schoolId })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(data.message, 'success');
+      await loadSystemCorrectionsQueue();
+      await loadSchools();
+    } else {
+      showToast('Failed to clear conflicting URN.', 'error');
+    }
+  } catch (err) {
+    console.error('Clear URN error:', err);
+    showToast('Exception clearing URN.', 'error');
+  }
 }
 
 // Utility debounce
@@ -7320,8 +8329,17 @@ async function checkAndPollScannerStatus() {
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.state && data.state.isRunning) {
-        startScannerPolling();
+      const st = data.state;
+      if (st) {
+        if (st.isRunning) {
+          startScannerPolling();
+        } else if (st.recentResults && Array.isArray(st.recentResults) && st.recentResults.length > 0) {
+          enrichmentFeedData = st.recentResults;
+          renderEnrichmentFeed(enrichmentFeedData);
+          if (st.latestRawInteraction) {
+            updateRawLLMInspector(st.latestRawInteraction);
+          }
+        }
       }
     }
   } catch (e) {
@@ -7530,12 +8548,20 @@ function updateRawLLMInspector(interaction) {
   const provider = (interaction.provider || 'gemini').toUpperCase();
   const model = interaction.model || 'gemini-3.6-flash';
   const timeStr = interaction.timestamp ? new Date(interaction.timestamp).toLocaleTimeString('en-GB') : 'Just now';
+  const isGrounded = Boolean(interaction.groundingMetadata || interaction.exactResponse?.groundingMetadata || interaction.searchQueries || interaction.exactResponse?.searchQueries);
 
   if (statusPill) {
     statusPill.style.background = '#1e1b4b';
     statusPill.style.color = '#c7d2fe';
     statusPill.style.borderColor = '#6366f1';
-    statusPill.innerHTML = `<i class="fa-solid fa-bolt" style="color:#a5b4fc;"></i> ${escapeHtml(schoolName)} • ${provider} (${model}) • ${timeStr}`;
+    statusPill.innerHTML = `<i class="fa-solid fa-bolt" style="color:#a5b4fc;"></i> ${escapeHtml(schoolName)} • ${provider} (${model}) ${isGrounded ? '<span style="color:#38bdf8; font-weight:700;"><i class="fa-brands fa-google"></i> Search Grounded</span> ' : ''}• ${timeStr}`;
+  }
+
+  const googleBtn = document.getElementById('raw-llm-google-search-btn');
+  if (googleBtn) {
+    const searchUrl = interaction.googleSearchUrl || interaction.exactRequest?.googleSearchUrl || (schoolName ? `https://www.google.com/search?q=${encodeURIComponent('"' + schoolName + '" admissions "11+" entrance exam dates 2026')}` : 'https://www.google.com');
+    googleBtn.href = searchUrl;
+    googleBtn.title = `Compare live browser Google search results for "${schoolName}"`;
   }
 
   if (reqPre) {
@@ -8104,7 +9130,7 @@ function renderEnrichmentFeed(items = [], forceRender = false) {
     }
 
     if (enrichmentFeedFilterStatus === 'ENRICHED') {
-      return item.status === 'llm_enriched' || item.status === 'auto_verified' || (item.tags && item.tags.includes('llm_enriched'));
+      return item.status === 'llm_enriched' || item.status === 'auto_verified' || (item.tags && (item.tags.includes('llm_enriched') || item.tags.includes('auto_verified') || item.tags.includes('llm_verified'))) || (item.verifiedMatches && item.verifiedMatches.length > 0);
     } else if (enrichmentFeedFilterStatus === 'WITH_DIFFS') {
       return item.diffs && item.diffs.length > 0;
     } else if (enrichmentFeedFilterStatus === 'SKIPPED') {
@@ -8118,7 +9144,7 @@ function renderEnrichmentFeed(items = [], forceRender = false) {
   if (streamBadge) streamBadge.textContent = `${filtered.length} item${filtered.length === 1 ? '' : 's'}`;
 
   // Check fingerprint to eliminate jumpy re-renders when data hasn't changed
-  const currentFingerprint = `${enrichmentFeedFilterText}:${enrichmentFeedFilterStatus}:${filtered.map(i => `${i.schoolId}_${i.verifiedAt || ''}_${i.status || ''}_${(i.diffs || []).length}`).join('|')}`;
+  const currentFingerprint = `${enrichmentFeedFilterText}:${enrichmentFeedFilterStatus}:${filtered.map(i => `${i.schoolId}_${i.verifiedAt || ''}_${i.status || ''}_${(i.diffs || []).length}_${(i.verifiedMatches || []).length}`).join('|')}`;
   if (currentFingerprint === lastFeedFingerprint && !forceRender && container.children.length > 0) {
     return;
   }
@@ -8137,7 +9163,8 @@ function renderEnrichmentFeed(items = [], forceRender = false) {
   let html = '';
   for (const item of filtered) {
     const isEnriched = (item.status === 'llm_enriched' || (item.tags && item.tags.includes('llm_enriched'))) && item.status !== 'llm_error';
-    const isAutoVerified = item.status === 'auto_verified';
+    const hasVerifiedMatches = item.verifiedMatches && item.verifiedMatches.length > 0;
+    const isAutoVerified = item.status === 'auto_verified' || hasVerifiedMatches;
     const isSkipped = item.skipped === true || (item.tags && item.tags.some(t => t.startsWith('skip_cache')));
     const hasAnomalies = (item.anomaliesCount > 0) || item.status === 'has_anomalies';
     const isLlmError = item.status === 'llm_error' || (item.tags && item.tags.includes('llm_error'));
@@ -8159,11 +9186,70 @@ function renderEnrichmentFeed(items = [], forceRender = false) {
       statusPill = `<span style="background: #f3e8ff; color: #7c3aed; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid #d8b4fe;"><i class="fa-solid fa-wand-magic-sparkles"></i> llm_enriched</span>`;
     } else if (isAutoVerified) {
       cardStatusClass = 'status-auto-verified';
-      statusPill = `<span style="background: #ecfdf5; color: #065f46; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid #a7f3d0;"><i class="fa-solid fa-circle-check"></i> Auto-Verified</span>`;
+      statusPill = `<span style="background: #ecfdf5; color: #065f46; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid #a7f3d0;"><i class="fa-solid fa-circle-check"></i> Verified Match</span>`;
     }
 
     const confScore = item.qualityScore || (isLlmError ? 30 : 95);
     const timeFormatted = item.verifiedAt ? new Date(item.verifiedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Just now';
+
+    // Verified Matching Non-Null Fields Table
+    let verifiedMatchesHtml = '';
+    if (hasVerifiedMatches) {
+      let vRows = '';
+      for (const vm of item.verifiedMatches) {
+        if (vm.type === 'dates' && vm.verifiedDates && vm.verifiedDates.length > 0) {
+          for (const vd of vm.verifiedDates) {
+            vRows += `
+              <tr>
+                <td style="font-weight: 600; color: #166534; width: 220px;">
+                  <i class="fa-regular fa-calendar-check" style="color: #16a34a; margin-right: 0.3rem;"></i> ${escapeHtml(vd.label || vd.key)}
+                </td>
+                <td style="width: 45%;">
+                  <span style="font-weight: 600; color: #0f172a;">${escapeHtml(vd.value)}</span>
+                </td>
+                <td>
+                  <span class="badge" style="background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; font-size: 0.7rem; font-weight: 700; padding: 0.12rem 0.45rem; border-radius: 999px;"><i class="fa-solid fa-circle-check"></i> Enriched / Verified</span>
+                </td>
+              </tr>
+            `;
+          }
+        } else {
+          vRows += `
+            <tr>
+              <td style="font-weight: 600; color: #166534; width: 220px;">
+                <i class="fa-solid fa-circle-check" style="color: #16a34a; margin-right: 0.3rem;"></i> ${escapeHtml(vm.label || vm.field)}
+              </td>
+              <td style="width: 45%;">
+                <span style="font-weight: 600; color: #0f172a;">${escapeHtml(vm.value)}</span>
+              </td>
+              <td>
+                <span class="badge" style="background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; font-size: 0.7rem; font-weight: 700; padding: 0.12rem 0.45rem; border-radius: 999px;"><i class="fa-solid fa-circle-check"></i> Enriched / Verified</span>
+              </td>
+            </tr>
+          `;
+        }
+      }
+
+      verifiedMatchesHtml = `
+        <div style="margin-top: 0.75rem;">
+          <div style="font-size: 0.76rem; font-weight: 700; color: #166534; display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.35rem;">
+            <i class="fa-solid fa-shield-check" style="color: #16a34a;"></i> Verified Matching Non-Null Fields (Query confirmed ${item.verifiedMatches.length} field groups):
+          </div>
+          <table class="delta-table" style="background: #f0fdf4; border: 1px solid #bbf7d0;">
+            <thead>
+              <tr style="background: #dcfce7;">
+                <th style="color: #166534;">Verified Attribute</th>
+                <th style="color: #166534;">Confirmed Matching Value</th>
+                <th style="color: #166534;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${vRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
 
     let deltaHtml = '';
     if (item.diffs && item.diffs.length > 0) {
@@ -8222,6 +9308,7 @@ function renderEnrichmentFeed(items = [], forceRender = false) {
             </tbody>
           </table>
         </div>
+        ${verifiedMatchesHtml}
       `;
     } else if (isLlmError) {
       deltaHtml = `
@@ -8236,6 +9323,14 @@ function renderEnrichmentFeed(items = [], forceRender = false) {
           <i class="fa-solid fa-circle-info" style="color: #3b82f6;"></i>
           <span>${escapeHtml(item.skipReason || 'School scan skipped: verified clean within active cache window.')}</span>
         </div>
+      `;
+    } else if (hasVerifiedMatches) {
+      deltaHtml = `
+        <div style="margin-top: 0.6rem; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.78rem; color: #166534; display: flex; align-items: center; gap: 0.5rem;">
+          <i class="fa-solid fa-circle-check" style="color: #16a34a; font-size: 1rem;"></i>
+          <span><strong>Verified &amp; Confirmed:</strong> Query confirmed matching non-null values for ${item.verifiedMatches.length} field groups. All confirmed fields marked as verified.</span>
+        </div>
+        ${verifiedMatchesHtml}
       `;
     } else {
       deltaHtml = `
@@ -8428,7 +9523,7 @@ function startScannerPolling() {
   }
   if (progressBox) progressBox.style.display = 'block';
 
-  scannerPollInterval = setInterval(async () => {
+  async function pollTick() {
     try {
       const res = await fetch('/api/admin/scanner/status', {
         headers: currentSessionId ? { 'x-session-id': currentSessionId } : {}
@@ -8458,15 +9553,15 @@ function startScannerPolling() {
             statusText.innerHTML = `
               <i class="fa-solid fa-hourglass-half fa-spin" style="color:#f59e0b;"></i> 
               Pacing API limit: Next query in <strong>${st.delayRemainingSeconds}s</strong> &bull; 
-              <span style="color:#059669; font-weight:700;"><i class="fa-solid fa-circle-check"></i> ${st.stats.verifiedCount} enriched</span>, 
-              <span style="color:#dc2626; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> ${st.stats.anomaliesCount} anomalies</span>
+              <span style="color:#059669; font-weight:700;"><i class="fa-solid fa-circle-check"></i> ${st.stats?.verifiedCount || 0} enriched</span>, 
+              <span style="color:#dc2626; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> ${st.stats?.anomaliesCount || 0} anomalies</span>
             `;
           } else {
             statusText.innerHTML = `
               <i class="fa-solid fa-spider fa-bounce" style="color:#7c3aed;"></i> 
               Auditing <strong>${st.currentSchool || 'schools'}</strong> (${pct}%) &bull; 
-              <span style="color:#059669; font-weight:700;"><i class="fa-solid fa-circle-check"></i> ${st.stats.verifiedCount} clean/enriched</span>, 
-              <span style="color:#dc2626; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> ${st.stats.anomaliesCount} anomalies</span>
+              <span style="color:#059669; font-weight:700;"><i class="fa-solid fa-circle-check"></i> ${st.stats?.verifiedCount || 0} clean/enriched</span>, 
+              <span style="color:#dc2626; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> ${st.stats?.anomaliesCount || 0} anomalies</span>
             `;
           }
         }
@@ -8485,16 +9580,27 @@ function startScannerPolling() {
         }
 
         if (progressBar) progressBar.style.width = '100%';
-        if (statusText) {
-          statusText.innerHTML = `
-            <i class="fa-solid fa-circle-check" style="color:#059669;"></i> 
-            Completed web audit across <strong>${st.scannedCount}</strong> schools 
-            (${st.stats.verifiedCount} auto-verified / enriched, ${st.stats.anomaliesCount} anomalies, ${st.stats.missingWebsitesCount} missing websites, ${st.stats.dataMissingCount} data missing).
-          `;
+        if (st.rateLimited || (st.error && (st.error.includes('429') || st.error.includes('Rate limit') || st.error.includes('Too Many Requests')))) {
+          if (statusText) {
+            statusText.innerHTML = `
+              <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 0.5rem 0.75rem; color: #991b1b; font-size: 0.85rem;">
+                <i class="fa-solid fa-hand fa-beat" style="color: #dc2626; margin-right: 0.35rem;"></i>
+                <strong>Crawling Stopped:</strong> HTTP 429 Rate Limit encountered. The background crawler was halted immediately to protect API quotas.
+              </div>
+            `;
+          }
+          showToast(st.error || 'Crawling stopped: HTTP 429 Rate Limit encountered.', 'error', 7000);
+        } else if (st.completedAt) {
+          if (statusText) {
+            statusText.innerHTML = `
+              <i class="fa-solid fa-circle-check" style="color:#059669;"></i> 
+              Completed web audit across <strong>${st.scannedCount}</strong> schools 
+              (${st.stats?.verifiedCount || 0} auto-verified / enriched, ${st.stats?.anomaliesCount || 0} anomalies, ${st.stats?.missingWebsitesCount || 0} missing websites, ${st.stats?.dataMissingCount || 0} data missing).
+            `;
+          }
+          showToast(`AI Enrichment scan complete: ${st.scannedCount} schools audited (${st.stats?.verifiedCount || 0} enriched)!`, 'success');
         }
-
-        showToast(`AI Enrichment scan complete: ${st.scannedCount} schools audited (${st.stats.verifiedCount} enriched)!`, 'success');
-              }
+      }
 
       if (st.latestRawInteraction) {
         updateRawLLMInspector(st.latestRawInteraction);
@@ -8510,7 +9616,10 @@ function startScannerPolling() {
     } catch (pollErr) {
       console.warn('Error polling scanner status:', pollErr);
     }
-  }, 800);
+  }
+
+  pollTick();
+  scannerPollInterval = setInterval(pollTick, 800);
 }
 
 async function startWebVerificationScan() {
@@ -8587,6 +9696,17 @@ async function startWebVerificationScan() {
 
     if (res.ok) {
       const data = await res.json();
+      if (data.started === false) {
+        showToast(data.message || 'All schools in this category have already been enriched.', 'info');
+        if (startBtn) {
+          startBtn.disabled = false;
+          startBtn.innerHTML = scanMode === 'SINGLE'
+            ? `<i class="fa-solid fa-bullseye"></i> Start AI Scan for Selected School`
+            : `<i class="fa-solid fa-play"></i> Start AI Verification Scan`;
+        }
+        if (progressBox) progressBox.style.display = 'none';
+        return;
+      }
       showToast(data.message || 'AI verification scan started!', 'info');
       startScannerPolling();
     } else {
@@ -9312,4 +10432,1637 @@ async function commitSelectedEnrichment(itemsToCommit) {
 
 async function runAdminFullEnrichment() {
   await openEnrichmentPreviewModal();
+}
+
+// =========================================================================
+// DATA QUALITY SUITE CLIENT CONTROLLERS (Pillars 2, 3, 4, 5)
+// =========================================================================
+
+// --- 1. DfE GIAS Backfill & Direct URN Ingestion Controller ---
+const GIAS_IMPORT_FIELDS = [
+  { key: 'name', label: 'School Name' },
+  { key: 'urn', label: 'DfE URN' },
+  { key: 'schoolType', label: 'School Type' },
+  { key: 'rawSchoolType', label: 'Raw DfE Type' },
+  { key: 'gender', label: 'Gender Policy' },
+  { key: 'ageRange', label: 'Age Range' },
+  { key: 'postcode', label: 'Postcode' },
+  { key: 'address', label: 'Postal Address', isTextarea: true },
+  { key: 'la', label: 'Local Authority' },
+  { key: 'region', label: 'Region' },
+  { key: 'ofstedRating', label: 'Ofsted Rating' },
+  { key: 'website', label: 'Official Website' },
+  { key: 'phone', label: 'Phone Number' },
+  { key: 'email', label: 'Email Address' },
+  { key: 'admissionsPolicy', label: 'Admissions Policy' },
+  { key: 'active', label: 'Operating Status (Active / Open)', isBool: true },
+  { key: 'official', label: 'Official DfE Record', isBool: true }
+];
+
+let giasActiveLookupData = null;
+
+async function initGiasBackfillTab() {
+  const triggerBtn = document.getElementById('trigger-gias-backfill-btn');
+  if (triggerBtn && !triggerBtn._bound) {
+    triggerBtn._bound = true;
+    triggerBtn.addEventListener('click', runGiasBackfillTrigger);
+  }
+
+  // Bind single URN lookup button & Enter key
+  const lookupBtn = document.getElementById('gias-lookup-urn-btn');
+  const lookupInput = document.getElementById('gias-lookup-urn-input');
+  if (lookupBtn && !lookupBtn._bound) {
+    lookupBtn._bound = true;
+    lookupBtn.addEventListener('click', runGiasUrnLookup);
+  }
+  if (lookupInput && !lookupInput._bound) {
+    lookupInput._bound = true;
+    lookupInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runGiasUrnLookup();
+      }
+    });
+  }
+
+  // Bind modal buttons
+  const closeBtn = document.getElementById('modal-close-gias-import');
+  if (closeBtn && !closeBtn._bound) {
+    closeBtn._bound = true;
+    closeBtn.addEventListener('click', closeGiasUrnImportModal);
+  }
+  const cancelBtn = document.getElementById('modal-cancel-gias-import');
+  if (cancelBtn && !cancelBtn._bound) {
+    cancelBtn._bound = true;
+    cancelBtn.addEventListener('click', closeGiasUrnImportModal);
+  }
+  const confirmBtn = document.getElementById('modal-confirm-gias-import');
+  if (confirmBtn && !confirmBtn._bound) {
+    confirmBtn._bound = true;
+    confirmBtn.addEventListener('click', confirmGiasUrnImport);
+  }
+
+  await loadGiasStatus();
+}
+
+async function loadGiasStatus() {
+  try {
+    const res = await fetch('/api/admin/quality/gias/status', {
+      headers: { ...(currentSessionId ? { 'x-session-id': currentSessionId } : {}) }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (document.getElementById('gias-stat-total')) document.getElementById('gias-stat-total').textContent = data.totalSchools.toLocaleString();
+      if (document.getElementById('gias-stat-ofsted')) document.getElementById('gias-stat-ofsted').textContent = data.missingOfsted.toLocaleString();
+      if (document.getElementById('gias-stat-websites')) document.getElementById('gias-stat-websites').textContent = data.missingWeb.toLocaleString();
+      if (document.getElementById('gias-stat-urns')) document.getElementById('gias-stat-urns').textContent = data.missingUrn.toLocaleString();
+    }
+  } catch (err) {
+    console.error('Failed to load GIAS status:', err);
+  }
+}
+
+async function runGiasUrnLookup() {
+  const input = document.getElementById('gias-lookup-urn-input');
+  const btn = document.getElementById('gias-lookup-urn-btn');
+  const errDiv = document.getElementById('gias-lookup-error');
+  if (!input) return;
+
+  const urn = input.value.trim();
+  if (!urn || !/^\d+$/.test(urn)) {
+    if (errDiv) {
+      errDiv.textContent = 'Please enter a valid numeric 6-digit DfE URN.';
+      errDiv.style.display = 'block';
+    }
+    input.focus();
+    return;
+  }
+
+  if (errDiv) errDiv.style.display = 'none';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Querying DfE GIAS...';
+  }
+
+  try {
+    const res = await fetch(`/api/admin/quality/gias/lookup/${encodeURIComponent(urn)}`, {
+      headers: { ...(currentSessionId ? { 'x-session-id': currentSessionId } : {}) }
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      giasActiveLookupData = data;
+      openGiasUrnImportModal();
+    } else {
+      const errMsg = data.error || (res.status === 404 ? `No establishment found for URN ${urn} on DfE GIAS.` : `Failed to lookup URN (HTTP ${res.status}). If the server was running before recent changes, please restart it.`);
+      if (errDiv) {
+        errDiv.textContent = errMsg;
+        errDiv.style.display = 'block';
+      }
+      showToast(errMsg, 'error');
+    }
+  } catch (err) {
+    console.error('GIAS URN lookup error:', err);
+    if (errDiv) {
+      errDiv.textContent = 'Error connecting to DfE GIAS service: ' + err.message;
+      errDiv.style.display = 'block';
+    }
+    showToast('Failed to lookup URN: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Fetch &amp; Ingest DfE Details';
+    }
+  }
+}
+
+function openGiasUrnImportModal() {
+  if (!giasActiveLookupData) return;
+  const { urn, dfeSchool: dfe, existingSchool: curr, isNew } = giasActiveLookupData;
+
+  const urnBadge = document.getElementById('gias-modal-urn-badge');
+  if (urnBadge) urnBadge.textContent = urn;
+
+  let matchCount = 0;
+  let changedCount = 0;
+  let rowsHtml = '';
+
+  GIAS_IMPORT_FIELDS.forEach(f => {
+    const dfeVal = dfe[f.key] ?? '';
+    const currVal = curr ? (curr[f.key] ?? '') : '';
+    const strDfe = String(dfeVal).trim();
+    const strCurr = String(currVal).trim();
+
+    const isMatch = !isNew && strDfe.toLowerCase() === strCurr.toLowerCase();
+    const isChanged = isNew || !isMatch;
+    const isMissingInCurr = !isNew && !strCurr && !!strDfe;
+
+    if (isMatch) matchCount++;
+    else changedCount++;
+
+    const isCheckedByDefault = isNew || isChanged || isMissingInCurr;
+    const initialVal = isCheckedByDefault ? strDfe : strCurr;
+
+    let inputHtml = '';
+    if (f.isTextarea) {
+      inputHtml = `<textarea id="gias_val_${f.key}" class="form-control" rows="2" style="font-size:0.82rem; width:100%; resize:vertical; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid #cbd5e1;">${escapeHtml(initialVal)}</textarea>`;
+    } else if (f.isBool) {
+      const isTrue = initialVal === 'true' || initialVal === '1' || initialVal === true || initialVal === 1;
+      inputHtml = `
+        <select id="gias_val_${f.key}" class="form-control" style="font-size:0.82rem; width:100%; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid #cbd5e1;">
+          <option value="true" ${isTrue ? 'selected' : ''}>Yes / Active (Official)</option>
+          <option value="false" ${!isTrue ? 'selected' : ''}>No / Inactive</option>
+        </select>
+      `;
+    } else {
+      inputHtml = `<input type="text" id="gias_val_${f.key}" class="form-control" value="${escapeHtml(initialVal)}" style="font-size:0.82rem; width:100%; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid #cbd5e1;">`;
+    }
+
+    rowsHtml += `
+      <tr class="${isChanged ? 'quality-dedup-row-diff' : ''}" id="gias_row_${f.key}">
+        <td style="width: 22%; padding: 0.5rem 0.75rem; vertical-align: middle;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin: 0; font-weight: 600; color: #1e293b;">
+            <input type="checkbox" id="gias_chk_${f.key}" ${isCheckedByDefault ? 'checked' : ''} onchange="onGiasFieldCheckboxToggle('${f.key}')" style="accent-color: #0284c7; width: 1.05rem; height: 1.05rem;">
+            <span>${escapeHtml(f.label)}</span>
+          </label>
+          <div style="margin-left: 1.55rem; margin-top: 0.15rem;">
+            ${isNew
+              ? '<span style="background: #e0f2fe; color: #0369a1; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.68rem; font-weight: 700;">New Attribute</span>'
+              : (isMatch
+                ? '<span class="status-badge-match" style="font-size: 0.68rem;"><i class="fa-solid fa-check"></i> Matches DB</span>'
+                : (isMissingInCurr
+                  ? '<span style="background: #dbeafe; color: #1e40af; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.68rem; font-weight: 700;"><i class="fa-solid fa-plus"></i> Fills Missing</span>'
+                  : '<span class="status-badge-diff" style="font-size: 0.68rem;"><i class="fa-solid fa-code-compare"></i> Differs</span>'))}
+          </div>
+        </td>
+        <td style="width: 24%; padding: 0.5rem 0.75rem; font-size: 0.82rem; color: #475569; background: #f8fafc; border-radius: 4px;">
+          ${isNew ? '<em style="color: #94a3b8;">(New School - No DB record)</em>' : (escapeHtml(strCurr) || '<em style="color: #94a3b8;">(Empty / Blank)</em>')}
+        </td>
+        <td style="width: 27%; padding: 0.5rem 0.75rem; font-size: 0.82rem; color: #0369a1; background: #f0f9ff; font-weight: 500; border-left: 3px solid #0284c7;">
+          ${escapeHtml(strDfe) || '<em style="color: #94a3b8;">(Not provided by DfE)</em>'}
+        </td>
+        <td style="width: 27%; padding: 0.5rem 0.75rem;">
+          ${inputHtml}
+        </td>
+      </tr>
+    `;
+  });
+
+  const contentDiv = document.getElementById('gias-urn-import-modal-content');
+  if (!contentDiv) return;
+
+  const dfeUrl = `https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/${urn}`;
+  const perfUrl = `https://www.compare-school-performance.service.gov.uk/school/${urn}`;
+
+  contentDiv.innerHTML = `
+    <!-- Top Information Banner -->
+    <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <span style="background: ${isNew ? '#dcfce7' : '#e0f2fe'}; color: ${isNew ? '#15803d' : '#0369a1'}; padding: 0.25rem 0.6rem; border-radius: 9999px; font-size: 0.78rem; font-weight: 700;">
+            <i class="fa-solid ${isNew ? 'fa-plus' : 'fa-arrows-rotate'}"></i> ${isNew ? 'New School Ingestion' : 'Updating Existing Database Record'}
+          </span>
+          <span style="font-weight: 700; color: #0c4a6e; font-size: 0.95rem;">
+            ${escapeHtml(dfe.name)}
+          </span>
+        </div>
+        <div style="display: flex; gap: 0.4rem; align-items: center;">
+          <a href="${escapeHtml(dfeUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; color: #0284c7; border-color: #bae6fd; background: #ffffff;">
+            <i class="fa-solid fa-landmark-dome"></i> Open DfE GIAS <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.65rem;"></i>
+          </a>
+          <a href="${escapeHtml(perfUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; color: #059669; border-color: #a7f3d0; background: #ffffff;">
+            <i class="fa-solid fa-chart-line"></i> DfE Performance Table <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.65rem;"></i>
+          </a>
+          ${dfe.website ? `
+            <a href="${escapeHtml(dfe.website)}" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; color: #2563eb; border-color: #bfdbfe; background: #ffffff;">
+              <i class="fa-solid fa-globe"></i> Website <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.65rem;"></i>
+            </a>
+          ` : ''}
+        </div>
+      </div>
+      ${curr ? `
+        <div style="font-size: 0.8rem; color: #475569; margin-top: 0.4rem;">
+          Matches existing database school ID: <code>${curr.id}</code> | Current Name: <strong>${escapeHtml(curr.name)}</strong> | Postcode: <strong>${escapeHtml(curr.postcode || 'N/A')}</strong>
+        </div>
+      ` : ''}
+    </div>
+
+    <!-- Batch Selection Toolbar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+      <div style="font-size: 0.82rem; color: #64748b;">
+        <i class="fa-solid fa-check-double"></i> Check fields to import from DfE, or directly edit the <strong>Final Value to Save</strong>:
+      </div>
+      <div style="display: flex; gap: 0.4rem;">
+        <button type="button" class="btn btn-outline" onclick="setGiasFieldSelection('all')" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; color: #0369a1; border-color: #bae6fd; background: #f0f9ff;">
+          <i class="fa-solid fa-check-square"></i> Select All DfE Fields
+        </button>
+        <button type="button" class="btn btn-outline" onclick="setGiasFieldSelection('diff')" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; color: #b45309; border-color: #fef08a; background: #fefce8;">
+          <i class="fa-solid fa-code-compare"></i> Select Changed / Missing Only
+        </button>
+        <button type="button" class="btn btn-outline" onclick="setGiasFieldSelection('none')" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; color: #475569; border-color: #cbd5e1; background: #ffffff;">
+          <i class="fa-regular fa-square"></i> Deselect All
+        </button>
+      </div>
+    </div>
+
+    <!-- Comparison and Editable Table -->
+    <div style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+      <table class="quality-dedup-table">
+        <thead>
+          <tr>
+            <th style="width: 22%;">Field (Check to Import)</th>
+            <th style="width: 24%; color: #475569;"><i class="fa-solid fa-database"></i> Current Database Value</th>
+            <th style="width: 27%; color: #0284c7;"><i class="fa-solid fa-landmark-dome"></i> Official DfE GIAS Fetched</th>
+            <th style="width: 27%; color: #0f172a; background: #f1f5f9;"><i class="fa-solid fa-pen-to-square"></i> Final Value to Save (Editable)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  document.getElementById('gias-urn-import-modal').style.display = 'flex';
+}
+
+function onGiasFieldCheckboxToggle(fieldKey) {
+  if (!giasActiveLookupData) return;
+  const { dfeSchool: dfe, existingSchool: curr } = giasActiveLookupData;
+  const chk = document.getElementById(`gias_chk_${fieldKey}`);
+  const inputEl = document.getElementById(`gias_val_${fieldKey}`);
+  if (!chk || !inputEl) return;
+
+  const fDef = GIAS_IMPORT_FIELDS.find(f => f.key === fieldKey);
+  const targetVal = chk.checked ? (dfe[fieldKey] ?? '') : (curr ? (curr[fieldKey] ?? '') : '');
+
+  if (fDef && fDef.isBool) {
+    const isTrue = targetVal === true || targetVal === 'true' || targetVal === 1 || targetVal === '1';
+    inputEl.value = isTrue ? 'true' : 'false';
+  } else {
+    inputEl.value = targetVal;
+  }
+}
+
+function setGiasFieldSelection(mode) {
+  if (!giasActiveLookupData) return;
+  const { dfeSchool: dfe, existingSchool: curr, isNew } = giasActiveLookupData;
+
+  GIAS_IMPORT_FIELDS.forEach(f => {
+    const chk = document.getElementById(`gias_chk_${f.key}`);
+    if (!chk) return;
+
+    if (mode === 'all') {
+      chk.checked = true;
+    } else if (mode === 'none') {
+      chk.checked = false;
+    } else if (mode === 'diff') {
+      const dfeVal = String(dfe[f.key] ?? '').trim().toLowerCase();
+      const currVal = String(curr ? (curr[f.key] ?? '') : '').trim().toLowerCase();
+      chk.checked = isNew || dfeVal !== currVal;
+    }
+    onGiasFieldCheckboxToggle(f.key);
+  });
+}
+
+function closeGiasUrnImportModal() {
+  const modal = document.getElementById('gias-urn-import-modal');
+  if (modal) modal.style.display = 'none';
+  giasActiveLookupData = null;
+}
+
+async function confirmGiasUrnImport() {
+  if (!giasActiveLookupData) {
+    showToast('No active GIAS URN lookup context.', 'error');
+    return;
+  }
+
+  const { urn, existingSchool: curr } = giasActiveLookupData;
+  const customData = {};
+
+  GIAS_IMPORT_FIELDS.forEach(f => {
+    const inputEl = document.getElementById(`gias_val_${f.key}`);
+    const chk = document.getElementById(`gias_chk_${f.key}`);
+    if (!inputEl) return;
+
+    if (chk && chk.checked) {
+      if (f.isBool) {
+        customData[f.key] = inputEl.value === 'true';
+      } else {
+        customData[f.key] = inputEl.value.trim();
+      }
+    } else if (curr && curr[f.key] !== undefined) {
+      customData[f.key] = curr[f.key];
+    }
+  });
+
+  const confirmBtn = document.getElementById('modal-confirm-gias-import');
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Saving to Database...';
+  }
+
+  try {
+    const res = await fetch('/api/admin/quality/gias/save', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({
+        urn,
+        schoolId: curr?.id || null,
+        customData
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showToast(data.message || 'School record successfully saved!', 'success');
+      closeGiasUrnImportModal();
+      const input = document.getElementById('gias-lookup-urn-input');
+      if (input) input.value = '';
+      await loadGiasStatus();
+      if (typeof loadSchools === 'function') await loadSchools();
+    } else {
+      showToast(data.error || 'Failed to save GIAS school record.', 'error');
+    }
+  } catch (err) {
+    console.error('Error saving GIAS school record:', err);
+    showToast('Exception saving GIAS school record.', 'error');
+  } finally {
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.innerHTML = '<i class="fa-solid fa-check-double"></i> Save &amp; Apply to Database';
+    }
+  }
+}
+
+async function runGiasBackfillTrigger() {
+  const btn = document.getElementById('trigger-gias-backfill-btn');
+  const log = document.getElementById('gias-output-log');
+  const badge = document.getElementById('gias-activity-badge');
+  if (btn) btn.disabled = true;
+  if (badge) { badge.textContent = 'Running Backfill...'; badge.style.background = '#fef08a'; badge.style.color = '#854d0e'; }
+  if (log) log.innerHTML = '⚡ Initiating DfE GIAS Master Registry ingestion & matching...\n';
+
+  try {
+    const res = await fetch('/api/admin/quality/gias/run', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      let logText = `✓ ${data.message}\n\nEnriched Schools Detail:\n`;
+      (data.updatedSchools || []).forEach(s => {
+        logText += `• ${s.name} (${s.id}) -> Updates: ${Object.keys(s.updates).join(', ')}\n`;
+      });
+      if (log) log.textContent = logText;
+      if (badge) { badge.textContent = 'Completed'; badge.style.background = '#dcfce7'; badge.style.color = '#166534'; }
+      showToast(`DfE GIAS Backfill enriched ${data.updatedCount} schools!`, 'success');
+      await loadGiasStatus();
+      await loadSchools();
+    } else {
+      if (log) log.textContent += '❌ Error executing DfE GIAS Backfill.';
+      if (badge) { badge.textContent = 'Error'; badge.style.background = '#fee2e2'; badge.style.color = '#991b1b'; }
+      showToast('Failed to run GIAS backfill.', 'error');
+    }
+  } catch (err) {
+    console.error('GIAS backfill error:', err);
+    if (log) log.textContent += `\n❌ Request exception: ${err.message}`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// --- 2. Admissions Guardrails Controller ---
+async function initAdmissionsGuardrailsTab() {
+  const triggerBtn = document.getElementById('trigger-guardrails-audit-btn');
+  if (triggerBtn && !triggerBtn._bound) {
+    triggerBtn._bound = true;
+    triggerBtn.addEventListener('click', runAdmissionsGuardrailsTrigger);
+  }
+  await loadGuardrailsStatus();
+}
+
+async function loadGuardrailsStatus() {
+  try {
+    const res = await fetch('/api/admin/quality/guardrails/status', {
+      headers: { ...(currentSessionId ? { 'x-session-id': currentSessionId } : {}) }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (document.getElementById('guardrails-stat-verified')) document.getElementById('guardrails-stat-verified').textContent = (data.totalSchools - data.staleCount).toLocaleString();
+      if (document.getElementById('guardrails-stat-stale')) document.getElementById('guardrails-stat-stale').textContent = data.staleCount.toLocaleString();
+      if (document.getElementById('guardrails-flagged-count')) document.getElementById('guardrails-flagged-count').textContent = `${data.staleCount} Flagged`;
+
+      renderFlaggedGuardrailSchools(data.flaggedSchools || []);
+    }
+  } catch (err) {
+    console.error('Failed to load guardrails status:', err);
+  }
+}
+
+function renderFlaggedGuardrailSchools(flagged) {
+  const container = document.getElementById('guardrails-flagged-table-container');
+  if (!container) return;
+
+  if (flagged.length === 0) {
+    container.innerHTML = '<div style="padding: 1.5rem; text-align: center; color: #166534; background: #f0fdf4;">✓ No stale dates or timeline inversions found. Database is 100% compliant with 2026/2027 cycle.</div>';
+    return;
+  }
+
+  let html = `
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+      <thead>
+        <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0; color: #64748b; font-weight: 600;">
+          <th style="padding: 0.6rem 0.8rem;">School Name</th>
+          <th style="padding: 0.6rem 0.8rem;">Type</th>
+          <th style="padding: 0.6rem 0.8rem;">Region</th>
+          <th style="padding: 0.6rem 0.8rem;">Flag Reason</th>
+          <th style="padding: 0.6rem 0.8rem; text-align: right;">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  flagged.forEach(s => {
+    html += `
+      <tr style="border-bottom: 1px solid #f1f5f9;">
+        <td style="padding: 0.6rem 0.8rem; font-weight: 600; color: #1e293b;">${escapeHtml(s.name)}</td>
+        <td style="padding: 0.6rem 0.8rem; color: #64748b;">${escapeHtml(s.schoolType || 'N/A')}</td>
+        <td style="padding: 0.6rem 0.8rem; color: #64748b;">${escapeHtml(s.region || 'N/A')}</td>
+        <td style="padding: 0.6rem 0.8rem;">
+          <span class="badge" style="background: #fee2e2; color: #991b1b; font-size: 0.75rem;">📅 Stale 2023/24 Dates (Queued for 2026/27)</span>
+        </td>
+        <td style="padding: 0.6rem 0.8rem; text-align: right;">
+          <button class="btn btn-outline" onclick="openSchoolDetail('${s.id}')" style="font-size: 0.75rem; padding: 0.25rem 0.55rem;">
+            Inspect
+          </button>
+        </td>
+      </tr>
+    `;
+  });
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+async function runAdmissionsGuardrailsTrigger() {
+  const btn = document.getElementById('trigger-guardrails-audit-btn');
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/admin/quality/guardrails/run', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(data.message, 'success');
+      await loadGuardrailsStatus();
+      await loadSchools();
+    } else {
+      showToast('Failed to run admissions guardrails audit.', 'error');
+    }
+  } catch (err) {
+    console.error('Guardrails trigger error:', err);
+    showToast('Exception running guardrails audit.', 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// --- 3. Website Health Controller ---
+let websiteHealthLastResults = [];
+let websiteHealthFilterText = '';
+let websiteHealthStatusFilter = 'ALL';
+let currentWebHealthCategorySchools = [];
+let webHealthModalSearchText = '';
+
+async function initWebsiteHealthTab() {
+  const triggerBtn = document.getElementById('trigger-website-health-btn');
+  if (triggerBtn && !triggerBtn._bound) {
+    triggerBtn._bound = true;
+    triggerBtn.addEventListener('click', runWebsiteHealthTrigger);
+  }
+
+  const filterInput = document.getElementById('webhealth-filter-input');
+  if (filterInput && !filterInput._bound) {
+    filterInput._bound = true;
+    filterInput.addEventListener('input', (e) => {
+      websiteHealthFilterText = e.target.value.trim().toLowerCase();
+      renderWebsiteHealthResultsTable();
+    });
+  }
+
+  const statusFilter = document.getElementById('webhealth-status-filter');
+  if (statusFilter && !statusFilter._bound) {
+    statusFilter._bound = true;
+    statusFilter.addEventListener('change', (e) => {
+      websiteHealthStatusFilter = e.target.value;
+      renderWebsiteHealthResultsTable();
+    });
+  }
+
+  // Clickable Stat Cards for Drill-down
+  const statCards = document.querySelectorAll('.webhealth-clickable-card');
+  statCards.forEach(card => {
+    if (!card._bound) {
+      card._bound = true;
+      card.addEventListener('click', () => {
+        const cat = card.getAttribute('data-category') || 'registered';
+        openWebsiteHealthCategoryModal(cat);
+      });
+    }
+  });
+
+  // Modal Close Handlers
+  const modalCloseBtn = document.getElementById('modal-close-website-health-details');
+  const modalCloseBtn2 = document.getElementById('btn-close-website-health-details');
+  const modalOverlay = document.getElementById('modal-website-health-details');
+  if (modalCloseBtn && !modalCloseBtn._bound) {
+    modalCloseBtn._bound = true;
+    modalCloseBtn.addEventListener('click', closeWebsiteHealthCategoryModal);
+  }
+  if (modalCloseBtn2 && !modalCloseBtn2._bound) {
+    modalCloseBtn2._bound = true;
+    modalCloseBtn2.addEventListener('click', closeWebsiteHealthCategoryModal);
+  }
+  if (modalOverlay && !modalOverlay._bound) {
+    modalOverlay._bound = true;
+    modalOverlay.addEventListener('click', (e) => {
+      if (e.target === modalOverlay) closeWebsiteHealthCategoryModal();
+    });
+  }
+
+  // Modal Live Search
+  const modalSearch = document.getElementById('webhealth-modal-search');
+  if (modalSearch && !modalSearch._bound) {
+    modalSearch._bound = true;
+    modalSearch.addEventListener('input', (e) => {
+      webHealthModalSearchText = e.target.value.trim().toLowerCase();
+      renderWebsiteHealthCategoryTable();
+    });
+  }
+
+  await loadWebsiteHealthStatus();
+}
+
+async function loadWebsiteHealthStatus() {
+  try {
+    const res = await fetch('/api/admin/quality/website-health/status', {
+      headers: { ...(currentSessionId ? { 'x-session-id': currentSessionId } : {}) }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (document.getElementById('webhealth-stat-total')) document.getElementById('webhealth-stat-total').textContent = (data.registeredWebsites || 0).toLocaleString();
+      if (document.getElementById('webhealth-stat-unscanned')) document.getElementById('webhealth-stat-unscanned').textContent = (data.unscannedWebsitesCount || 0).toLocaleString();
+      if (document.getElementById('webhealth-stat-https')) document.getElementById('webhealth-stat-https').textContent = (data.httpsWebsitesCount || data.healthyWebsitesCount || 0).toLocaleString();
+      if (document.getElementById('webhealth-stat-dead')) document.getElementById('webhealth-stat-dead').textContent = (data.deadWebsitesCount || 0).toLocaleString();
+    }
+  } catch (err) {
+    console.error('Failed to load website health status:', err);
+  }
+}
+
+let webHealthModalRenderLimit = 60;
+
+async function openWebsiteHealthCategoryModal(category) {
+  const modal = document.getElementById('modal-website-health-details');
+  const titleEl = document.getElementById('webhealth-modal-title');
+  const subEl = document.getElementById('webhealth-modal-subtitle');
+  const countEl = document.getElementById('webhealth-modal-count');
+  const tableBody = document.getElementById('webhealth-modal-table-body');
+  const searchInput = document.getElementById('webhealth-modal-search');
+  const loadMoreBox = document.getElementById('webhealth-modal-load-more');
+
+  if (!modal) return;
+  if (searchInput) searchInput.value = '';
+  webHealthModalSearchText = '';
+  webHealthModalRenderLimit = 60;
+
+  modal.style.display = 'flex';
+  modal.style.zIndex = '20000';
+  modal.classList.add('active');
+
+  if (loadMoreBox) loadMoreBox.style.display = 'none';
+
+  if (tableBody) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align: center; padding: 2.5rem; color: #64748b;">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.4rem; color: #ec4899; margin-bottom: 0.5rem; display: block;"></i>
+          Loading school records for category <strong>${escapeHtml(category)}</strong>...
+        </td>
+      </tr>
+    `;
+  }
+
+  try {
+    const token = currentSessionId || localStorage.getItem('school_db_session_id');
+    const headers = {};
+    if (token) {
+      headers['x-session-id'] = token;
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(`/api/admin/quality/website-health/category-schools?category=${encodeURIComponent(category)}`, {
+      headers
+    });
+    if (res.ok) {
+      const data = await res.json();
+      currentWebHealthCategorySchools = data.schools || [];
+      if (titleEl) titleEl.textContent = data.title || 'Website Health Breakdown';
+      if (subEl) subEl.textContent = `Showing all ${currentWebHealthCategorySchools.length.toLocaleString()} schools matching category "${category}".`;
+      renderWebsiteHealthCategoryTable();
+    } else {
+      if (tableBody) tableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #dc2626; padding: 1.5rem;">Failed to load schools for this category (${res.status} ${res.statusText}).</td></tr>`;
+    }
+  } catch (err) {
+    console.error('Error opening category modal:', err);
+    if (tableBody) tableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #dc2626; padding: 1.5rem;">Error: ${err.message}</td></tr>`;
+  }
+}
+
+function closeWebsiteHealthCategoryModal() {
+  const modal = document.getElementById('modal-website-health-details');
+  if (modal) {
+    modal.style.display = 'none';
+    modal.classList.remove('active');
+  }
+}
+
+function loadMoreWebHealthModalRows() {
+  webHealthModalRenderLimit += 60;
+  renderWebsiteHealthCategoryTable();
+}
+
+window.openWebsiteHealthCategoryModal = openWebsiteHealthCategoryModal;
+window.closeWebsiteHealthCategoryModal = closeWebsiteHealthCategoryModal;
+window.loadMoreWebHealthModalRows = loadMoreWebHealthModalRows;
+
+function renderWebsiteHealthCategoryTable() {
+  const tableBody = document.getElementById('webhealth-modal-table-body');
+  const countEl = document.getElementById('webhealth-modal-count');
+  const loadMoreBox = document.getElementById('webhealth-modal-load-more');
+  if (!tableBody) return;
+
+  const filtered = currentWebHealthCategorySchools.filter(s => {
+    if (!webHealthModalSearchText) return true;
+    const q = webHealthModalSearchText;
+    const matchName = (s.name || '').toLowerCase().includes(q);
+    const matchWeb = (s.website || '').toLowerCase().includes(q);
+    const matchPost = (s.postcode || '').toLowerCase().includes(q);
+    const matchLa = (s.la || '').toLowerCase().includes(q);
+    return matchName || matchWeb || matchPost || matchLa;
+  });
+
+  if (countEl) countEl.textContent = `${filtered.length.toLocaleString()} of ${currentWebHealthCategorySchools.length.toLocaleString()}`;
+
+  if (filtered.length === 0) {
+    if (loadMoreBox) loadMoreBox.style.display = 'none';
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align: center; padding: 1.5rem; color: #64748b; font-style: italic;">
+          No schools found matching "${escapeHtml(webHealthModalSearchText)}".
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  const displaySlice = filtered.slice(0, webHealthModalRenderLimit);
+  if (loadMoreBox) {
+    loadMoreBox.style.display = filtered.length > webHealthModalRenderLimit ? 'block' : 'none';
+  }
+
+  tableBody.innerHTML = displaySlice.map(s => {
+    let statusPill = '';
+    if (s.isDead) {
+      statusPill = `<span class="badge" style="background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px;"><i class="fa-solid fa-link-slash"></i> Dead Domain</span>`;
+    } else if (s.isHttps) {
+      statusPill = `<span class="badge" style="background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px;"><i class="fa-solid fa-shield-check"></i> Standard HTTPS</span>`;
+    } else {
+      statusPill = `<span class="badge" style="background: #fef3c7; color: #92400e; border: 1px solid #fde68a; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px;"><i class="fa-solid fa-triangle-exclamation"></i> Insecure HTTP</span>`;
+    }
+
+    const auditedBadge = s.isAudited
+      ? `<span style="color: #166534; font-size: 0.75rem; font-weight: 600;"><i class="fa-solid fa-check"></i> Audited</span>`
+      : `<span style="color: #854d0e; font-size: 0.75rem; font-weight: 600; background: #fef9c3; padding: 0.1rem 0.4rem; border-radius: 4px;"><i class="fa-solid fa-clock"></i> Unscanned</span>`;
+
+    return `
+      <tr style="border-bottom: 1px solid #f1f5f9;">
+        <td style="padding: 0.6rem 0.75rem;">
+          <strong style="color: #1e293b; cursor: pointer;" onclick="openSchoolModal('${s.id}')" title="Inspect school details">${escapeHtml(s.name)}</strong>
+          <div style="font-size: 0.72rem; color: #64748b;">${escapeHtml(s.la || '')} ${s.postcode ? `&bull; ${escapeHtml(s.postcode)}` : ''}</div>
+        </td>
+        <td style="padding: 0.6rem 0.75rem; max-width: 250px;">
+          <a href="${escapeHtml(s.website)}" target="_blank" rel="noopener noreferrer" style="color: #4f46e5; text-decoration: underline; word-break: break-all;" title="Open website in new tab">
+            ${escapeHtml(s.website)} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.7rem; margin-left: 0.2rem;"></i>
+          </a>
+        </td>
+        <td style="padding: 0.6rem 0.75rem; text-align: center;">
+          ${statusPill}
+        </td>
+        <td style="padding: 0.6rem 0.75rem; text-align: center;">
+          ${auditedBadge}
+        </td>
+        <td style="padding: 0.6rem 0.75rem; text-align: center;">
+          <button type="button" class="btn btn-outline" style="padding: 0.25rem 0.5rem; font-size: 0.74rem;" onclick="openSchoolModal('${s.id}')" title="Edit School Details">
+            <i class="fa-solid fa-pen-to-square"></i> Edit
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderWebsiteHealthResultsTable() {
+  const tableWrapper = document.getElementById('website-health-table-wrapper');
+  const tableBody = document.getElementById('website-health-table-body');
+  const countEl = document.getElementById('webhealth-table-count');
+  if (!tableWrapper || !tableBody) return;
+
+  if (!websiteHealthLastResults || websiteHealthLastResults.length === 0) {
+    tableWrapper.style.display = 'none';
+    return;
+  }
+
+  tableWrapper.style.display = 'block';
+
+  const filtered = websiteHealthLastResults.filter(item => {
+    if (websiteHealthFilterText) {
+      const q = websiteHealthFilterText.toLowerCase();
+      const matchName = (item.schoolName || '').toLowerCase().includes(q);
+      const matchUrl = (item.originalUrl || '').toLowerCase().includes(q) || (item.finalUrl || '').toLowerCase().includes(q);
+      if (!matchName && !matchUrl) return false;
+    }
+
+    if (websiteHealthStatusFilter === 'DEAD') {
+      return !item.isAlive || item.status === 'not_found' || item.status === 'error' || item.status === 'timeout';
+    } else if (websiteHealthStatusFilter === 'UPGRADED') {
+      return item.status === 'redirect' || (item.actionTaken && item.actionTaken.includes('Upgraded'));
+    } else if (websiteHealthStatusFilter === 'HEALTHY') {
+      return item.isAlive && item.status !== 'redirect';
+    }
+    return true;
+  });
+
+  if (countEl) countEl.textContent = `${filtered.length} of ${websiteHealthLastResults.length}`;
+
+  if (filtered.length === 0) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; padding: 1.5rem; color: #64748b; font-style: italic;">
+          No domain scan results match the selected filter.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tableBody.innerHTML = filtered.map(item => {
+    let statusPill = '';
+    if (item.statusCode >= 200 && item.statusCode < 300) {
+      statusPill = `<span class="badge" style="background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px;"><i class="fa-solid fa-circle-check"></i> ${item.statusLabel || item.statusCode}</span>`;
+    } else if (item.statusCode >= 300 && item.statusCode < 400) {
+      statusPill = `<span class="badge" style="background: #e0f2fe; color: #075985; border: 1px solid #bae6fd; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px;"><i class="fa-solid fa-arrow-right-arrow-left"></i> ${item.statusLabel || item.statusCode}</span>`;
+    } else if (item.status === 'not_found' || item.statusCode === 404) {
+      statusPill = `<span class="badge" style="background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px;"><i class="fa-solid fa-circle-xmark"></i> ${item.statusLabel || '404 Broken'}</span>`;
+    } else if (item.status === 'timeout') {
+      statusPill = `<span class="badge" style="background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px;"><i class="fa-solid fa-clock"></i> Timeout</span>`;
+    } else {
+      statusPill = `<span class="badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px;"><i class="fa-solid fa-triangle-exclamation"></i> ${item.statusLabel || 'Error'}</span>`;
+    }
+
+    let actionPill = '';
+    if (item.actionTaken === 'Auto-Upgraded to HTTPS') {
+      actionPill = `<span style="color: #0369a1; font-weight: 700; font-size: 0.75rem; background: #f0f9ff; padding: 0.2rem 0.5rem; border-radius: 6px; border: 1px solid #e0f2fe;"><i class="fa-solid fa-shield-check"></i> Auto-Upgraded to HTTPS</span>`;
+    } else if (item.actionTaken === 'Tagged dead_website') {
+      actionPill = `<span style="color: #b91c1c; font-weight: 700; font-size: 0.75rem; background: #fef2f2; padding: 0.2rem 0.5rem; border-radius: 6px; border: 1px solid #fee2e2;"><i class="fa-solid fa-link-slash"></i> Tagged dead_website</span>`;
+    } else {
+      actionPill = `<span style="color: #166534; font-weight: 600; font-size: 0.75rem; background: #f0fdf4; padding: 0.2rem 0.5rem; border-radius: 6px; border: 1px solid #dcfce7;"><i class="fa-solid fa-check"></i> Verified Clean</span>`;
+    }
+
+    const latencyText = item.responseTimeMs !== undefined ? `${item.responseTimeMs}ms` : '—';
+
+    return `
+      <tr style="border-bottom: 1px solid #f1f5f9;">
+        <td style="padding: 0.6rem 0.75rem;">
+          <strong style="color: #1e293b; cursor: pointer;" onclick="openSchoolModal('${item.schoolId}')" title="Click to view school details">${escapeHtml(item.schoolName)}</strong>
+          ${item.postcode ? `<div style="font-size: 0.72rem; color: #64748b;">${escapeHtml(item.postcode)}</div>` : ''}
+        </td>
+        <td style="padding: 0.6rem 0.75rem; max-width: 250px;">
+          <a href="${escapeHtml(item.finalUrl || item.originalUrl)}" target="_blank" rel="noopener noreferrer" style="color: #4f46e5; text-decoration: underline; word-break: break-all;" title="Open URL in new window">
+            ${escapeHtml(item.finalUrl || item.originalUrl)} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.7rem; margin-left: 0.2rem;"></i>
+          </a>
+          ${item.finalUrl && item.finalUrl !== item.originalUrl ? `<div style="font-size: 0.72rem; color: #94a3b8; text-decoration: line-through;">${escapeHtml(item.originalUrl)}</div>` : ''}
+        </td>
+        <td style="padding: 0.6rem 0.75rem; text-align: center;">
+          ${statusPill}
+        </td>
+        <td style="padding: 0.6rem 0.75rem; text-align: center; font-family: monospace; color: #64748b; font-size: 0.78rem;">
+          ${latencyText}
+        </td>
+        <td style="padding: 0.6rem 0.75rem;">
+          ${actionPill}
+        </td>
+        <td style="padding: 0.6rem 0.75rem; text-align: center;">
+          <button type="button" class="btn btn-outline" style="padding: 0.25rem 0.5rem; font-size: 0.74rem;" onclick="openSchoolModal('${item.schoolId}')" title="Inspect School Details">
+            <i class="fa-solid fa-pen-to-square"></i> Edit
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function runWebsiteHealthTrigger() {
+  const btn = document.getElementById('trigger-website-health-btn');
+  const limitSelect = document.getElementById('website-health-limit');
+  const log = document.getElementById('website-health-output-log');
+  const badge = document.getElementById('webhealth-status-badge');
+  const limit = limitSelect ? parseInt(limitSelect.value, 10) : 50;
+
+  if (btn) btn.disabled = true;
+  if (badge) { badge.textContent = 'Auditing Links...'; badge.style.background = '#fef08a'; badge.style.color = '#854d0e'; }
+  if (log) log.textContent = `⚡ Probing HTTP reachability and following redirects across ${limit} domains...\n`;
+
+  try {
+    const res = await fetch('/api/admin/quality/website-health/run', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ limit })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      let logText = `✓ ${data.message}\n\n`;
+      logText += `• Checked Domains: ${data.checkedCount}\n`;
+      logText += `• Healthy Verified: ${data.healthyCount}\n`;
+      logText += `• Upgraded to HTTPS: ${data.upgradedCount}\n`;
+      logText += `• Dead / Unreachable: ${data.deadCount}\n`;
+      if (log) log.textContent = logText;
+      if (badge) { badge.textContent = 'Audit Complete'; badge.style.background = '#dcfce7'; badge.style.color = '#166534'; }
+      
+      websiteHealthLastResults = data.results || [];
+      renderWebsiteHealthResultsTable();
+
+      showToast(`Website Health Audit verified ${data.checkedCount} domains!`, 'success');
+      await loadWebsiteHealthStatus();
+    } else {
+      showToast('Failed to run website health check.', 'error');
+    }
+  } catch (err) {
+    console.error('Website health error:', err);
+    if (log) log.textContent += `\n❌ Exception: ${err.message}`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// --- 4. Deduplication & Linkage Controller ---
+const QUALITY_DEDUP_MERGE_FIELDS = [
+  { key: 'name', label: 'School Name' },
+  { key: 'urn', label: 'DfE URN' },
+  { key: 'schoolType', label: 'School Type' },
+  { key: 'gender', label: 'Gender' },
+  { key: 'ageRange', label: 'Age Range' },
+  { key: 'postcode', label: 'Postcode' },
+  { key: 'address', label: 'Address' },
+  { key: 'la', label: 'Local Authority' },
+  { key: 'region', label: 'Region' },
+  { key: 'ofstedRating', label: 'Ofsted Rating' },
+  { key: 'entranceExamType', label: 'Entrance Exam Type' },
+  { key: 'second_stage_exam_required', label: 'Stage 2 Exam Required', isBool: true },
+  { key: 'website', label: 'Official Website' },
+  { key: 'phone', label: 'Phone Number' },
+  { key: 'email', label: 'Email' },
+  { key: 'pupilCount', label: 'Pupil Count', isNumber: true },
+  { key: 'gcseProgress8', label: 'Progress 8 Score', isNumber: true },
+  { key: 'gcseAttainment8', label: 'Attainment 8 Score', isNumber: true },
+  { key: 'feesTermly', label: 'Termly Fees (£)' },
+  { key: 'admissionsPolicy', label: 'Admissions Policy' },
+  { key: 'description', label: 'Description', isTextarea: true },
+  { key: 'active', label: 'Operating Status (Active vs Closed)', isBool: true },
+  { key: 'hot', label: 'Hot School Status', isBool: true },
+  { key: 'official', label: 'Official DfE GIAS Record', isBool: true }
+];
+
+let qualityDedupActivePair = null;
+
+async function initDeduplicationTab() {
+  const triggerBtn = document.getElementById('run-quality-dedup-scan-btn');
+  if (triggerBtn && !triggerBtn._bound) {
+    triggerBtn._bound = true;
+    triggerBtn.addEventListener('click', () => runDeduplicationCandidatesScan(true));
+  }
+
+  // Bind modal buttons
+  const closeBtn = document.getElementById('modal-close-quality-dedup-merge');
+  if (closeBtn && !closeBtn._bound) {
+    closeBtn._bound = true;
+    closeBtn.addEventListener('click', closeQualityDedupMergeModal);
+  }
+  const cancelBtn = document.getElementById('modal-cancel-quality-dedup-merge');
+  if (cancelBtn && !cancelBtn._bound) {
+    cancelBtn._bound = true;
+    cancelBtn.addEventListener('click', closeQualityDedupMergeModal);
+  }
+  const confirmBtn = document.getElementById('modal-confirm-quality-dedup-merge');
+  if (confirmBtn && !confirmBtn._bound) {
+    confirmBtn._bound = true;
+    confirmBtn.addEventListener('click', confirmQualityDedupMerge);
+  }
+
+  // Bind toggle reviewed pairs button
+  const toggleReviewedBtn = document.getElementById('toggle-reviewed-pairs-btn');
+  if (toggleReviewedBtn && !toggleReviewedBtn._bound) {
+    toggleReviewedBtn._bound = true;
+    toggleReviewedBtn.addEventListener('click', () => {
+      const container = document.getElementById('reviewed-pairs-container');
+      if (!container) return;
+      const isHidden = container.style.display === 'none';
+      container.style.display = isHidden ? 'block' : 'none';
+      toggleReviewedBtn.innerHTML = isHidden
+        ? '<i class="fa-solid fa-chevron-up"></i> Hide Dismissed Pairs'
+        : '<i class="fa-solid fa-chevron-down"></i> Show Dismissed Pairs';
+      if (isHidden) loadReviewedPairsList();
+    });
+  }
+
+  loadReviewedPairsList();
+  await runDeduplicationCandidatesScan(false);
+}
+
+async function runDeduplicationCandidatesScan(forceScan = false) {
+  const container = document.getElementById('quality-dedup-pairs-container');
+  if (container) {
+    container.innerHTML = forceScan
+      ? '<div style="text-align: center; color: #8b5cf6; padding: 2rem;"><i class="fa-solid fa-circle-notch fa-spin" style="font-size: 1.8rem;"></i><p style="margin-top: 0.5rem;">Running deduplication scan across 6,489 schools...</p></div>'
+      : '<div style="text-align: center; color: #94a3b8; padding: 2rem;"><i class="fa-solid fa-circle-notch fa-spin" style="font-size: 1.8rem;"></i><p style="margin-top: 0.5rem;">Loading persisted duplicate candidates...</p></div>';
+  }
+
+  try {
+    const url = forceScan ? '/api/admin/quality/deduplication/scan' : '/api/admin/quality/deduplication/candidates';
+    const res = await fetch(url, {
+      method: forceScan ? 'POST' : 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      window._qualityDedupPairs = data.candidatePairs || [];
+      renderDeduplicationCandidatePairs(window._qualityDedupPairs, data.correctionsQueueCount || 0, data.enrichmentQueueCount || 0, data.scannedAt, data.hasScanned);
+      if (forceScan) {
+        showToast(data.message || 'Deduplication scan completed.', 'success');
+      }
+    } else {
+      if (container) container.innerHTML = '<div style="color: #ef4444; padding: 1.5rem;">Failed to fetch duplicate candidates.</div>';
+    }
+  } catch (err) {
+    console.error('Failed to scan duplicate candidates:', err);
+  }
+}
+
+function renderDeduplicationCandidatePairs(pairs, correctionsCount = 0, enrichmentCount = 0, scannedAt = null, hasScanned = true) {
+  const container = document.getElementById('quality-dedup-pairs-container');
+  if (!container) return;
+
+  let queueSummaryHtml = '';
+  if (correctionsCount > 0 || enrichmentCount > 0 || scannedAt) {
+    queueSummaryHtml = `
+      <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center;">
+        ${scannedAt ? `<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.45rem 0.75rem; font-size: 0.78rem; color: #475569;"><i class="fa-solid fa-clock-rotate-left"></i> Last Scanned: <strong>${new Date(scannedAt).toLocaleString()}</strong></div>` : ''}
+        ${correctionsCount > 0 ? `<div style="background: #fef2f2; border: 1px solid #fee2e2; border-radius: 8px; padding: 0.45rem 0.75rem; font-size: 0.78rem; color: #991b1b; display: flex; align-items: center; gap: 0.4rem;"><i class="fa-solid fa-triangle-exclamation"></i> <span><strong>${correctionsCount}</strong> conflicting matches in <strong>Corrections Queue</strong></span></div>` : ''}
+        ${enrichmentCount > 0 ? `<div style="background: #eff6ff; border: 1px solid #dbeafe; border-radius: 8px; padding: 0.45rem 0.75rem; font-size: 0.78rem; color: #1e40af; display: flex; align-items: center; gap: 0.4rem;"><i class="fa-solid fa-cloud-arrow-down"></i> <span><strong>${enrichmentCount}</strong> sparse records in <strong>Enrichment Queue</strong></span></div>` : ''}
+      </div>
+    `;
+  }
+
+  if (hasScanned === false && pairs.length === 0) {
+    container.innerHTML = `
+      <div style="padding: 2.5rem 1rem; text-align: center; color: #6d28d9; background: #faf5ff; border-radius: 10px; border: 1px solid #e9d5ff;">
+        <i class="fa-solid fa-clone" style="font-size: 2.2rem; margin-bottom: 0.6rem; color: #7c3aed;"></i>
+        <div style="font-weight: 700; font-size: 1rem; color: #581c87;">Duplicate Detection Scan Not Run Yet</div>
+        <div style="font-size: 0.85rem; color: #7e22ce; margin-top: 0.35rem; max-width: 520px; margin-left: auto; margin-right: auto;">
+          Click the scan button to cross-check all 6,489 schools for duplicate profile pairs using multi-attribute overlap.
+        </div>
+        <button type="button" class="btn btn-primary" onclick="runDeduplicationCandidatesScan(true)" style="background: #7c3aed; border-color: #7c3aed; margin-top: 0.6rem; font-size: 0.85rem; padding: 0.45rem 1.1rem;">
+          <i class="fa-solid fa-play"></i> Run Deduplication Scan Now
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  if (pairs.length === 0) {
+    container.innerHTML = `
+      ${queueSummaryHtml}
+      <div style="padding: 2rem; text-align: center; color: #166534; background: #f0fdf4; border-radius: 8px; border: 1px solid #dcfce7;">
+        <i class="fa-solid fa-circle-check" style="font-size: 1.5rem; margin-bottom: 0.5rem;"></i>
+        <div style="font-weight: 600;">No genuine duplicate profiles found.</div>
+        <div style="font-size: 0.85rem; color: #15803d; margin-top: 0.25rem;">All active school records meet multi-attribute uniqueness standards. Partial matches have been safely routed to corrections and enrichment queues.</div>
+      </div>
+    `;
+    return;
+  }
+
+  let html = `
+    ${queueSummaryHtml}
+    <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.75rem;">
+      Found <strong>${pairs.length}</strong> genuine duplicate candidate pairs with significant multi-attribute overlap:
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+  `;
+
+  pairs.forEach((p, idx) => {
+    const score = p.compositeScore || Math.round((p.similarity || 0.9) * 100);
+    html += `
+      <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-weight: 700; color: #8b5cf6; font-size: 0.85rem;">
+              <i class="fa-solid fa-clone"></i> Pair #${idx + 1}
+            </span>
+            <span style="background: #ede9fe; color: #6d28d9; padding: 0.2rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700;">
+              ${score}% Match Overlap
+            </span>
+          </div>
+          <div style="display: flex; gap: 0.4rem; align-items: center;">
+            <button class="btn btn-outline" onclick="markPairAsReviewed('${p.schoolA.id}', '${p.schoolB.id}')" style="font-size: 0.78rem; padding: 0.3rem 0.65rem; color: #059669; border-color: #a7f3d0;" title="Mark this pair as reviewed distinct schools so it will not be detected in future scans">
+              <i class="fa-solid fa-shield-check"></i> Not a Duplicate
+            </button>
+            <button class="btn btn-primary" onclick="openQualityDedupMergeModal(${idx})" style="background: #8b5cf6; border-color: #8b5cf6; font-size: 0.78rem; padding: 0.3rem 0.7rem;">
+              <i class="fa-solid fa-code-merge"></i> Review &amp; Merge
+            </button>
+          </div>
+        </div>
+        <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 0.6rem;">${escapeHtml(p.reason)}</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.75rem; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #2563eb; margin-bottom: 0.25rem;">PRIMARY (A)</div>
+              <div style="font-weight: 600; color: #1e293b;">${escapeHtml(p.schoolA.name)}</div>
+              <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.25rem;">
+                Postcode: <strong>${escapeHtml(p.schoolA.postcode || 'N/A')}</strong> | URN: <strong>${escapeHtml(p.schoolA.urn || 'N/A')}</strong> | Gender: <strong>${escapeHtml(p.schoolA.gender || 'N/A')}</strong>
+              </div>
+            </div>
+            ${renderQuickAccessInvestigationLinks(p.schoolA)}
+          </div>
+          <div style="background: #faf5ff; border: 1px solid #f3e8ff; border-radius: 8px; padding: 0.75rem; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+              <div style="font-size: 0.75rem; font-weight: 700; color: #8b5cf6; margin-bottom: 0.25rem;">CANDIDATE (B)</div>
+              <div style="font-weight: 600; color: #1e293b;">${escapeHtml(p.schoolB.name)}</div>
+              <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.25rem;">
+                Postcode: <strong>${escapeHtml(p.schoolB.postcode || 'N/A')}</strong> | URN: <strong>${escapeHtml(p.schoolB.urn || 'N/A')}</strong> | Gender: <strong>${escapeHtml(p.schoolB.gender || 'N/A')}</strong>
+              </div>
+            </div>
+            ${renderQuickAccessInvestigationLinks(p.schoolB)}
+          </div>
+        </div>
+      </div>
+    `;
+  });
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function openQualityDedupMergeModal(pairIdx) {
+  const pair = (window._qualityDedupPairs || [])[pairIdx];
+  if (!pair) {
+    showToast('Duplicate pair data not found.', 'error');
+    return;
+  }
+
+  const { schoolA: recA, schoolB: recB } = pair;
+  qualityDedupActivePair = { pairIdx, schoolA: recA, schoolB: recB };
+
+  const score = pair.compositeScore || Math.round((pair.similarity || 0.9) * 100);
+
+  let matchCount = 0;
+  let diffCount = 0;
+  let enrichedCount = 0;
+
+  let rowsHtml = '';
+  QUALITY_DEDUP_MERGE_FIELDS.forEach(f => {
+    const rawA = recA[f.key] ?? '';
+    const rawB = recB[f.key] ?? '';
+    const strA = String(rawA).trim();
+    const strB = String(rawB).trim();
+
+    const isMatch = strA.toLowerCase() === strB.toLowerCase();
+    const isEnriched = !strA && !!strB;
+
+    if (isMatch) matchCount++;
+    else diffCount++;
+    if (isEnriched) enrichedCount++;
+
+    const defaultSource = (!strA && !!strB) ? 'b' : 'a';
+    const defaultVal = defaultSource === 'b' ? rawB : rawA;
+
+    const cellClassA = isMatch ? 'quality-dedup-cell-match' : (!strA ? '' : 'quality-dedup-cell-diff');
+    const cellClassB = isMatch ? 'quality-dedup-cell-match' : (isEnriched ? 'quality-dedup-cell-enriched' : 'quality-dedup-cell-diff');
+
+    let inputHtml = '';
+    if (f.isTextarea) {
+      inputHtml = `<textarea id="qdedup_val_${f.key}" class="form-control" rows="2" style="font-size:0.82rem; width:100%; resize:vertical; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid #cbd5e1;">${escapeHtml(String(defaultVal || ''))}</textarea>`;
+    } else if (f.isBool) {
+      const isChecked = defaultVal === true || defaultVal === 1 || defaultVal === '1' || defaultVal === 'true';
+      inputHtml = `
+        <select id="qdedup_val_${f.key}" class="form-control" style="font-size:0.82rem; width:100%; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid #cbd5e1;">
+          <option value="true" ${isChecked ? 'selected' : ''}>Yes / Active</option>
+          <option value="false" ${!isChecked ? 'selected' : ''}>No / Standard</option>
+        </select>
+      `;
+    } else {
+      inputHtml = `<input type="${f.isNumber ? 'number' : 'text'}" ${f.isNumber ? 'step="any"' : ''} id="qdedup_val_${f.key}" class="form-control" value="${escapeHtml(String(defaultVal ?? ''))}" style="font-size:0.82rem; width:100%; padding:0.35rem 0.5rem; border-radius:6px; border:1px solid #cbd5e1;">`;
+    }
+
+    rowsHtml += `
+      <tr class="${!isMatch ? 'quality-dedup-row-diff' : ''}" id="qdedup_row_${f.key}">
+        <td style="font-weight:600; width:18%; color:#1e293b;">
+          <div>${escapeHtml(f.label)}</div>
+          <div style="margin-top:0.2rem;">
+            ${isMatch
+              ? '<span class="status-badge-match" style="font-size:0.7rem;"><i class="fa-solid fa-check"></i> Match</span>'
+              : (isEnriched
+                ? '<span style="background:#dbeafe; color:#1e40af; padding:0.15rem 0.4rem; border-radius:4px; font-size:0.7rem; font-weight:700;"><i class="fa-solid fa-plus"></i> Enriched from B</span>'
+                : '<span class="status-badge-diff" style="font-size:0.7rem;"><i class="fa-solid fa-code-compare"></i> Conflict</span>')}
+          </div>
+        </td>
+        <td class="${cellClassA}" style="width:27%; border-radius:6px; padding:0.5rem;">
+          <label style="display:flex; align-items:flex-start; gap:0.5rem; cursor:pointer; font-size:0.82rem; margin:0;">
+            <input type="radio" name="qdedup_radio_${f.key}" value="a" ${defaultSource === 'a' ? 'checked' : ''} onchange="onQualityDedupRadioChange('${f.key}', 'a')" style="accent-color:#2563eb; margin-top:0.2rem;">
+            <span style="word-break:break-word; color:#334155;">${escapeHtml(strA) || '<em style="color:#94a3b8;">(Empty)</em>'}</span>
+          </label>
+        </td>
+        <td class="${cellClassB}" style="width:27%; border-radius:6px; padding:0.5rem;">
+          <label style="display:flex; align-items:flex-start; gap:0.5rem; cursor:pointer; font-size:0.82rem; margin:0;">
+            <input type="radio" name="qdedup_radio_${f.key}" value="b" ${defaultSource === 'b' ? 'checked' : ''} onchange="onQualityDedupRadioChange('${f.key}', 'b')" style="accent-color:#8b5cf6; margin-top:0.2rem;">
+            <span style="word-break:break-word; color:#334155;">${escapeHtml(strB) || '<em style="color:#94a3b8;">(Empty)</em>'}</span>
+          </label>
+        </td>
+        <td style="width:28%; padding:0.5rem;">
+          ${inputHtml}
+        </td>
+      </tr>
+    `;
+  });
+
+  const contentDiv = document.getElementById('quality-dedup-merge-modal-content');
+  if (!contentDiv) return;
+
+  contentDiv.innerHTML = `
+    <!-- Comparison Header Banner -->
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <span style="background: #ede9fe; color: #6d28d9; padding: 0.25rem 0.6rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 700;">
+            <i class="fa-solid fa-code-merge"></i> ${score}% Match Overlap
+          </span>
+          <span style="font-size: 0.82rem; color: #475569;">
+            ${escapeHtml(pair.reason || 'Candidate duplicate pair identified by multi-attribute link analyzer.')}
+          </span>
+        </div>
+        <div style="display: flex; gap: 0.4rem; font-size: 0.75rem;">
+          <span style="background: #dcfce7; color: #15803d; padding: 0.2rem 0.5rem; border-radius: 6px; font-weight: 600;">
+            ${matchCount} Matching
+          </span>
+          <span style="background: #fef3c7; color: #b45309; padding: 0.2rem 0.5rem; border-radius: 6px; font-weight: 600;">
+            ${diffCount} Conflicting
+          </span>
+          ${enrichedCount > 0 ? `<span style="background: #dbeafe; color: #1e40af; padding: 0.2rem 0.5rem; border-radius: 6px; font-weight: 600;">${enrichedCount} Enriched</span>` : ''}
+        </div>
+      </div>
+
+      <!-- Side-by-Side School Headers with Links -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 0.6rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
+            <span style="font-weight: 700; color: #1d4ed8; font-size: 0.8rem;"><i class="fa-solid fa-a"></i> PRIMARY RECORD (A)</span>
+            <code style="background: #ffffff; color: #1e40af; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.72rem;">ID: ${recA.id}</code>
+          </div>
+          <div style="font-weight: 600; color: #1e293b; font-size: 0.88rem;">${escapeHtml(recA.name)}</div>
+          ${renderQuickAccessInvestigationLinks(recA)}
+        </div>
+        <div style="background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 6px; padding: 0.6rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.2rem;">
+            <span style="font-weight: 700; color: #7e22ce; font-size: 0.8rem;"><i class="fa-solid fa-b"></i> CANDIDATE RECORD (B)</span>
+            <code style="background: #ffffff; color: #6b21a8; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.72rem;">ID: ${recB.id}</code>
+          </div>
+          <div style="font-weight: 600; color: #1e293b; font-size: 0.88rem;">${escapeHtml(recB.name)}</div>
+          ${renderQuickAccessInvestigationLinks(recB)}
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Batch Selection Toolbar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+      <div style="font-size: 0.82rem; color: #64748b;">
+        <i class="fa-solid fa-hand-pointer"></i> Select radio options to pick field values, or directly type/edit the <strong>Final Merged Value</strong>:
+      </div>
+      <div style="display: flex; gap: 0.4rem;">
+        <button type="button" class="btn btn-outline" onclick="setQualityDedupAll('a')" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff;">
+          <i class="fa-solid fa-a"></i> Use All Primary (A)
+        </button>
+        <button type="button" class="btn btn-outline" onclick="setQualityDedupAll('b')" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; color: #7e22ce; border-color: #e9d5ff; background: #faf5ff;">
+          <i class="fa-solid fa-b"></i> Use All Candidate (B)
+        </button>
+        <button type="button" class="btn btn-outline" onclick="setQualityDedupSmartFill()" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; color: #059669; border-color: #a7f3d0; background: #ecfdf5;">
+          <i class="fa-solid fa-wand-magic-sparkles"></i> Smart Fill (Keep Non-Empty)
+        </button>
+      </div>
+    </div>
+
+    <!-- Comparison & Interactive Edit Table -->
+    <div style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+      <table class="quality-dedup-table">
+        <thead>
+          <tr>
+            <th style="width: 18%;">Field</th>
+            <th style="width: 27%; color: #1d4ed8;"><i class="fa-solid fa-a"></i> Source A (Primary)</th>
+            <th style="width: 27%; color: #7e22ce;"><i class="fa-solid fa-b"></i> Source B (Candidate)</th>
+            <th style="width: 28%; color: #0f172a; background: #f1f5f9;"><i class="fa-solid fa-pen-to-square"></i> Final Merged Value (Editable)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  document.getElementById('quality-dedup-merge-modal').style.display = 'flex';
+}
+
+function onQualityDedupRadioChange(fieldKey, source) {
+  if (!qualityDedupActivePair) return;
+  const { schoolA, schoolB } = qualityDedupActivePair;
+  const targetSchool = source === 'b' ? schoolB : schoolA;
+  const inputEl = document.getElementById(`qdedup_val_${fieldKey}`);
+  if (!inputEl) return;
+
+  const fDef = QUALITY_DEDUP_MERGE_FIELDS.find(f => f.key === fieldKey);
+  const rawVal = targetSchool[fieldKey] ?? '';
+
+  if (fDef && fDef.isBool) {
+    const isTrue = rawVal === true || rawVal === 1 || rawVal === '1' || rawVal === 'true';
+    inputEl.value = isTrue ? 'true' : 'false';
+  } else {
+    inputEl.value = rawVal;
+  }
+}
+
+function setQualityDedupAll(source) {
+  if (!qualityDedupActivePair) return;
+  QUALITY_DEDUP_MERGE_FIELDS.forEach(f => {
+    const radio = document.querySelector(`input[name="qdedup_radio_${f.key}"][value="${source}"]`);
+    if (radio) {
+      radio.checked = true;
+      onQualityDedupRadioChange(f.key, source);
+    }
+  });
+}
+
+function setQualityDedupSmartFill() {
+  if (!qualityDedupActivePair) return;
+  const { schoolA, schoolB } = qualityDedupActivePair;
+
+  QUALITY_DEDUP_MERGE_FIELDS.forEach(f => {
+    const rawA = schoolA[f.key] ?? '';
+    const rawB = schoolB[f.key] ?? '';
+    const strA = String(rawA).trim();
+    const strB = String(rawB).trim();
+
+    const choice = (!strA && !!strB) ? 'b' : 'a';
+    const radio = document.querySelector(`input[name="qdedup_radio_${f.key}"][value="${choice}"]`);
+    if (radio) {
+      radio.checked = true;
+      onQualityDedupRadioChange(f.key, choice);
+    }
+  });
+}
+
+function closeQualityDedupMergeModal() {
+  const modal = document.getElementById('quality-dedup-merge-modal');
+  if (modal) modal.style.display = 'none';
+  qualityDedupActivePair = null;
+}
+
+async function confirmQualityDedupMerge() {
+  if (!qualityDedupActivePair) {
+    showToast('No active deduplication pair selected.', 'error');
+    return;
+  }
+
+  const { schoolA, schoolB } = qualityDedupActivePair;
+  const mergedRecord = {};
+
+  QUALITY_DEDUP_MERGE_FIELDS.forEach(f => {
+    const inputEl = document.getElementById(`qdedup_val_${f.key}`);
+    if (!inputEl) return;
+
+    if (f.isBool) {
+      mergedRecord[f.key] = inputEl.value === 'true';
+    } else if (f.isNumber) {
+      const valStr = inputEl.value.trim();
+      mergedRecord[f.key] = valStr === '' ? null : (isNaN(Number(valStr)) ? valStr : Number(valStr));
+    } else {
+      mergedRecord[f.key] = inputEl.value;
+    }
+  });
+
+  await executeAtomicMerge(schoolA.id, schoolB.id, mergedRecord);
+}
+
+async function executeAtomicMerge(primaryId, secondaryId, mergedRecord = null) {
+  if (!mergedRecord) {
+    if (!confirm(`Are you sure you want to merge these two records? Primary will absorb missing details and secondary will be safely removed.`)) return;
+  }
+
+  const confirmBtn = document.getElementById('modal-confirm-quality-dedup-merge');
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Merging Records...';
+  }
+
+  try {
+    const res = await fetch('/api/admin/quality/deduplication/merge', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ primaryId, secondaryId, mergedRecord })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(data.message || 'Records merged successfully!', 'success');
+      closeQualityDedupMergeModal();
+      await runDeduplicationCandidatesScan();
+      if (typeof loadSchools === 'function') await loadSchools();
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = '<i class="fa-solid fa-check-double"></i> Confirm &amp; Merge Records';
+      }
+    }
+  } catch (err) {
+    console.error('Merge error:', err);
+    showToast('Exception executing merge operation.', 'error');
+  } finally {
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.innerHTML = '<i class="fa-solid fa-check-double"></i> Confirm &amp; Merge Records';
+    }
+  }
+}
+
+async function markPairAsReviewed(schoolAId, schoolBId, schoolAName = '', schoolBName = '') {
+  // Resolve names from active candidate/conflict caches if not passed
+  let nameA = schoolAName;
+  let nameB = schoolBName;
+  if (!nameA || !nameB) {
+    if (Array.isArray(window._qualityDedupPairs)) {
+      const pair = window._qualityDedupPairs.find(p =>
+        (p.schoolA?.id === schoolAId && p.schoolB?.id === schoolBId) ||
+        (p.schoolA?.id === schoolBId && p.schoolB?.id === schoolAId)
+      );
+      if (pair) {
+        nameA = nameA || pair.schoolA?.name;
+        nameB = nameB || pair.schoolB?.name;
+      }
+    }
+    if ((!nameA || !nameB) && Array.isArray(window._qualityCorrectionsQueue)) {
+      const pair = window._qualityCorrectionsQueue.find(p =>
+        (p.schoolA?.id === schoolAId && p.schoolB?.id === schoolBId) ||
+        (p.schoolA?.id === schoolBId && p.schoolB?.id === schoolAId)
+      );
+      if (pair) {
+        nameA = nameA || pair.schoolA?.name;
+        nameB = nameB || pair.schoolB?.name;
+      }
+    }
+  }
+
+  const displayNameA = nameA || schoolAId;
+  const displayNameB = nameB || schoolBId;
+
+  if (!confirm(`Mark "${displayNameA}" and "${displayNameB}" as reviewed distinct schools?\n\nThis will remove them from the duplicate/conflict queue and permanently prevent future candidate alerts.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/admin/quality/deduplication/mark-reviewed', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({
+        schoolAId,
+        schoolBId,
+        schoolAName: nameA,
+        schoolBName: nameB,
+        decision: 'not_duplicate',
+        reason: 'Confirmed distinct schools by admin review.'
+      })
+    });
+
+    let data = null;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      const text = await res.text().catch(() => '');
+      if (res.status === 404) {
+        throw new Error('API route not found (404). Please restart the server ("npm start" in your terminal) to load the new route.');
+      } else {
+        throw new Error(`Server returned HTTP ${res.status}: ${text.slice(0, 100)}`);
+      }
+    }
+
+    if (res.ok && data && data.success) {
+      showToast(data.message || 'Marked pair as reviewed.', 'success');
+      try {
+        if (typeof runDeduplicationCandidatesScan === 'function') await runDeduplicationCandidatesScan(false);
+      } catch (e) { console.warn(e); }
+      try {
+        if (typeof loadSystemCorrectionsQueue === 'function') await loadSystemCorrectionsQueue(false);
+      } catch (e) { console.warn(e); }
+      try {
+        await loadReviewedPairsList();
+      } catch (e) { console.warn(e); }
+    } else {
+      showToast((data && data.error) ? data.error : 'Failed to mark pair as reviewed.', 'error');
+    }
+  } catch (err) {
+    console.error('Error marking pair as reviewed:', err);
+    showToast(err.message || 'Exception marking pair as reviewed.', 'error');
+  }
+}
+
+async function loadReviewedPairsList() {
+  const container = document.getElementById('reviewed-pairs-container');
+  const countPill = document.getElementById('reviewed-pairs-count-pill');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/admin/quality/deduplication/reviewed-pairs', {
+      headers: { ...(currentSessionId ? { 'x-session-id': currentSessionId } : {}) }
+    });
+
+    if (!res.ok) {
+      if (countPill) countPill.textContent = '0 pairs';
+      return;
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      if (countPill) countPill.textContent = '0 pairs';
+      return;
+    }
+
+    const data = await res.json();
+    const pairs = data.reviewedPairs || [];
+
+    if (countPill) {
+      countPill.textContent = `${pairs.length} ${pairs.length === 1 ? 'pair' : 'pairs'}`;
+    }
+
+    if (pairs.length === 0) {
+      container.innerHTML = `
+        <div style="padding: 1.5rem; text-align: center; color: #64748b; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.85rem;">
+          <i class="fa-solid fa-clipboard-check" style="font-size: 1.3rem; color: #94a3b8; display: block; margin-bottom: 0.35rem;"></i>
+          No candidate pairs have been marked as reviewed yet.
+        </div>
+      `;
+      return;
+    }
+
+    let html = `
+      <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+    `;
+
+    pairs.forEach((p, idx) => {
+      html += `
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.25rem;">
+              <span style="font-weight: 700; color: #0f172a; font-size: 0.88rem;">
+                ${escapeHtml(p.school_a_name || p.school_a_id)} <span style="color:#94a3b8; font-weight:400;">vs</span> ${escapeHtml(p.school_b_name || p.school_b_id)}
+              </span>
+              <span style="font-size: 0.7rem; font-weight: 700; background: #dcfce7; color: #166534; padding: 0.12rem 0.45rem; border-radius: 4px;">
+                <i class="fa-solid fa-check"></i> Not Duplicate
+              </span>
+            </div>
+            <div style="font-size: 0.75rem; color: #64748b;">
+              Reviewed by <strong>${escapeHtml(p.reviewed_by || 'admin')}</strong> on ${new Date(p.reviewed_at).toLocaleDateString()} • Reason: <em>${escapeHtml(p.reason || 'Distinct schools')}</em>
+            </div>
+          </div>
+          <button type="button" class="btn btn-outline" onclick="unmarkReviewedPair('${p.pair_id}')" style="font-size: 0.76rem; padding: 0.3rem 0.65rem; color: #dc2626; border-color: #fca5a5;">
+            <i class="fa-solid fa-rotate-left"></i> Unmark / Re-evaluate
+          </button>
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+  } catch (err) {
+    console.error('Error loading reviewed pairs:', err);
+  }
+}
+
+async function unmarkReviewedPair(pairId) {
+  if (!confirm('Remove this pair from the reviewed list? It will be re-evaluated on the next deduplication scan.')) return;
+
+  try {
+    const res = await fetch('/api/admin/quality/deduplication/unmark-reviewed', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(currentSessionId ? { 'x-session-id': currentSessionId } : {})
+      },
+      body: JSON.stringify({ pairId })
+    });
+
+    let data = null;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Server returned HTTP ${res.status}: ${text.slice(0, 100)}`);
+    }
+
+    if (res.ok && data && data.success) {
+      showToast(data.message || 'Pair un-marked.', 'success');
+      await loadReviewedPairsList();
+    } else {
+      showToast((data && data.error) ? data.error : 'Failed to unmark pair.', 'error');
+    }
+  } catch (err) {
+    console.error('Error unmarking pair:', err);
+    showToast(err.message || 'Exception unmarking pair.', 'error');
+  }
 }

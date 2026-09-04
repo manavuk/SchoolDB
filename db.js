@@ -23,6 +23,8 @@ try {
 
 const PROD_DB_NAME = 'schooldb.sqlite';
 const TEST_DB_NAME = 'schooldb_test.sqlite';
+const AUDIT_DB_NAME = 'auditdb.sqlite';
+const PARENT_DB_NAME = 'parentdb.sqlite';
 const INSTANCE_CONFIG_FILE = 'active_instance.json';
 
 function getLocalDataDir() {
@@ -105,6 +107,32 @@ function resolveDatabasePath(instanceType = null) {
   return path.join(dataDir, dbFileName);
 }
 
+function resolveDomainDbPath(dbFileName) {
+  const isServerless = Boolean(
+    process.env.LAMBDA_TASK_ROOT ||
+    process.env.VERCEL ||
+    process.env.NETLIFY ||
+    process.env.AWS_EXECUTION_ENV ||
+    __dirname.startsWith('/var/task')
+  );
+
+  if (isServerless) {
+    const tmpDbPath = path.join('/tmp', dbFileName);
+    const seedDbPath = path.join(__dirname, 'data', dbFileName);
+    try {
+      if (!fs.existsSync(tmpDbPath) && fs.existsSync(seedDbPath)) {
+        fs.copyFileSync(seedDbPath, tmpDbPath);
+      }
+    } catch (err) {
+      console.warn(`Warning: Could not copy ${dbFileName} to /tmp:`, err.message);
+    }
+    return tmpDbPath;
+  }
+
+  const dataDir = getLocalDataDir();
+  return path.join(dataDir, dbFileName);
+}
+
 let db = null;
 
 function getDb() {
@@ -128,6 +156,18 @@ function getDb() {
     } catch (e) {
       try { db.exec('PRAGMA journal_mode = DELETE;'); } catch (err) {}
     }
+
+    // Attach domain-partitioned databases (auditdb & parentdb)
+    const auditPath = resolveDomainDbPath(AUDIT_DB_NAME);
+    const parentPath = resolveDomainDbPath(PARENT_DB_NAME);
+    try {
+      db.exec(`ATTACH DATABASE '${auditPath}' AS audit;`);
+      db.exec('PRAGMA audit.journal_mode = WAL;');
+    } catch (e) {}
+    try {
+      db.exec(`ATTACH DATABASE '${parentPath}' AS parent;`);
+      db.exec('PRAGMA parent.journal_mode = WAL;');
+    } catch (e) {}
 
     initTables();
   }
@@ -298,15 +338,20 @@ function initTables() {
       national_rank_england INTEGER,
       gcse_rank_england INTEGER,
       a_level_rank_england INTEGER,
+      fees_termly_gbp INTEGER,
+      fees_annual_gbp INTEGER,
+      sixthFormGenderPolicy TEXT,
       verification_status TEXT,
       verification_tags TEXT,
       verification_report TEXT,
       verified_at TEXT,
-      confidence_score INTEGER DEFAULT 70
+      confidence_score INTEGER DEFAULT 70,
+      active INTEGER DEFAULT 1
     );
   `);
 
   // Migration safeguard: add columns if missing
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN active INTEGER DEFAULT 1;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN rawSchoolType TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN verification_status TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN verification_tags TEXT;`); } catch (e) {}
@@ -314,6 +359,9 @@ function initTables() {
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN verified_at TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN confidence_score INTEGER;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN feesTermly TEXT;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN fees_termly_gbp INTEGER;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN fees_annual_gbp INTEGER;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN sixthFormGenderPolicy TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN registrationFee TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN sourceUrl TEXT;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN second_stage_exam_required TEXT;`); } catch (e) {}
@@ -322,6 +370,7 @@ function initTables() {
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN national_rank_england INTEGER;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN gcse_rank_england INTEGER;`); } catch (e) {}
   try { sqlite.exec(`ALTER TABLE schools ADD COLUMN a_level_rank_england INTEGER;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE schools ADD COLUMN completeness_score INTEGER DEFAULT 0;`); } catch (e) {}
 
   // High-performance single and composite indexes
   sqlite.exec(`
@@ -332,12 +381,32 @@ function initTables() {
     CREATE INDEX IF NOT EXISTS idx_schools_schoolType ON schools(schoolType);
     CREATE INDEX IF NOT EXISTS idx_schools_gender ON schools(gender);
     CREATE INDEX IF NOT EXISTS idx_schools_ofstedRating ON schools(ofstedRating);
+    CREATE INDEX IF NOT EXISTS idx_schools_fees_termly ON schools(fees_termly_gbp);
     CREATE INDEX IF NOT EXISTS idx_schools_verification_status ON schools(verification_status);
     CREATE INDEX IF NOT EXISTS idx_schools_verified_at ON schools(verified_at);
     CREATE INDEX IF NOT EXISTS idx_schools_national_rank ON schools(national_rank_england);
+    CREATE INDEX IF NOT EXISTS idx_schools_completeness ON schools(completeness_score);
     CREATE INDEX IF NOT EXISTS idx_schools_type_region ON schools(schoolType, region);
     CREATE INDEX IF NOT EXISTS idx_schools_status_region ON schools(verification_status, region);
   `);
+
+  // Ensure postcode_cache table and index exist for exact spatial distance calculations
+  try {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS postcode_cache (
+        postcode TEXT PRIMARY KEY,
+        outcode TEXT,
+        latitude REAL,
+        longitude REAL,
+        easting REAL,
+        northing REAL,
+        admin_district TEXT,
+        source TEXT,
+        created_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_postcode_cache_outcode ON postcode_cache(outcode);
+    `);
+  } catch (e) {}
 
   // Ensure FTS5 search virtual table and synchronizing triggers exist
   try {
@@ -369,9 +438,9 @@ function initTables() {
     `);
   } catch (e) {}
 
-  // 2. Users table
+  // 2. Users table (parentdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE IF NOT EXISTS parent.users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
@@ -383,7 +452,7 @@ function initTables() {
   
   // Migration safeguard: add permissions column if missing from legacy table
   try {
-    sqlite.exec(`ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT '["parent:recommendations","parent:portfolio"]';`);
+    sqlite.exec(`ALTER TABLE parent.users ADD COLUMN permissions TEXT DEFAULT '["parent:recommendations","parent:portfolio"]';`);
   } catch (e) {
     // Column already exists
   }
@@ -392,7 +461,7 @@ function initTables() {
   const adminPerms = JSON.stringify(['directory:view', 'admin:portal', 'admin:edit', 'admin:delete', 'parent:recommendations', 'parent:portfolio']);
   try {
     sqlite.prepare(`
-      INSERT INTO users (id, name, email, password, permissions, createdAt)
+      INSERT INTO parent.users (id, name, email, password, permissions, createdAt)
       VALUES ('admin-super', 'Super Admin (aa@bb.cc)', 'aa@bb.cc', 'admin', ?, ?)
       ON CONFLICT(email) DO UPDATE SET
         permissions = excluded.permissions,
@@ -402,9 +471,9 @@ function initTables() {
     console.error('Error seeding aa@bb.cc admin user:', e);
   }
 
-  // 3. User Portfolios table (supports Classic Shortlist & Parent Portal 2.0 Dual Track)
+  // 3. User Portfolios table (supports Classic Shortlist & Parent Portal 2.0 Dual Track) (parentdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS user_portfolios (
+    CREATE TABLE IF NOT EXISTS parent.user_portfolios (
       userId TEXT PRIMARY KEY,
       targetLocation TEXT,
       selectedSchools TEXT,
@@ -418,13 +487,13 @@ function initTables() {
   `);
 
   // Migration safeguards: add Parent 2.0 dual-track columns if missing
-  try { sqlite.exec(`ALTER TABLE user_portfolios ADD COLUMN cafRankings TEXT;`); } catch (e) {}
-  try { sqlite.exec(`ALTER TABLE user_portfolios ADD COLUMN independentSchools TEXT;`); } catch (e) {}
-  try { sqlite.exec(`ALTER TABLE user_portfolios ADD COLUMN parentNotes TEXT;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE parent.user_portfolios ADD COLUMN cafRankings TEXT;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE parent.user_portfolios ADD COLUMN independentSchools TEXT;`); } catch (e) {}
+  try { sqlite.exec(`ALTER TABLE parent.user_portfolios ADD COLUMN parentNotes TEXT;`); } catch (e) {}
 
-  // 4. Reviewed Pairs table
+  // 4. Reviewed Pairs table (auditdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS reviewed_pairs (
+    CREATE TABLE IF NOT EXISTS audit.reviewed_pairs (
       pairKey TEXT PRIMARY KEY,
       idA TEXT NOT NULL,
       idB TEXT NOT NULL,
@@ -432,7 +501,7 @@ function initTables() {
     );
   `);
 
-  // 4b. Persistent Duplicate Candidate Pairs table (Retains detected pairs until manual re-scan)
+  // 4b. Persistent Duplicate Candidate Pairs table (Retains detected pairs until manual re-scan) (schooldb)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS duplicate_candidate_pairs (
       pairKey TEXT PRIMARY KEY,
@@ -446,15 +515,15 @@ function initTables() {
     );
   `);
 
-  // 5. Recommendation Settings table
+  // 5. Recommendation Settings table (parentdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS recommendation_settings (
+    CREATE TABLE IF NOT EXISTS parent.recommendation_settings (
       key TEXT PRIMARY KEY,
       weights TEXT NOT NULL
     );
   `);
 
-  // 5b. System Settings table (Feature flags & Admin configuration)
+  // 5b. System Settings table (Feature flags & Admin configuration) (schooldb)
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS system_settings (
       key TEXT PRIMARY KEY,
@@ -462,9 +531,9 @@ function initTables() {
     );
   `);
 
-  // 6. Persistent Sessions table (30-day session lifetime)
+  // 6. Persistent Sessions table (30-day session lifetime) (parentdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
+    CREATE TABLE IF NOT EXISTS parent.sessions (
       id TEXT PRIMARY KEY,
       userId TEXT NOT NULL,
       userJson TEXT NOT NULL,
@@ -473,9 +542,9 @@ function initTables() {
     );
   `);
 
-  // 7. User Field Ratings & Custom Overrides table
+  // 7. User Field Ratings & Custom Overrides table (parentdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS user_field_reports (
+    CREATE TABLE IF NOT EXISTS parent.user_field_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       userId TEXT NOT NULL,
       schoolId TEXT NOT NULL,
@@ -488,9 +557,9 @@ function initTables() {
     );
   `);
 
-  // 8. User Recommendation Preferences table
+  // 8. User Recommendation Preferences table (parentdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS user_recommendation_preferences (
+    CREATE TABLE IF NOT EXISTS parent.user_recommendation_preferences (
       userId TEXT PRIMARY KEY,
       targetPostcode TEXT,
       targetBorough TEXT,
@@ -501,9 +570,9 @@ function initTables() {
     );
   `);
 
-  // 9. Field Confidence Votes table
+  // 9. Field Confidence Votes table (parentdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS field_confidence_votes (
+    CREATE TABLE IF NOT EXISTS parent.field_confidence_votes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       userId TEXT NOT NULL,
       schoolId TEXT NOT NULL,
@@ -514,9 +583,9 @@ function initTables() {
     );
   `);
 
-  // 10. Admin Field Reviews table
+  // 10. Admin Field Reviews table (auditdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS admin_field_reviews (
+    CREATE TABLE IF NOT EXISTS audit.admin_field_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       schoolId TEXT NOT NULL,
       fieldName TEXT NOT NULL,
@@ -526,9 +595,9 @@ function initTables() {
     );
   `);
 
-  // 11. Admin Audit Logs table for atomic history and 1-click rollback
+  // 11. Admin Audit Logs table for atomic history and 1-click rollback (auditdb)
   sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS admin_audit_logs (
+    CREATE TABLE IF NOT EXISTS audit.admin_audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       actionType TEXT NOT NULL,
       batchId TEXT NOT NULL,
@@ -540,6 +609,113 @@ function initTables() {
       rolledBackAt TEXT
     );
   `);
+
+  // 12. Data Quality Scans persistence cache (Deduplication, Conflict Queues) (auditdb)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS audit.data_quality_scans (
+      scan_type TEXT PRIMARY KEY,
+      scanned_at TEXT NOT NULL,
+      total_schools INTEGER DEFAULT 0,
+      results_json TEXT NOT NULL
+    );
+  `);
+
+  // 13. Reviewed & Dismissed Duplicate Pairs (Avoid future candidate detection)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS reviewed_duplicate_pairs (
+      pair_id TEXT PRIMARY KEY,
+      school_a_id TEXT NOT NULL,
+      school_b_id TEXT NOT NULL,
+      school_a_name TEXT,
+      school_b_name TEXT,
+      decision TEXT NOT NULL DEFAULT 'not_duplicate',
+      reason TEXT,
+      reviewed_by TEXT NOT NULL,
+      reviewed_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_reviewed_pairs_a ON reviewed_duplicate_pairs(school_a_id);
+    CREATE INDEX IF NOT EXISTS idx_reviewed_pairs_b ON reviewed_duplicate_pairs(school_b_id);
+  `);
+}
+
+function getQualityScanResult(scanType) {
+  const sqlite = getDb();
+  try {
+    const row = sqlite.prepare('SELECT scan_type, scanned_at, total_schools, results_json FROM data_quality_scans WHERE scan_type = ?').get(scanType);
+    if (!row) return null;
+    return {
+      scanType: row.scan_type,
+      scannedAt: row.scanned_at,
+      totalSchools: row.total_schools,
+      data: JSON.parse(row.results_json)
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveQualityScanResult(scanType, data, totalSchools = 0) {
+  const sqlite = getDb();
+  const scannedAt = new Date().toISOString();
+  const resultsJson = JSON.stringify(data || {});
+  sqlite.prepare(`
+    INSERT OR REPLACE INTO data_quality_scans (scan_type, scanned_at, total_schools, results_json)
+    VALUES (?, ?, ?, ?)
+  `).run(scanType, scannedAt, totalSchools, resultsJson);
+  return { scanType, scannedAt, totalSchools, data };
+}
+
+function getReviewedDuplicatePairKeys() {
+  const sqlite = getDb();
+  try {
+    const rows = sqlite.prepare('SELECT pair_id FROM reviewed_duplicate_pairs').all();
+    const set = new Set();
+    for (const r of rows) {
+      if (r.pair_id) set.add(r.pair_id);
+    }
+    return set;
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function getReviewedDuplicatePairs() {
+  const sqlite = getDb();
+  try {
+    return sqlite.prepare('SELECT * FROM reviewed_duplicate_pairs ORDER BY reviewed_at DESC').all();
+  } catch (e) {
+    return [];
+  }
+}
+
+function markDuplicatePairReviewed(schoolAId, schoolBId, schoolAName = '', schoolBName = '', decision = 'not_duplicate', reason = '', reviewedBy = 'admin') {
+  const sqlite = getDb();
+  const pairId = [String(schoolAId).trim(), String(schoolBId).trim()].sort().join('::');
+  const reviewedAt = new Date().toISOString();
+
+  sqlite.prepare(`
+    INSERT OR REPLACE INTO reviewed_duplicate_pairs (
+      pair_id, school_a_id, school_b_id, school_a_name, school_b_name, decision, reason, reviewed_by, reviewed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(pairId, schoolAId, schoolBId, schoolAName || '', schoolBName || '', decision, reason || '', reviewedBy || 'admin', reviewedAt);
+
+  return {
+    pair_id: pairId,
+    school_a_id: schoolAId,
+    school_b_id: schoolBId,
+    school_a_name: schoolAName,
+    school_b_name: schoolBName,
+    decision,
+    reason,
+    reviewed_by: reviewedBy,
+    reviewed_at: reviewedAt
+  };
+}
+
+function unmarkDuplicatePairReviewed(pairId) {
+  const sqlite = getDb();
+  const res = sqlite.prepare('DELETE FROM reviewed_duplicate_pairs WHERE pair_id = ?').run(pairId);
+  return { success: true, deleted: res.changes > 0, pairId };
 }
 
 // Helper to normalize school type strictly to Grammar, Independent, or Comprehensive
@@ -618,6 +794,9 @@ function recordToSchool(row) {
     email: row.email || '',
     description: row.description || '',
     feesTermly: row.feesTermly || '',
+    fees_termly_gbp: (row.fees_termly_gbp !== null && row.fees_termly_gbp !== undefined && !isNaN(parseInt(row.fees_termly_gbp, 10))) ? parseInt(row.fees_termly_gbp, 10) : null,
+    fees_annual_gbp: (row.fees_annual_gbp !== null && row.fees_annual_gbp !== undefined && !isNaN(parseInt(row.fees_annual_gbp, 10))) ? parseInt(row.fees_annual_gbp, 10) : null,
+    sixthFormGenderPolicy: row.sixthFormGenderPolicy || '',
     registrationFee: row.registrationFee || '',
     sourceUrl: row.sourceUrl || '',
     second_stage_exam_required: row.second_stage_exam_required || '',
@@ -630,6 +809,7 @@ function recordToSchool(row) {
 
   school.official = row.official !== undefined && row.official !== null ? Boolean(row.official) : true;
   school.hot = Boolean(row.hot);
+  school.active = row.active !== undefined && row.active !== null ? Boolean(row.active) : true;
   school.officialDataSource = row.officialDataSource || 'DfE GIAS';
   school.compareSchoolPerformanceUrl = (row.urn && String(row.urn).trim())
     ? `https://www.compare-school-performance.service.gov.uk/school/${String(row.urn).trim()}`
@@ -649,8 +829,18 @@ function recordToSchool(row) {
   }
   if (row.verified_at) school.verified_at = row.verified_at;
   if (row.confidence_score !== null && row.confidence_score !== undefined) school.confidence_score = row.confidence_score;
+  school.completeness_score = (row.completeness_score !== null && row.completeness_score !== undefined) ? Number(row.completeness_score) : 0;
 
   return school;
+}
+
+// Safely parse fee number from string
+function parseFeeNumber(feeStr) {
+  if (!feeStr || typeof feeStr !== 'string') return null;
+  const match = feeStr.replace(/,/g, '').match(/\d+/);
+  if (!match) return null;
+  const num = parseInt(match[0], 10);
+  return (num > 100 && num < 100000) ? num : null;
 }
 
 // Convert school JS object to params for SQLite INSERT/UPDATE
@@ -664,6 +854,14 @@ function schoolToParams(s) {
     ? s.id.toString().trim()
     : (s.urn ? `sch-gov-${s.urn}` : `sch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
 
+  const termlyFeeNum = (s.fees_termly_gbp !== null && s.fees_termly_gbp !== undefined && !isNaN(parseInt(s.fees_termly_gbp, 10)))
+    ? parseInt(s.fees_termly_gbp, 10)
+    : parseFeeNumber(s.feesTermly);
+
+  const annualFeeNum = (s.fees_annual_gbp !== null && s.fees_annual_gbp !== undefined && !isNaN(parseInt(s.fees_annual_gbp, 10)))
+    ? parseInt(s.fees_annual_gbp, 10)
+    : (termlyFeeNum ? termlyFeeNum * 3 : null);
+
   return {
     id: schoolId,
     name: s.name || '',
@@ -675,6 +873,7 @@ function schoolToParams(s) {
     schoolType: normalizeSchoolType(s.schoolType, s.name, s.ofstedRating),
     rawSchoolType: s.rawSchoolType || s.schoolType || null,
     gender: s.gender || null,
+    sixthFormGenderPolicy: s.sixthFormGenderPolicy || null,
     ageRange: s.ageRange || null,
     pupilCount,
     ofstedRating: s.ofstedRating || null,
@@ -690,6 +889,8 @@ function schoolToParams(s) {
     email: s.email || null,
     description: s.description || null,
     feesTermly: s.feesTermly || null,
+    fees_termly_gbp: termlyFeeNum,
+    fees_annual_gbp: annualFeeNum,
     registrationFee: s.registrationFee || null,
     sourceUrl: s.sourceUrl || null,
     second_stage_exam_required: s.second_stage_exam_required || null,
@@ -700,6 +901,7 @@ function schoolToParams(s) {
     a_level_rank_england: (s.a_level_rank_england !== null && s.a_level_rank_england !== undefined && s.a_level_rank_england !== '' && !isNaN(parseInt(s.a_level_rank_england, 10))) ? parseInt(s.a_level_rank_england, 10) : null,
     official: s.official !== false ? 1 : 0,
     hot: s.hot ? 1 : 0,
+    active: (s.active !== false && s.active !== 0 && s.active !== 'false') ? 1 : 0,
     officialDataSource: s.officialDataSource || 'DfE GIAS',
     potentialDuplicateOf: s._potentialDuplicateOf || s.potentialDuplicateOf || null,
     dedupNote: s._dedupNote || s.dedupNote || null,
@@ -707,7 +909,8 @@ function schoolToParams(s) {
     verification_tags: s.verification_tags ? (typeof s.verification_tags === 'string' ? s.verification_tags : JSON.stringify(s.verification_tags)) : '[]',
     verification_report: s.verification_report ? (typeof s.verification_report === 'string' ? s.verification_report : JSON.stringify(s.verification_report)) : null,
     verified_at: s.verified_at || null,
-    confidence_score: s.confidence_score !== undefined && s.confidence_score !== null ? s.confidence_score : 70
+    confidence_score: s.confidence_score !== undefined && s.confidence_score !== null ? s.confidence_score : 70,
+    completeness_score: (s.completeness_score !== undefined && s.completeness_score !== null) ? Number(s.completeness_score) : null
   };
 }
 
@@ -726,36 +929,57 @@ function getSchoolById(id) {
   return recordToSchool(row);
 }
 
+function getSchoolByUrn(urn) {
+  if (!urn) return null;
+  const sqlite = getDb();
+  const stmt = sqlite.prepare('SELECT * FROM schools WHERE urn = ? LIMIT 1');
+  const row = stmt.get(String(urn).trim());
+  return recordToSchool(row);
+}
+
 function insertSchool(school) {
   const sqlite = getDb();
   const p = schoolToParams(school);
+
+  // Auto-calculate completeness score if not explicitly specified
+  let scoreVal = p.completeness_score;
+  if (scoreVal === null || scoreVal === undefined || isNaN(scoreVal)) {
+    try {
+      const completenessEngine = require('./scripts/completeness_engine');
+      const settings = getAdminSettings();
+      scoreVal = completenessEngine.evaluateSchoolCompleteness(school, settings.completenessWeights).score;
+    } catch (e) {
+      scoreVal = 0;
+    }
+  }
+
   const stmt = sqlite.prepare(`
     INSERT OR REPLACE INTO schools (
-      id, name, urn, la, region, postcode, address, schoolType, rawSchoolType, gender, ageRange,
+      id, name, urn, la, region, postcode, address, schoolType, rawSchoolType, gender, sixthFormGenderPolicy, ageRange,
       pupilCount, ofstedRating, gcseProgress8, gcseAttainment8, ebaccAveragePointScore,
       entranceExamType, entranceExamDates, gcseSubjects, admissionsPolicy, website,
       phone, email, description, official, hot, officialDataSource,
-      potentialDuplicateOf, dedupNote, feesTermly, registrationFee, sourceUrl, second_stage_exam_required,
+      potentialDuplicateOf, dedupNote, feesTermly, fees_termly_gbp, fees_annual_gbp, registrationFee, sourceUrl, second_stage_exam_required,
       stage_one_format_and_subjects, stage_two_format_and_subjects, national_rank_england, gcse_rank_england, a_level_rank_england,
-      verification_status, verification_tags, verification_report, verified_at, confidence_score
+      verification_status, verification_tags, verification_report, verified_at, confidence_score, completeness_score, active
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?
     )
   `);
   stmt.run(
-    p.id, p.name, p.urn, p.la, p.region, p.postcode, p.address, p.schoolType, p.rawSchoolType, p.gender, p.ageRange,
+    p.id, p.name, p.urn, p.la, p.region, p.postcode, p.address, p.schoolType, p.rawSchoolType, p.gender, p.sixthFormGenderPolicy, p.ageRange,
     p.pupilCount, p.ofstedRating, p.gcseProgress8, p.gcseAttainment8, p.ebaccAveragePointScore,
     p.entranceExamType, p.entranceExamDates, p.gcseSubjects, p.admissionsPolicy, p.website,
     p.phone, p.email, p.description, p.official, p.hot, p.officialDataSource,
-    p.potentialDuplicateOf, p.dedupNote, p.feesTermly, p.registrationFee, p.sourceUrl, p.second_stage_exam_required,
+    p.potentialDuplicateOf, p.dedupNote, p.feesTermly, p.fees_termly_gbp, p.fees_annual_gbp, p.registrationFee, p.sourceUrl, p.second_stage_exam_required,
     p.stage_one_format_and_subjects, p.stage_two_format_and_subjects, p.national_rank_england, p.gcse_rank_england, p.a_level_rank_england,
-    p.verification_status, p.verification_tags, p.verification_report, p.verified_at, p.confidence_score
+    p.verification_status, p.verification_tags, p.verification_report, p.verified_at, p.confidence_score, scoreVal, p.active
   );
   return getSchoolById(p.id);
 }
@@ -1138,35 +1362,43 @@ function saveRecSettings(weights) {
   return getRecSettings();
 }
 
-const DEFAULT_LLM_PROMPT_TEMPLATE = `You are an expert UK School Admissions Data Researcher and Verifier. Your task is to provide accurate, verified, and structured information for the following UK school:
+const DEFAULT_LLM_PROMPT_TEMPLATE = `You are an expert UK School Admissions Data Researcher and Verifier. Your task is to provide accurate, verified, and structured admissions intelligence for the following UK school using SEARCH-BASED ANSWERS:
 
-Target School Identification & Anchors:
+Target School:
 - School Name: {{school_name}}
 - City / Town: {{city}}
 - Local Authority / County: {{county}}
 - Postcode: {{postcode}}
 - Known Website: {{website}}
+- Reference DfE URN: {{urn}}
 
-CRITICAL ACCURACY & ANTI-HALLUCINATION RULES:
-1. STRICT DISAMBIGUATION: You must verify information ONLY for the specific UK school located at Postcode {{postcode}} in {{city}}, {{county}}. Do NOT confuse with schools of similar or identical names in other regions.
-2. ABSOLUTE ACCURACY OVER COMPLETENESS (ZERO GUESSWORK ON BASIC INFO): Never guess, estimate, or fabricate basic school details. If any field is unconfirmed, return null.
-3. STRICT GENDER POLICY & BASIC PROFILE INTEGRITY:
-   - 'gender': You MUST return "Girls", "Boys", or "Mixed" ONLY if 100% verified from official sources (such as DfE Get Information About Schools or official school website). NEVER default to "Mixed" or guess the gender policy. If single-sex girls, state "Girls"; if single-sex boys, state "Boys"; if co-educational, state "Mixed". If unconfirmed, set null.
-   - 'schoolType' / 'rawSchoolType': Return accurate classification ("Independent", "Grammar", "Comprehensive", or official DfE category).
-   - 'ageRange': Return official age range (e.g. "11 to 18", "4 to 11", "11 to 16", "3 to 19") if verified; otherwise set null.
-   - 'address': Return full official postal street address if known (e.g. including road/street name). Do not replace a detailed address with just a city name. If unknown, set null.
-   - 'description': Provide an accurate summary of the school and its ethos.
-   - 'website', 'phone', 'email': Return official contact info if known; otherwise null.
-4. 11+ ADMISSIONS CYCLE CONTEXT:
-   - Focus on Year 7 entry (11+ admissions). Dates must follow "Day Month Year" format (e.g. "6 November 2026").
-   - For Grammar / State Selective: Identify exact 11+ consortium/board (e.g. "GL Assessment", "CSSE 11+", "Kent 11+ PESE", "School's Own Exam"). Fees must be null.
-   - For Independent / Fee-Paying: Identify exam format (e.g. "ISEB Common Pre-Test", "London 11+ Consortium", "School's Own Assessment"), termly tuition fee (e.g. "£7,500"), and registration fee (e.g. "£150").
-   - For Comprehensive / Non-Selective State: Exam board is "Non-selective / DfE Coordinated Admissions", second_stage_exam_required is "No", fees are null.
-   - If specific Year 7 entrance exam dates are not applicable or unconfirmed (e.g. primary/special/non-selective), leave those date fields as null or empty arrays [].
-5. OFFICIAL ENGLAND RANKINGS:
-   - 'national_rank_england', 'gcse_rank_england', 'a_level_rank_england': Official integer rank in England if published; otherwise null.
+SEARCH-BASED KNOWLEDGE RETRIEVAL & CRITICAL ACCURACY DIRECTIVES:
+1. USE SEARCH-BASED ANSWERS (BROWSER SEARCH FIDELITY):
+   - You MUST answer as if performing a live browser-based Google search. Search official school web pages, published admissions policies, prospectus documents, and DfE GIAS registers to retrieve real, factual information.
+   - Prioritize live, verifiable facts published by the school over stale pre-training memory or generic estimates.
+   - Refer to these targeted search queries to resolve the school's official data:
+{{search_queries}}
 
-Output ONLY a valid JSON object matching this schema with no markdown formatting, code blocks, or preamble:
+2. 11+ ADMISSIONS PROFILE (Year 7 / 2026–2027 Entry):
+   - Entrance Exam Format: Name the specific exam board/consortium (e.g. "11+ GL Assessment", "ISEB Common Pre-Test", "CSSE 11+", "Kent PESE", "London 11+ Consortium", or "Non-selective (Local Authority CAF / Pan-London eAdmissions)").
+   - Milestone Dates (format as "Day Month Year", e.g. "15 October 2026"):
+     * Registration Opens & Deadline
+     * Stage 1 Exam Date, Format & Results Release Date
+     * Stage 2 Exam Required ("Yes" or "No"), Stage 2 Exam Date & Results Date
+     * Interview Dates, National Offer Date & Acceptance Deadline
+     * Open Events / Open Days dates
+   - ZERO GUESSWORK: If a specific date for 2026/2027 entry is not confirmed in search results, return null. NEVER invent, extrapolate, or reuse outdated dates from past academic years.
+
+3. FINANCIALS, GENDER & IDENTITY:
+   - Financials (Independent Schools): Exact termly tuition fee (e.g. "£7,500") and registration fee (e.g. "£150"). (For state schools, leave null).
+   - School Gender: Accurately state "Girls", "Boys", or "Mixed" from official DfE GIAS records or prospectus. NEVER guess or default.
+   - School Type: Identify "Grammar", "Independent", or "Comprehensive" (Academy / Community / Foundation).
+   - Contact & Identity: Official website URL, admissions phone, admissions email, and complete street address.
+   - Source URL: In "sourceUrl", cite the exact official webpage URL discovered via search where these admissions details are published.
+   - England Rankings: National rank in England, GCSE rank, and A-Level rank (if published in official tables; otherwise null).
+   - Provide a concise summary of the school and its 11+ admissions process in admissionsOverview (with bullet points for key admission milestones) and description. If a school has multiple examination dates, specify all dates.
+
+Return ONLY a valid JSON object matching this schema (use null for unconfirmed fields):
 
 {
   "name": "{{school_name}}",
@@ -1186,14 +1418,14 @@ Output ONLY a valid JSON object matching this schema with no markdown formatting
     "registrationOpen": null,
     "registrationDeadline": null,
     "registrationFee": null,
-    "stage_one_examDate": [],
+    "stage_one_examDate": null,
     "stage_one_format_and_subjects": null,
     "stage_one_resultDate": null,
-    "second_stage_exam_required": null,
-    "stage_two_examDate": [],
+    "second_stage_exam_required": "No",
+    "stage_two_examDate": null,
     "stage_two_format_and_subjects": null,
     "stage_two_resultDate": null,
-    "interviewDates": [],
+    "interviewDates": null,
     "offerDate": null,
     "acceptanceDeadline": null,
     "openEvents": null,
@@ -1245,6 +1477,16 @@ const DEFAULT_ADMIN_SETTINGS = {
     academicPerformance: 20,
     ofstedRating: 10,
     schoolType: 10
+  },
+  completenessWeights: {
+    website: 20,
+    examDates: 25,
+    examFormat: 15,
+    schoolClassification: 10,
+    academicOfsted: 10,
+    contactChannels: 8,
+    addressGeography: 6,
+    leadershipCapacity: 6
   }
 };
 
@@ -1274,6 +1516,13 @@ function getAdminSettings() {
     } catch (e) {}
   }
 
+  let completenessWeights = rawMap.completenessWeights || DEFAULT_ADMIN_SETTINGS.completenessWeights;
+  if (typeof completenessWeights !== 'object' || completenessWeights === null) {
+    completenessWeights = DEFAULT_ADMIN_SETTINGS.completenessWeights;
+  } else {
+    completenessWeights = { ...DEFAULT_ADMIN_SETTINGS.completenessWeights, ...completenessWeights };
+  }
+
   const llmProvider = (rawMap.llmProvider === 'chatgpt') ? 'chatgpt' : 'gemini';
   let geminiModel = typeof rawMap.geminiModel === 'string' && rawMap.geminiModel.trim() ? rawMap.geminiModel.trim() : DEFAULT_ADMIN_SETTINGS.geminiModel;
   // Migrate deprecated/nonexistent models to valid API models
@@ -1290,7 +1539,7 @@ function getAdminSettings() {
   const scannerSkipDays = typeof rawMap.scannerSkipDays === 'number' ? Math.max(0, Math.min(100, rawMap.scannerSkipDays)) : (parseInt(rawMap.scannerSkipDays, 10) || 10);
   const scannerDelaySeconds = typeof rawMap.scannerDelaySeconds === 'number' ? Math.max(0, Math.min(300, rawMap.scannerDelaySeconds)) : (parseInt(rawMap.scannerDelaySeconds, 10) || 20);
   let llmPromptTemplate = typeof rawMap.llmPromptTemplate === 'string' && rawMap.llmPromptTemplate.trim() ? rawMap.llmPromptTemplate : DEFAULT_LLM_PROMPT_TEMPLATE;
-  if (!llmPromptTemplate.includes('CRITICAL ACCURACY') || !llmPromptTemplate.includes('You are an expert UK School Admissions Data Researcher and Verifier')) {
+  if (!llmPromptTemplate.includes('CRITICAL ACCURACY') || !llmPromptTemplate.includes('You are an expert UK School Admissions Data Researcher and Verifier') || !llmPromptTemplate.includes('SEARCH-BASED ANSWERS')) {
     llmPromptTemplate = DEFAULT_LLM_PROMPT_TEMPLATE;
   }
 
@@ -1304,6 +1553,7 @@ function getAdminSettings() {
     scannerDelaySeconds,
     llmPromptTemplate,
     recWeights,
+    completenessWeights,
     // Client Display Helper Metadata
     hasGeminiKey: Boolean(geminiApiKey || process.env.GEMINI_API_KEY),
     geminiKeyMasked: geminiApiKey ? ('••••••••' + geminiApiKey.slice(-4)) : (process.env.GEMINI_API_KEY ? '••••••••' + process.env.GEMINI_API_KEY.slice(-4) : ''),
@@ -1412,7 +1662,7 @@ function updateEnvVariable(key, val) {
 
     if (typeof updates.llmPromptTemplate !== 'undefined' && typeof updates.llmPromptTemplate === 'string') {
       const trimmed = updates.llmPromptTemplate.trim();
-      const templateVal = (trimmed && trimmed.includes('You are an expert UK School Admissions Data Researcher and Verifier') && trimmed.includes('CRITICAL ACCURACY & ANTI-HALLUCINATION RULES')) ? trimmed : DEFAULT_LLM_PROMPT_TEMPLATE;
+      const templateVal = (trimmed && trimmed.includes('You are an expert UK School Admissions Data Researcher and Verifier') && (trimmed.includes('CRITICAL ACCURACY') || trimmed.includes('SEARCH-BASED'))) ? trimmed : DEFAULT_LLM_PROMPT_TEMPLATE;
       stmt.run('llmPromptTemplate', JSON.stringify(templateVal));
     }
 
@@ -1428,6 +1678,21 @@ function updateEnvVariable(key, val) {
       try {
         sqlite.prepare('INSERT OR REPLACE INTO recommendation_settings (key, weights) VALUES (?, ?)').run('default', JSON.stringify(mergedWeights));
       } catch (e) {}
+    }
+
+    if (updates.completenessWeights && typeof updates.completenessWeights === 'object') {
+      const defComp = DEFAULT_ADMIN_SETTINGS.completenessWeights;
+      const mergedComp = {
+        website: typeof updates.completenessWeights.website !== 'undefined' ? (parseInt(updates.completenessWeights.website, 10) || 0) : defComp.website,
+        examDates: typeof updates.completenessWeights.examDates !== 'undefined' ? (parseInt(updates.completenessWeights.examDates, 10) || 0) : defComp.examDates,
+        examFormat: typeof updates.completenessWeights.examFormat !== 'undefined' ? (parseInt(updates.completenessWeights.examFormat, 10) || 0) : defComp.examFormat,
+        schoolClassification: typeof updates.completenessWeights.schoolClassification !== 'undefined' ? (parseInt(updates.completenessWeights.schoolClassification, 10) || 0) : defComp.schoolClassification,
+        academicOfsted: typeof updates.completenessWeights.academicOfsted !== 'undefined' ? (parseInt(updates.completenessWeights.academicOfsted, 10) || 0) : defComp.academicOfsted,
+        contactChannels: typeof updates.completenessWeights.contactChannels !== 'undefined' ? (parseInt(updates.completenessWeights.contactChannels, 10) || 0) : defComp.contactChannels,
+        addressGeography: typeof updates.completenessWeights.addressGeography !== 'undefined' ? (parseInt(updates.completenessWeights.addressGeography, 10) || 0) : defComp.addressGeography,
+        leadershipCapacity: typeof updates.completenessWeights.leadershipCapacity !== 'undefined' ? (parseInt(updates.completenessWeights.leadershipCapacity, 10) || 0) : defComp.leadershipCapacity
+      };
+      stmt.run('completenessWeights', JSON.stringify(mergedComp));
     }
 
     sqlite.exec('COMMIT;');
@@ -2635,10 +2900,11 @@ function saveSchoolVerificationResult(schoolId, scanResult) {
   return getSchoolById(schoolId);
 }
 
-function getSchoolsForScannerBatch(priorityCategory = 'ALL', limit = 50, skipDaysOverride = null) {
+function getSchoolsForScannerBatch(priorityCategory = 'ALL', limit = 50, skipDaysOverride = null, forceRerun = false) {
   const sqlite = getDb();
   const conditions = [];
   const params = [];
+  const isForce = Boolean(forceRerun);
 
   switch (priorityCategory.toUpperCase()) {
     case 'GREATER_LONDON':
@@ -2660,7 +2926,7 @@ function getSchoolsForScannerBatch(priorityCategory = 'ALL', limit = 50, skipDay
       break;
     case 'UNVERIFIED':
     case 'UNVERIFIED_QUEUE':
-      conditions.push("(verified_at IS NULL OR TRIM(verified_at) = '' OR verification_status IS NULL OR verification_status = 'unverified')");
+      conditions.push("(verified_at IS NULL OR TRIM(verified_at) = '' OR verification_status IS NULL OR verification_status = 'unverified' OR verification_status = 'unscanned')");
       break;
     case 'CRITICAL':
     case 'CRITICAL_INVERSIONS':
@@ -2683,9 +2949,21 @@ function getSchoolsForScannerBatch(priorityCategory = 'ALL', limit = 50, skipDay
     ? Math.max(0, Math.min(100, parseInt(skipDaysOverride, 10) || 0)) 
     : getSystemSetting('scannerSkipDays', 10);
 
-  if (skipDays > 0) {
-    const cutoffDate = new Date(Date.now() - skipDays * 24 * 60 * 60 * 1000).toISOString();
-    conditions.push('(verified_at IS NULL OR verified_at < ?)');
+  // When NOT force-rerunning: Ensure queue only contains schools that have NOT been recently enriched or verified
+  if (!isForce) {
+    // 1. Strictly exclude schools already marked as llm_enriched (via status or verification tags)
+    conditions.push("(verification_status IS NULL OR verification_status != 'llm_enriched')");
+    conditions.push("(verification_tags IS NULL OR (verification_tags NOT LIKE '%llm_enriched%' AND verification_tags NOT LIKE '%\"llm_enriched\"%' AND verification_tags NOT LIKE '%llm_verified%'))");
+
+    // 2. Exclude schools verified/audited within the active cache window (default skipDays or 10)
+    if (skipDays > 0) {
+      const cutoffDate = new Date(Date.now() - skipDays * 24 * 60 * 60 * 1000).toISOString();
+      conditions.push("(verified_at IS NULL OR TRIM(verified_at) = '' OR verified_at < ?)");
+      params.push(cutoffDate);
+    }
+  } else if (skipDaysOverride !== null && parseInt(skipDaysOverride, 10) > 0) {
+    const cutoffDate = new Date(Date.now() - parseInt(skipDaysOverride, 10) * 24 * 60 * 60 * 1000).toISOString();
+    conditions.push("(verified_at IS NULL OR TRIM(verified_at) = '' OR verified_at < ?)");
     params.push(cutoffDate);
   }
 
@@ -3098,7 +3376,7 @@ function generateEnrichmentPreview() {
       if (s.urn) {
         sources.push({
           title: `DfE Get Information About Schools (URN ${s.urn})`,
-          url: `https://get-information-schools.service.gov.uk/Establishments/Establishment/Detail/${s.urn}`,
+          url: `https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/${s.urn}`,
           type: 'dfe'
         });
         sources.push({
@@ -3333,6 +3611,7 @@ module.exports = {
   getDb,
   getAllSchools,
   getSchoolById,
+  getSchoolByUrn,
   insertSchool,
   updateSchool,
   bulkUpdateSchools,
@@ -3393,8 +3672,20 @@ module.exports = {
   setActiveDatabaseInstance,
   resetTestDatabaseFromProduction,
   getDatabaseInstancesMetadata,
+  getSchoolDb: getDb,
+  getAuditDb: () => getDb(),
+  getParentDb: () => getDb(),
   searchSchoolsFts,
-  DEFAULT_LLM_PROMPT_TEMPLATE
+  DEFAULT_LLM_PROMPT_TEMPLATE,
+  DEFAULT_COMPLETENESS_WEIGHTS: require('./scripts/completeness_engine').DEFAULT_COMPLETENESS_WEIGHTS,
+  evaluateSchoolCompleteness: require('./scripts/completeness_engine').evaluateSchoolCompleteness,
+  batchRecalculateAllSchools: (weights) => require('./scripts/completeness_engine').batchRecalculateAllSchools(getDb(), weights),
+  getQualityScanResult,
+  saveQualityScanResult,
+  getReviewedDuplicatePairKeys,
+  getReviewedDuplicatePairs,
+  markDuplicatePairReviewed,
+  unmarkDuplicatePairReviewed
 };
 
 

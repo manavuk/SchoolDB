@@ -98,6 +98,8 @@ async function fetchWebpage(urlString, timeoutMs = 3500, maxRedirects = 2) {
         finish({
           ok: res.statusCode >= 200 && res.statusCode < 400,
           status: res.statusCode,
+          isRateLimited: res.statusCode === 429,
+          error: res.statusCode === 429 ? 'RATE_LIMITED_429' : null,
           body: data,
           finalUrl: formattedUrl,
           headers: res.headers
@@ -959,7 +961,8 @@ function validateLlmResponse(data, school) {
     return { valid: false, reason: 'LLM response is not a valid JSON object' };
   }
 
-  if (!data.name || typeof data.name !== 'string' || data.name.trim().length === 0) {
+  const nameVal = data.name || data.schoolName || school?.name;
+  if (!nameVal || typeof nameVal !== 'string' || nameVal.trim().length === 0) {
     return { valid: false, reason: 'Missing school name in LLM response' };
   }
 
@@ -1136,6 +1139,138 @@ function computeSchoolDiff(previousSchool = {}, newData = {}, updatedSchool = {}
   }
 
   return diffs;
+}
+
+/**
+ * Identify and Extract Verified Non-Null Matching Fields (Query confirms existing DB values)
+ */
+function computeVerifiedMatches(previousSchool, newData) {
+  if (!previousSchool || !newData) return [];
+  const matches = [];
+
+  // 1. Entrance Exam Dates Matches
+  let prevDates = {};
+  try {
+    if (previousSchool.entranceExamDates) {
+      prevDates = typeof previousSchool.entranceExamDates === 'string' ? JSON.parse(previousSchool.entranceExamDates) : previousSchool.entranceExamDates;
+    }
+  } catch (e) {}
+
+  let newDates = {};
+  try {
+    if (newData.entranceExamDates) {
+      newDates = typeof newData.entranceExamDates === 'object' ? newData.entranceExamDates : JSON.parse(newData.entranceExamDates);
+    }
+  } catch (e) {}
+
+  const dateKeys = [
+    { key: 'registrationOpen', aliases: ['registrationOpen'], label: 'Registration Opens' },
+    { key: 'registrationDeadline', aliases: ['registrationDeadline'], label: 'Registration Deadline' },
+    { key: 'stage_one_examDate', aliases: ['stage_one_examDate', 'examDate', 'stage1ExamDate'], label: 'Stage 1 Exam Date' },
+    { key: 'stage_one_format_and_subjects', aliases: ['stage_one_format_and_subjects', 'stage1Format', 'stage_one_format'], label: 'Stage 1 Format & Subjects' },
+    { key: 'stage_one_resultDate', aliases: ['stage_one_resultDate', 'resultDate', 'stage1ResultDate'], label: 'Stage 1 Results' },
+    { key: 'second_stage_exam_required', aliases: ['second_stage_exam_required', 'stage2Required', 'secondStageRequired'], label: '2nd Stage Required?' },
+    { key: 'stage_two_examDate', aliases: ['stage_two_examDate', 'examDate2', 'secondExamDate', 'stage2ExamDate'], label: 'Stage 2 Exam Date' },
+    { key: 'stage_two_format_and_subjects', aliases: ['stage_two_format_and_subjects', 'stage2Format', 'stage_two_format'], label: 'Stage 2 Format & Subjects' },
+    { key: 'interviewDates', aliases: ['interviewDates', 'interviewDate'], label: 'Admissions Interviews' },
+    { key: 'offerDate', aliases: ['offerDate', 'offersDate'], label: 'Offers Posted' },
+    { key: 'acceptanceDeadline', aliases: ['acceptanceDeadline'], label: 'Acceptance Deadline' }
+  ];
+
+  const formatVal = (v) => Array.isArray(v) ? v.join(', ') : (v !== null && v !== undefined ? String(v).trim() : '');
+
+  const verifiedDates = [];
+  for (const item of dateKeys) {
+    let oldV = null;
+    for (const alias of item.aliases) {
+      if (prevDates[alias] !== undefined && prevDates[alias] !== null) { oldV = prevDates[alias]; break; }
+    }
+    let newV = null;
+    for (const alias of item.aliases) {
+      if (newDates[alias] !== undefined && newDates[alias] !== null) { newV = newDates[alias]; break; }
+    }
+
+    const formattedOld = formatVal(oldV);
+    const formattedNew = formatVal(newV);
+
+    if (formattedOld && formattedOld !== 'TBC' && formattedOld !== 'N/A' && formattedOld !== 'null' && formattedOld === formattedNew) {
+      verifiedDates.push({ key: item.key, label: item.label, value: formattedOld });
+    }
+  }
+
+  if (verifiedDates.length > 0) {
+    matches.push({
+      field: 'entranceExamDates',
+      label: '11+ Admissions Milestones',
+      type: 'dates',
+      verifiedDates
+    });
+  }
+
+  // 2. Website URL Match
+  const oldWeb = (previousSchool.website || '').trim().toLowerCase().replace(/\/$/, '');
+  const newWeb = (newData.website || '').trim().toLowerCase().replace(/\/$/, '');
+  if (oldWeb && oldWeb !== 'n/a' && oldWeb === newWeb) {
+    matches.push({ field: 'website', label: 'Website URL', value: previousSchool.website, type: 'url' });
+  }
+
+  // 3. Exam Board / Format Match
+  const oldExam = (previousSchool.entranceExamType || '').trim();
+  const newExam = (newData.entranceExamType || '').trim();
+  if (oldExam && oldExam !== 'Unknown' && oldExam !== 'N/A' && oldExam.toLowerCase() === newExam.toLowerCase()) {
+    matches.push({ field: 'entranceExamType', label: 'Exam Board / Format', value: previousSchool.entranceExamType, type: 'text' });
+  }
+
+  // 4. Gender Policy Match
+  const oldGender = (previousSchool.gender || '').trim();
+  const newGender = (newData.gender || '').trim();
+  if (oldGender && oldGender.toLowerCase() === newGender.toLowerCase()) {
+    matches.push({ field: 'gender', label: 'Gender Policy', value: previousSchool.gender, type: 'badge' });
+  }
+
+  // 5. Contact Phone Match
+  const oldPhone = (previousSchool.phone || '').trim().replace(/[\s()-]/g, '');
+  const newPhone = (newData.phone || '').trim().replace(/[\s()-]/g, '');
+  if (oldPhone && oldPhone !== 'n/a' && oldPhone === newPhone) {
+    matches.push({ field: 'phone', label: 'Contact Phone', value: previousSchool.phone, type: 'text' });
+  }
+
+  // 6. Admissions Email Match
+  const oldEmail = (previousSchool.email || '').trim().toLowerCase();
+  const newEmail = (newData.email || '').trim().toLowerCase();
+  if (oldEmail && oldEmail !== 'n/a' && oldEmail === newEmail) {
+    matches.push({ field: 'email', label: 'Admissions Email', value: previousSchool.email, type: 'text' });
+  }
+
+  // 7. Fees Match
+  const oldFees = (previousSchool.feesTermly || '').trim().replace(/\s+/g, '');
+  const newFees = (newData.feesTermly || '').trim().replace(/\s+/g, '');
+  if (oldFees && oldFees !== 'n/a' && oldFees === newFees) {
+    matches.push({ field: 'feesTermly', label: 'Termly Tuition Fees', value: previousSchool.feesTermly, type: 'text' });
+  }
+
+  // 8. Registration Fee Match
+  const oldRegFee = (previousSchool.registrationFee || '').trim().replace(/\s+/g, '');
+  const newRegFee = (newData.registrationFee || '').trim().replace(/\s+/g, '');
+  if (oldRegFee && oldRegFee !== 'n/a' && oldRegFee === newRegFee) {
+    matches.push({ field: 'registrationFee', label: '11+ Registration Fee', value: previousSchool.registrationFee, type: 'text' });
+  }
+
+  // 9. Postcode Match
+  const oldPostcode = (previousSchool.postcode || '').trim().toUpperCase().replace(/\s+/g, '');
+  const newPostcode = (newData.postcode || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (oldPostcode && oldPostcode !== 'N/A' && oldPostcode === newPostcode) {
+    matches.push({ field: 'postcode', label: 'Postcode', value: previousSchool.postcode, type: 'text' });
+  }
+
+  // 10. Admissions Process Overview Match
+  const oldAdmissions = (previousSchool.admissionsPolicy || '').trim();
+  const newAdmissions = (newData.admissionsOverview || newData.admissionsPolicy || '').trim();
+  if (oldAdmissions && oldAdmissions.length > 20 && oldAdmissions === newAdmissions) {
+    matches.push({ field: 'admissionsPolicy', label: '11+ Admissions Process Overview', value: previousSchool.admissionsPolicy, type: 'text' });
+  }
+
+  return matches;
 }
 
 /**
@@ -1352,6 +1487,7 @@ async function auditAndVerifySchool(school, options = {}) {
           promptTemplate,
           apiKey,
           mockResponse: options.mockResponse,
+          fetchFn: options.fetchFn,
           timeoutMs: options.timeout || 15000
         });
       } catch (err) {
@@ -1359,7 +1495,19 @@ async function auditAndVerifySchool(school, options = {}) {
       }
     }
 
-    // 2. Process Verified LLM Intelligence
+    // 2. Check for HTTP 429 Rate Limit
+    if (llmRes && (llmRes.isRateLimited || llmRes.httpStatus === 429 || llmRes.exactResponse?.status === 429 || (llmRes.error && llmRes.error.includes('429')))) {
+      result.status = 'rate_limited';
+      result.isRateLimited = true;
+      result.httpStatus = 429;
+      result.tags = Array.from(new Set([...result.tags, 'crawl_rate_limited_429', 'http_429_rate_limited']));
+      result.error = `HTTP 429 Rate Limit (Too Many Requests / Quota Exceeded) received from LLM Provider (${llmRes.provider || 'Gemini'}).`;
+      result.exactRequest = llmRes.exactRequest || null;
+      result.exactResponse = llmRes.exactResponse || null;
+      return result;
+    }
+
+    // 3. Process Verified LLM Intelligence
     if (llmRes && llmRes.success && llmRes.data && !llmRes.error && llmRes.exactResponse?.status !== 429 && (!llmRes.exactResponse?.status || llmRes.exactResponse.status < 400)) {
       const data = llmRes.data;
       const validation = validateLlmResponse(data, school);
@@ -1381,7 +1529,11 @@ async function auditAndVerifySchool(school, options = {}) {
           }
         }
 
-        // ONLY mark as llm_enriched if the DB update succeeded AND at least one field was added/updated
+        // Compute diffs and verified matching fields
+        const diffs = computeSchoolDiff(school, data, updatedDbSchool);
+        const verifiedMatches = computeVerifiedMatches(school, data);
+
+        // If fields were added/updated
         if (applyRes && applyRes.success && applyRes.updated && applyRes.updatedFieldsCount > 0) {
           const providerTag = llmRes.provider === 'chatgpt' ? 'chatgpt_crawl' : 'gemini_crawl';
           result.status = 'llm_enriched';
@@ -1402,7 +1554,8 @@ async function auditAndVerifySchool(school, options = {}) {
           result.website = data.website || school.website;
           result.auditLogId = auditLogId;
           result.batchId = batchId;
-          result.diffs = computeSchoolDiff(school, data, updatedDbSchool);
+          result.diffs = diffs;
+          result.verifiedMatches = verifiedMatches;
           result.previousSchool = school;
           result.exactRequest = llmRes.exactRequest || null;
           result.exactResponse = llmRes.exactResponse || null;
@@ -1411,16 +1564,40 @@ async function auditAndVerifySchool(school, options = {}) {
           }
           return result;
         } else {
-          // No fields were updated -> preserve existing valid status, do NOT add llm_enriched tag, but clear any old llm_error
-          const prevStatus = school.verification_status;
-          result.status = (prevStatus && prevStatus !== 'llm_error' && prevStatus !== 'unverified') ? prevStatus : 'auto_verified';
+          // If query returned matching non-null values -> mark verified!
+          const providerTag = llmRes.provider === 'chatgpt' ? 'chatgpt_crawl' : 'gemini_crawl';
+          const hasVerifiedMatches = verifiedMatches.length > 0;
+          result.status = hasVerifiedMatches ? 'auto_verified' : ((school.verification_status && school.verification_status !== 'llm_error') ? school.verification_status : 'auto_verified');
+          
           let prevTags = Array.isArray(school.verification_tags) ? [...school.verification_tags] : [];
           prevTags = prevTags.filter(t => t !== 'llm_error' && t !== 'auto_verification_data_missing' && t !== 'dead_website');
-          if (!prevTags.includes('auto_verified') && !prevTags.includes('inspected') && !prevTags.includes('llm_enriched')) {
+          if (hasVerifiedMatches) {
+            if (!prevTags.includes('auto_verified')) prevTags.push('auto_verified');
+            if (!prevTags.includes('llm_verified')) prevTags.push('llm_verified');
+            if (!prevTags.includes('dates_verified') && verifiedMatches.some(m => m.field === 'entranceExamDates')) prevTags.push('dates_verified');
+            if (!prevTags.includes(providerTag)) prevTags.push(providerTag);
+
+            // Persist verified status and confidence in DB
+            try {
+              if (db && typeof db.updateSchool === 'function') {
+                db.updateSchool(school.id, {
+                  verification_status: 'auto_verified',
+                  verification_tags: JSON.stringify(prevTags),
+                  verified_at: new Date().toISOString(),
+                  confidence_score: Math.max(school.confidence_score || 85, 95)
+                });
+              }
+            } catch (persistErr) {
+              console.warn('[Scanner Verifier] Could not persist verified status to DB:', persistErr.message);
+            }
+          } else if (!prevTags.includes('auto_verified') && !prevTags.includes('inspected') && !prevTags.includes('llm_enriched')) {
             prevTags.push('inspected');
           }
+
           result.tags = prevTags;
           result.diffs = [];
+          result.verifiedMatches = verifiedMatches;
+          result.confidenceScore = hasVerifiedMatches ? Math.max(school.confidence_score || 85, 95) : (school.confidence_score || 85);
           result.previousSchool = school;
           result.updatedSchool = school;
           result.exactRequest = llmRes.exactRequest || null;
@@ -1583,6 +1760,7 @@ module.exports = {
   extractAndVerifyAdmissionDates,
   auditAndVerifySchool,
   getPriorityGroupQuery,
-  computeSchoolDiff
+  computeSchoolDiff,
+  computeVerifiedMatches
 };
 

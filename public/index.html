@@ -22,11 +22,18 @@
       if (hasLocal || hasCookie) {
         document.documentElement.classList.add('session-pending');
       }
+      const activeTab = localStorage.getItem('app_active_primary_tab');
+      if (activeTab === 'admin') {
+        document.documentElement.classList.add('admin-active-pending');
+      }
     })();
   </script>
   <style>
     html.session-pending #auth-gatekeeper-overlay {
       display: none !important;
+    }
+    html.admin-active-pending #tab-admin-btn {
+      display: inline-flex !important;
     }
   </style>
 <body>
@@ -78,7 +85,7 @@
           <i class="fa-solid fa-right-from-bracket"></i> Sign Out
         </button>
 
-        <button id="auth-login-btn" class="btn btn-outline" style="font-size: 0.82rem; padding: 0.35rem 0.65rem;" onclick="triggerGoogleSignInWorkflow(event)">
+        <button id="auth-login-btn" class="btn btn-outline" style="font-size: 0.82rem; padding: 0.35rem 0.65rem;" onclick="openLoginModal(event)">
           <i class="fa-solid fa-right-to-bracket"></i> Sign In
         </button>
 
@@ -149,13 +156,21 @@
               <!-- TIER 1: HORIZONTAL OMNI-SEARCH & FILTER BAR -->
               <div style="display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(130px, 0.9fr) minmax(170px, 1.1fr) minmax(170px, 1.1fr) minmax(170px, 1.1fr); gap: 0.75rem; align-items: end; margin-bottom: 0.9rem;">
                 
-                <!-- 1. Postcode / Borough -->
+                <!-- 1. Postcode / Borough & Distance Radius -->
                 <div>
                   <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
                     <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> Home Postcode / Borough
                   </label>
-                  <div style="position: relative;">
-                    <input type="text" id="rec-target-locations" placeholder="e.g. SW19, Barnet, Kingston, HA8..." style="width: 100%; padding: 0.52rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem; background: #f8fafc;">
+                  <div style="display: flex; gap: 0.35rem;">
+                    <input type="text" id="rec-target-locations" placeholder="e.g. SW19 4TT, EN5, W6..." style="flex: 1; min-width: 0; padding: 0.52rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem; background: #f8fafc;">
+                    <select id="rec-max-distance-select" title="Max Distance Radius" style="width: 100px; padding: 0.52rem 0.35rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.78rem; background: #f8fafc; color: #334155; font-weight: 600; cursor: pointer;">
+                      <option value="">Any Dist</option>
+                      <option value="3">≤ 3 miles</option>
+                      <option value="5">≤ 5 miles</option>
+                      <option value="10">≤ 10 miles</option>
+                      <option value="15">≤ 15 miles</option>
+                      <option value="25">≤ 25 miles</option>
+                    </select>
                   </div>
                 </div>
 
@@ -559,11 +574,37 @@
             <span class="side-tab-counter" id="corrections-badge-count" style="display: none;">0</span>
           </button>
 
-          <button class="admin-side-tab" data-target-tab="merge" id="side-tab-btn-merge" title="Merge & De-Duplicate">
-            <span class="side-tab-icon"><i class="fa-solid fa-code-merge" style="color: #7c3aed;"></i></span>
+          <div class="side-nav-heading" style="margin-top: 1.25rem;">DATA QUALITY &amp; SCANS</div>
+
+          <button class="admin-side-tab" data-target-tab="gias-backfill" id="side-tab-btn-gias-backfill" title="DfE GIAS Backfill">
+            <span class="side-tab-icon"><i class="fa-solid fa-landmark-dome" style="color: #0284c7;"></i></span>
             <div class="side-tab-info">
-              <span class="side-tab-title">Merge &amp; De-Duplicate</span>
-              <span class="side-tab-desc">Scanner &amp; side-by-side diff</span>
+              <span class="side-tab-title">DfE GIAS Backfill</span>
+              <span class="side-tab-desc">Ofsted, URNs &amp; Official Sites</span>
+            </div>
+          </button>
+
+          <button class="admin-side-tab" data-target-tab="admissions-guardrails" id="side-tab-btn-admissions-guardrails" title="Admissions Guardrails">
+            <span class="side-tab-icon"><i class="fa-solid fa-shield-halved" style="color: #10b981;"></i></span>
+            <div class="side-tab-info">
+              <span class="side-tab-title">Admissions Guardrails</span>
+              <span class="side-tab-desc">Milestone Chronology &amp; Stale Dates</span>
+            </div>
+          </button>
+
+          <button class="admin-side-tab" data-target-tab="website-health" id="side-tab-btn-website-health" title="Website Health">
+            <span class="side-tab-icon"><i class="fa-solid fa-heart-pulse" style="color: #ec4899;"></i></span>
+            <div class="side-tab-info">
+              <span class="side-tab-title">Website Health</span>
+              <span class="side-tab-desc">Dead Links &amp; HTTPS Upgrader</span>
+            </div>
+          </button>
+
+          <button class="admin-side-tab" data-target-tab="deduplication" id="side-tab-btn-deduplication" title="Deduplication">
+            <span class="side-tab-icon"><i class="fa-solid fa-code-merge" style="color: #8b5cf6;"></i></span>
+            <div class="side-tab-info">
+              <span class="side-tab-title">Deduplication</span>
+              <span class="side-tab-desc">Duplicate Linkage &amp; Atomic Merge</span>
             </div>
           </button>
 
@@ -598,6 +639,22 @@
                 <div class="filter-header">
                   <h3><i class="fa-solid fa-sliders"></i> Filter Database</h3>
                   <button id="reset-filters-btn" class="btn-text">Reset All</button>
+                </div>
+
+                <!-- Distance from Home Postcode -->
+                <div class="filter-group">
+                  <label><i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> Your Home Postcode</label>
+                  <div style="display: flex; gap: 0.35rem;">
+                    <input type="text" id="filter-user-postcode" placeholder="e.g. SW19 4TT" style="flex: 1; padding: 0.45rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.82rem;">
+                    <select id="filter-max-distance" onchange="loadSchools()" title="Maximum Distance Radius" style="width: 105px; padding: 0.45rem 0.35rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">
+                      <option value="">Any Dist</option>
+                      <option value="3">≤ 3 miles</option>
+                      <option value="5">≤ 5 miles</option>
+                      <option value="10">≤ 10 miles</option>
+                      <option value="15">≤ 15 miles</option>
+                      <option value="25">≤ 25 miles</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div class="filter-group">
@@ -864,16 +921,16 @@
                   <!-- Batch Options -->
                   <div id="scanner-batch-options" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
                     <select id="scanner-priority-category" style="font-size: 0.82rem; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid #cbd5e1; background: white;">
+                      <option value="UNVERIFIED" selected>⚡ All Un-enriched Schools (Priority Queue)</option>
                       <option value="CURRENT_TAB">🎯 Active Tab Category (Unscanned First)</option>
-                      <option value="UNVERIFIED">⚡ All Unscanned Schools (Priority)</option>
-                      <option value="GREATER_LONDON">🏛️ Greater London Region (All Types)</option>
-                      <option value="LONDON_INDEPENDENT" selected>1. London Area Independent Schools</option>
-                      <option value="ALL_INDEPENDENT">2. All Independent Schools</option>
-                      <option value="GRAMMAR">3. Selective Grammar Schools</option>
-                      <option value="STATE_COMPREHENSIVE">4. State Comprehensive Schools</option>
-                      <option value="CRITICAL_INVERSIONS">5. Critical Inversions &amp; Anomalies</option>
-                      <option value="MISSING_WEBSITES">6. Missing Info &amp; URLs</option>
-                      <option value="ALL">7. All Remaining Schools</option>
+                      <option value="ALL_INDEPENDENT">1. All Independent Schools (Un-enriched)</option>
+                      <option value="STATE_COMPREHENSIVE">2. State Comprehensive Schools (Un-enriched)</option>
+                      <option value="GRAMMAR">3. Selective Grammar Schools (Un-enriched)</option>
+                      <option value="LONDON_INDEPENDENT">4. London Area Independent Schools</option>
+                      <option value="GREATER_LONDON">5. Greater London Region (All Types)</option>
+                      <option value="CRITICAL_INVERSIONS">6. Critical Inversions &amp; Anomalies</option>
+                      <option value="MISSING_WEBSITES">7. Missing Info &amp; URLs</option>
+                      <option value="ALL">8. All Remaining Schools (Un-enriched)</option>
                     </select>
                     <select id="scanner-batch-limit" style="font-size: 0.82rem; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid #cbd5e1; background: white;">
                       <option value="5">5 schools</option>
@@ -881,6 +938,8 @@
                       <option value="25" selected>25 schools</option>
                       <option value="50">50 schools</option>
                       <option value="100">100 schools</option>
+                      <option value="200">200 schools</option>
+                      <option value="500">500 schools</option>
                     </select>
                   </div>
 
@@ -937,6 +996,9 @@
                   </div>
                 </div>
                 <div style="display: flex; gap: 0.4rem; align-items: center;">
+                  <a id="raw-llm-google-search-btn" href="https://www.google.com" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="font-size: 0.76rem; padding: 0.25rem 0.65rem; color: #38bdf8; border-color: #0284c7; background: #082f49; text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem;" title="Compare with live browser Google search results for this school">
+                    <i class="fa-brands fa-google"></i> Google Search Reference
+                  </a>
                   <button type="button" class="btn btn-outline" id="btn-toggle-raw-llm-panel" style="font-size: 0.76rem; padding: 0.25rem 0.65rem; color: #cbd5e1; border-color: #475569; background: #1e293b;">
                     <i class="fa-solid fa-code"></i> <span id="btn-text-toggle-raw-llm">Show Raw Messages</span>
                   </button>
@@ -1149,9 +1211,30 @@
           <!-- ================= TAB 3: DATA CORRECTIONS ================= -->
           <div id="admin-subpane-corrections" class="admin-subpane" style="display: none;">
             
+            <!-- System-Detected Conflicts & Queue -->
+            <div class="admin-card" id="admin-system-corrections-card" style="margin-bottom: 1.5rem;">
+              <div class="card-title-bar" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                <div>
+                  <h3 style="margin: 0;"><i class="fa-solid fa-code-compare" style="color: #ea580c;"></i> System-Detected Data Conflicts &amp; Correction Queue</h3>
+                  <div id="system-corrections-scan-status" style="font-size: 0.75rem; color: #64748b; margin-top: 0.2rem;">
+                    <i class="fa-solid fa-database"></i> Loading persisted scan records...
+                  </div>
+                </div>
+                <button id="refresh-system-corrections-btn" class="btn btn-primary" style="background: #ea580c; border-color: #ea580c; font-size: 0.82rem; padding: 0.4rem 0.9rem; display: inline-flex; align-items: center; gap: 0.35rem;">
+                  <i class="fa-solid fa-arrows-rotate"></i> Run Conflict &amp; Overlap Scan
+                </button>
+              </div>
+              <p class="helper-text">Identifies school profiles that share an identifier (such as a shared DfE URN) but have conflicting school names, postcodes, or co-located studio school specs that do not meet genuine duplicate criteria. Admins can inspect details, edit profiles, or clear erroneous URNs.</p>
+
+              <div id="admin-system-corrections-container">
+                <div style="text-align: center; color: #94a3b8; padding: 1.5rem;">Loading system-detected data conflicts...</div>
+              </div>
+            </div>
+
+            <!-- Crowdsourced User Reports -->
             <div class="admin-card" id="admin-field-reports-card">
               <div class="card-title-bar">
-                <h3><i class="fa-solid fa-triangle-exclamation" style="color: #ea580c;"></i> User Reported Data Errors &amp; Field Corrections</h3>
+                <h3><i class="fa-solid fa-triangle-exclamation" style="color: #ea580c;"></i> User-Reported Data Errors &amp; Field Corrections</h3>
                 <button id="refresh-field-reports-btn" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.35rem 0.7rem;">
                   <i class="fa-solid fa-rotate"></i> Refresh Error Audit
                 </button>
@@ -1168,78 +1251,248 @@
 
 
 
-          <!-- ================= TAB 4: MERGE & DE-DUPLICATE ================= -->
-          <div id="admin-subpane-merge" class="admin-subpane" style="display: none;">
-            
-            <div class="admin-card" id="merge-dedup-card">
+          <!-- ================= TAB: DfE GIAS MASTER BACKFILL ================= -->
+          <div id="admin-subpane-gias-backfill" class="admin-subpane" style="display: none;">
+            <div class="admin-card">
               <div class="card-title-bar">
-                <h3><i class="fa-solid fa-code-merge" style="color:#7c3aed;"></i> Merge &amp; De-duplicate Database</h3>
-                <button id="run-dedup-scan-btn" class="btn btn-primary" style="background:#7c3aed; border-color:#7c3aed; font-size:0.85rem; padding:0.45rem 1rem;">
-                  <i class="fa-solid fa-magnifying-glass"></i> Scan for Duplicates
+                <h3><i class="fa-solid fa-landmark-dome" style="color: #0284c7;"></i> DfE GIAS Master Ingestion &amp; Backfill</h3>
+                <button id="trigger-gias-backfill-btn" class="btn btn-primary" style="background: #0284c7; border-color: #0284c7; font-size: 0.85rem; padding: 0.45rem 1rem;">
+                  <i class="fa-solid fa-play"></i> Trigger DfE GIAS Backfill
                 </button>
               </div>
-              <p class="helper-text">Scan the entire school database for potential duplicate entries, or manually pick any two schools below to merge side-by-side.</p>
+              <p class="helper-text">Cross-references all 6,487 schools against the official UK Department for Education *Get Information About Schools* master register to backfill missing Ofsted inspection grades, official URNs, websites, and verified telephone contacts.</p>
 
-              <!-- Manual Merge Selector Box with Typeaheads -->
-              <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; margin-top: 0.8rem; margin-bottom: 1rem; overflow: visible; position: relative;">
-                <div style="font-weight: 700; font-size: 0.9rem; color: #334155; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem;">
-                  <i class="fa-solid fa-hand-pointer" style="color: #7c3aed;"></i> Manually Select Any Two Schools to Merge:
+              <!-- Direct DfE GIAS URN Lookup & Ingestion Tool -->
+              <div style="background: #ffffff; border: 1px solid #bae6fd; border-radius: 10px; padding: 1.25rem; margin: 1.25rem 0 0.5rem 0; box-shadow: 0 2px 6px rgba(2, 132, 199, 0.06);">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+                  <div style="font-weight: 700; color: #0369a1; font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-magnifying-glass-location" style="color: #0284c7;"></i> Direct DfE GIAS URN Ingestion &amp; Live Sync
+                  </div>
+                  <span style="font-size: 0.72rem; background: #e0f2fe; color: #0284c7; padding: 0.15rem 0.55rem; border-radius: 9999px; font-weight: 700;">Single School Lookup</span>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.8rem; align-items: end; overflow: visible;">
-                  
-                  <!-- Typeahead School A -->
-                  <div style="position: relative; overflow: visible;">
-                    <label style="font-size: 0.78rem; font-weight: 600; color: #64748b; display: block; margin-bottom: 0.25rem;">
-                      <i class="fa-solid fa-a" style="color: #2563eb;"></i> Primary Record A (Will be updated)
-                    </label>
-                    <input type="text" id="manual-merge-input-a" placeholder="Type school name or URN..." autocomplete="off" style="width: 100%; padding: 0.5rem 0.65rem; font-size: 0.85rem; border: 1px solid #cbd5e1; border-radius: 8px;">
-                    <input type="hidden" id="manual-merge-school-a">
-                    <div id="manual-merge-suggestions-a" style="position: absolute; top: 100%; left: 0; right: 0; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 240px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.25);"></div>
+                <p style="font-size: 0.82rem; color: #475569; margin-bottom: 0.75rem;">Type an official 6-digit Department for Education Unique Reference Number (URN) to query GIAS live. You can review the fetched attributes against current database records, choose which fields to import, make custom edits, and save.</p>
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                  <div style="position: relative; flex: 1; min-width: 240px; max-width: 380px;">
+                    <i class="fa-solid fa-hashtag" style="position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 0.85rem;"></i>
+                    <input type="text" id="gias-lookup-urn-input" class="form-control" placeholder="Enter 6-digit URN (e.g. 100537, 101954)" maxlength="10" style="padding-left: 2rem; font-size: 0.88rem;">
                   </div>
+                  <button id="gias-lookup-urn-btn" class="btn btn-primary" style="background: #0284c7; border-color: #0284c7; font-size: 0.85rem; padding: 0.45rem 1rem;">
+                    <i class="fa-solid fa-cloud-arrow-down"></i> Fetch &amp; Ingest DfE Details
+                  </button>
+                </div>
+                <div id="gias-lookup-error" style="color: #dc2626; font-size: 0.82rem; margin-top: 0.5rem; display: none;"></div>
+              </div>
 
-                  <!-- Typeahead School B -->
-                  <div style="position: relative; overflow: visible;">
-                    <label style="font-size: 0.78rem; font-weight: 600; color: #64748b; display: block; margin-bottom: 0.25rem;">
-                      <i class="fa-solid fa-b" style="color: #7c3aed;"></i> Candidate Record B (Will be deleted)
-                    </label>
-                    <input type="text" id="manual-merge-input-b" placeholder="Type school name or URN..." autocomplete="off" style="width: 100%; padding: 0.5rem 0.65rem; font-size: 0.85rem; border: 1px solid #cbd5e1; border-radius: 8px;">
-                    <input type="hidden" id="manual-merge-school-b">
-                    <div id="manual-merge-suggestions-b" style="position: absolute; top: 100%; left: 0; right: 0; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; max-height: 240px; overflow-y: auto; z-index: 9999; display: none; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.25);"></div>
-                  </div>
-
-                  <div>
-                    <button id="manual-merge-trigger-btn" class="btn btn-primary" style="width: 100%; background: #7c3aed; border-color: #7c3aed; font-size: 0.85rem; padding: 0.5rem 0.9rem;">
-                      <i class="fa-solid fa-code-merge"></i> Compare &amp; Merge Selected
-                    </button>
-                  </div>
+              <!-- GIAS Metrics Grid -->
+              <div class="stats-pills-row" style="margin: 1.25rem 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                <div class="stat-pill" style="background: #f0f9ff; border: 1px solid #bae6fd; padding: 1rem; border-radius: 10px;">
+                  <div style="font-size: 0.8rem; color: #0369a1; font-weight: 600;"><i class="fa-solid fa-database"></i> Total Schools</div>
+                  <div id="gias-stat-total" style="font-size: 1.6rem; font-weight: 800; color: #0c4a6e; margin-top: 0.25rem;">6,487</div>
+                </div>
+                <div class="stat-pill" style="background: #fefce8; border: 1px solid #fef08a; padding: 1rem; border-radius: 10px;">
+                  <div style="font-size: 0.8rem; color: #854d0e; font-weight: 600;"><i class="fa-solid fa-certificate"></i> Missing Ofsted</div>
+                  <div id="gias-stat-ofsted" style="font-size: 1.6rem; font-weight: 800; color: #713f12; margin-top: 0.25rem;">6,188</div>
+                </div>
+                <div class="stat-pill" style="background: #fdf2f8; border: 1px solid #fbcfe8; padding: 1rem; border-radius: 10px;">
+                  <div style="font-size: 0.8rem; color: #9d174d; font-weight: 600;"><i class="fa-solid fa-globe"></i> Missing Websites</div>
+                  <div id="gias-stat-websites" style="font-size: 1.6rem; font-weight: 800; color: #831843; margin-top: 0.25rem;">2,383</div>
+                </div>
+                <div class="stat-pill" style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 1rem; border-radius: 10px;">
+                  <div style="font-size: 0.8rem; color: #166534; font-weight: 600;"><i class="fa-solid fa-id-badge"></i> Missing URNs</div>
+                  <div id="gias-stat-urns" style="font-size: 1.6rem; font-weight: 800; color: #14532d; margin-top: 0.25rem;">28</div>
                 </div>
               </div>
 
-              <!-- Scan Summary Pills -->
-              <div id="dedup-scan-summary" style="display:none;" class="stats-pills-row">
-                <div class="stat-pill dup"><i class="fa-solid fa-clone"></i> Duplicate Pairs Found: <strong id="dedup-pair-count">0</strong></div>
-                <div class="stat-pill valid"><i class="fa-solid fa-database"></i> Total Records Scanned: <strong id="dedup-total-count">0</strong></div>
-              </div>
-
-              <!-- Scan Results Panel -->
-              <div id="dedup-scan-results" style="display:none; margin-top: 1rem;">
-                <!-- Empty State -->
-                <div id="dedup-empty-state" style="display:none; text-align:center; padding: 2.5rem 1rem; background: #f0fdf4; border-radius: 10px; border: 1px solid #bbf7d0;">
-                  <i class="fa-solid fa-circle-check" style="font-size:2.5rem; color:#22c55e; display:block; margin-bottom:0.75rem;"></i>
-                  <strong style="font-size:1.05rem; color:#166534;">No Duplicate Records Found</strong>
-                  <p style="color:#4ade80; margin-top:0.35rem; font-size:0.88rem;">All school records appear to be unique based on name and URN matching.</p>
+              <!-- GIAS Results Feed -->
+              <div id="gias-results-container" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.25rem; margin-top: 1rem;">
+                <div style="font-weight: 700; font-size: 0.95rem; color: #1e293b; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between;">
+                  <span><i class="fa-solid fa-bolt" style="color: #0284c7;"></i> GIAS Ingestion Feed &amp; Backfill Activity</span>
+                  <span id="gias-activity-badge" class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 0.75rem;">Ready</span>
                 </div>
-
-                <!-- Duplicate Pairs Table -->
-                <div id="dedup-pairs-container">
-                  <!-- Each duplicate pair is a collapsible row group rendered by JS -->
+                <div id="gias-output-log" style="font-family: monospace; font-size: 0.85rem; color: #334155; max-height: 280px; overflow-y: auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.85rem; line-height: 1.6;">
+                  Click "Trigger DfE GIAS Backfill" to cross-reference and populate missing official metadata.
                 </div>
               </div>
+            </div>
+          </div>
 
-              <!-- Loading Spinner -->
-              <div id="dedup-loading" style="display:none; text-align:center; padding:2rem 1rem;">
-                <i class="fa-solid fa-circle-notch fa-spin" style="font-size:2rem; color:#7c3aed;"></i>
-                <p style="color:#64748b; margin-top:0.75rem; font-size:0.9rem;">Scanning database for duplicate school records…</p>
+          <!-- ================= TAB: ADMISSIONS GUARDRAILS ================= -->
+          <div id="admin-subpane-admissions-guardrails" class="admin-subpane" style="display: none;">
+            <div class="admin-card">
+              <div class="card-title-bar">
+                <h3><i class="fa-solid fa-shield-halved" style="color: #10b981;"></i> Admissions Chronology &amp; Cycle Integrity Guardrails</h3>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                  <button id="trigger-guardrails-audit-btn" class="btn btn-primary" style="background: #10b981; border-color: #10b981; font-size: 0.85rem; padding: 0.45rem 1rem;">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Run Audit &amp; Auto-Fix
+                  </button>
+                </div>
+              </div>
+              <p class="helper-text">Enforces timeline milestone sequence order (Registration &le; Stage 1 &le; Stage 2 &le; Results &le; Offers &le; Acceptance), detects stale prior-cycle dates (2023/2024), and enforces institutional sanity rules (state school fee nullity and comprehensive entry rules).</p>
+
+              <!-- Guardrails Metrics Grid -->
+              <div class="stats-pills-row" style="margin: 1.25rem 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                <div class="stat-pill" style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 1rem; border-radius: 10px;">
+                  <div style="font-size: 0.8rem; color: #166534; font-weight: 600;"><i class="fa-solid fa-check-double"></i> Verified Chronology</div>
+                  <div id="guardrails-stat-verified" style="font-size: 1.6rem; font-weight: 800; color: #14532d; margin-top: 0.25rem;">6,487</div>
+                </div>
+                <div class="stat-pill" style="background: #fef2f2; border: 1px solid #fecaca; padding: 1rem; border-radius: 10px;">
+                  <div style="font-size: 0.8rem; color: #991b1b; font-weight: 600;"><i class="fa-solid fa-clock-rotate-left"></i> Stale Prior Dates (2023/24)</div>
+                  <div id="guardrails-stat-stale" style="font-size: 1.6rem; font-weight: 800; color: #7f1d1d; margin-top: 0.25rem;">43</div>
+                </div>
+                <div class="stat-pill" style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 1rem; border-radius: 10px;">
+                  <div style="font-size: 0.8rem; color: #1e40af; font-weight: 600;"><i class="fa-solid fa-scale-balanced"></i> Sanity Rules Active</div>
+                  <div id="guardrails-stat-sanity" style="font-size: 1.6rem; font-weight: 800; color: #1e3a8a; margin-top: 0.25rem;">4,172</div>
+                </div>
+              </div>
+
+              <!-- Flagged Schools Table -->
+              <div style="margin-top: 1.25rem;">
+                <div style="font-weight: 700; font-size: 0.95rem; color: #1e293b; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between;">
+                  <span><i class="fa-solid fa-triangle-exclamation" style="color: #ea580c;"></i> Profiles Flagged for 2026/2027 Gemini Recrawl</span>
+                  <span id="guardrails-flagged-count" class="badge" style="background: #ffedd5; color: #9a3412; font-size: 0.75rem;">43 Flagged</span>
+                </div>
+                <div id="guardrails-flagged-table-container" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow-x: auto; max-height: 320px;">
+                  <!-- JS Populated table -->
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ================= TAB: WEBSITE HEALTH VERIFIER ================= -->
+          <div id="admin-subpane-website-health" class="admin-subpane" style="display: none;">
+            <div class="admin-card">
+              <div class="card-title-bar">
+                <h3><i class="fa-solid fa-heart-pulse" style="color: #ec4899;"></i> Automated Website Health &amp; Dead Link Checker</h3>
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                  <select id="website-health-limit" style="font-size: 0.85rem; padding: 0.4rem 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; background: #ffffff;">
+                    <option value="50">Test 50 Websites</option>
+                    <option value="150" selected>Test 150 Websites</option>
+                    <option value="500">Test 500 Websites</option>
+                  </select>
+                  <button id="trigger-website-health-btn" class="btn btn-primary" style="background: #ec4899; border-color: #ec4899; font-size: 0.85rem; padding: 0.45rem 1rem;">
+                    <i class="fa-solid fa-stethoscope"></i> Run Health Audit
+                  </button>
+                </div>
+              </div>
+              <p class="helper-text">Performs non-blocking HTTP health checks on school URLs, automatically upgrades HTTP to HTTPS on 301 redirects, and tags broken or unreachable domains (`dead_website`) to prevent invalid crawls.</p>
+
+              <!-- Website Health Metrics Grid -->
+              <div class="stats-pills-row" style="margin: 1.25rem 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+                <div class="stat-pill webhealth-clickable-card" id="webhealth-stat-total-card" data-category="registered" onclick="openWebsiteHealthCategoryModal('registered')" style="background: #fdf2f8; border: 1px solid #fbcfe8; padding: 1rem; border-radius: 10px; cursor: pointer; transition: all 0.2s ease;" title="Click to view all registered school websites">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 0.8rem; color: #9d174d; font-weight: 600;"><i class="fa-solid fa-globe"></i> Registered Websites</div>
+                    <span style="font-size: 0.7rem; color: #db2777; background: #fce7f3; padding: 0.15rem 0.4rem; border-radius: 4px;"><i class="fa-solid fa-up-right-from-square"></i> View</span>
+                  </div>
+                  <div id="webhealth-stat-total" style="font-size: 1.6rem; font-weight: 800; color: #831843; margin-top: 0.25rem;">-</div>
+                </div>
+
+                <div class="stat-pill webhealth-clickable-card" id="webhealth-stat-unscanned-card" data-category="unscanned" onclick="openWebsiteHealthCategoryModal('unscanned')" style="background: #fefce8; border: 1px solid #fef08a; padding: 1rem; border-radius: 10px; cursor: pointer; transition: all 0.2s ease;" title="Click to view unscanned websites (prioritized first in audits)">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 0.8rem; color: #854d0e; font-weight: 600;"><i class="fa-solid fa-clock"></i> Never Scanned</div>
+                    <span style="font-size: 0.7rem; color: #a16207; background: #fef9c3; padding: 0.15rem 0.4rem; border-radius: 4px;"><i class="fa-solid fa-up-right-from-square"></i> View</span>
+                  </div>
+                  <div id="webhealth-stat-unscanned" style="font-size: 1.6rem; font-weight: 800; color: #713f12; margin-top: 0.25rem;">-</div>
+                </div>
+
+                <div class="stat-pill webhealth-clickable-card" id="webhealth-stat-https-card" data-category="https" onclick="openWebsiteHealthCategoryModal('https')" style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 1rem; border-radius: 10px; cursor: pointer; transition: all 0.2s ease;" title="Click to view standardized HTTPS websites">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 0.8rem; color: #166534; font-weight: 600;"><i class="fa-solid fa-shield-check"></i> Standardized HTTPS</div>
+                    <span style="font-size: 0.7rem; color: #15803d; background: #dcfce7; padding: 0.15rem 0.4rem; border-radius: 4px;"><i class="fa-solid fa-up-right-from-square"></i> View</span>
+                  </div>
+                  <div id="webhealth-stat-https" style="font-size: 1.6rem; font-weight: 800; color: #14532d; margin-top: 0.25rem;">-</div>
+                </div>
+
+                <div class="stat-pill webhealth-clickable-card" id="webhealth-stat-dead-card" data-category="dead" onclick="openWebsiteHealthCategoryModal('dead')" style="background: #fff1f2; border: 1px solid #fecdd3; padding: 1rem; border-radius: 10px; cursor: pointer; transition: all 0.2s ease;" title="Click to view broken or unreachable domains">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 0.8rem; color: #9f1239; font-weight: 600;"><i class="fa-solid fa-link-slash"></i> Dead / Unreachable</div>
+                    <span style="font-size: 0.7rem; color: #be123c; background: #ffe4e6; padding: 0.15rem 0.4rem; border-radius: 4px;"><i class="fa-solid fa-up-right-from-square"></i> View</span>
+                  </div>
+                  <div id="webhealth-stat-dead" style="font-size: 1.6rem; font-weight: 800; color: #881337; margin-top: 0.25rem;">-</div>
+                </div>
+              </div>
+
+              <!-- Website Health Log & Results Container -->
+              <div id="website-health-results-container" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.25rem; margin-top: 1rem;">
+                <div style="font-weight: 700; font-size: 0.95rem; color: #1e293b; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between;">
+                  <span><i class="fa-solid fa-list-check" style="color: #ec4899;"></i> Link Verifier Execution Log</span>
+                  <span id="webhealth-status-badge" class="badge" style="background: #fce7f3; color: #9d174d; font-size: 0.75rem;">Idle</span>
+                </div>
+                <div id="website-health-output-log" style="font-family: monospace; font-size: 0.85rem; color: #334155; max-height: 200px; overflow-y: auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.85rem; line-height: 1.6;">
+                  Select a sample size and click "Run Health Audit" to begin link verification.
+                </div>
+
+                <!-- Detailed Scan Outcome Table -->
+                <div id="website-health-table-wrapper" style="margin-top: 1.25rem; display: none;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <div style="font-weight: 700; font-size: 0.95rem; color: #1e293b; display: flex; align-items: center; gap: 0.4rem;">
+                      <i class="fa-solid fa-table-list" style="color: #ec4899;"></i> Detailed Domain Outcome Results (<span id="webhealth-table-count">0</span>)
+                    </div>
+                    <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
+                      <input type="text" id="webhealth-filter-input" placeholder="Filter by school or domain..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 6px; width: 220px;">
+                      <select id="webhealth-status-filter" style="font-size: 0.8rem; padding: 0.35rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+                        <option value="ALL">All Outcomes</option>
+                        <option value="DEAD">Dead / Broken Only</option>
+                        <option value="UPGRADED">Auto-Upgraded HTTPS</option>
+                        <option value="HEALTHY">Healthy / Active</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style="max-height: 420px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff;">
+                    <table class="table" style="width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0;">
+                      <thead style="background: #f8fafc; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #e2e8f0;">
+                        <tr>
+                          <th style="padding: 0.6rem 0.75rem; text-align: left; color: #475569;">School Name</th>
+                          <th style="padding: 0.6rem 0.75rem; text-align: left; color: #475569;">Tested Domain</th>
+                          <th style="padding: 0.6rem 0.75rem; text-align: center; color: #475569;">HTTP Status</th>
+                          <th style="padding: 0.6rem 0.75rem; text-align: center; color: #475569;">Latency</th>
+                          <th style="padding: 0.6rem 0.75rem; text-align: left; color: #475569;">Action / Outcome</th>
+                          <th style="padding: 0.6rem 0.75rem; text-align: center; color: #475569;">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody id="website-health-table-body">
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ================= TAB: DEDUPLICATION & RECORD LINKAGE ================= -->
+          <div id="admin-subpane-deduplication" class="admin-subpane" style="display: none;">
+            
+            <div class="admin-card" id="dedup-quality-card">
+              <div class="card-title-bar">
+                <h3><i class="fa-solid fa-code-merge" style="color:#8b5cf6;"></i> Record Linkage, Deduplication &amp; Atomic Merge</h3>
+                <button id="run-quality-dedup-scan-btn" class="btn btn-primary" style="background:#8b5cf6; border-color:#8b5cf6; font-size:0.85rem; padding:0.45rem 1rem;">
+                  <i class="fa-solid fa-magnifying-glass"></i> Scan Duplicate Candidates
+                </button>
+              </div>
+              <p class="helper-text">Scans the entire database using shared DfE URNs and Postcode + Jaro-Winkler fuzzy name matching. You can review detected pairs and perform a 1-click atomic merge without losing any historical admissions dates.</p>
+
+              <!-- Duplicate Candidate Pairs Container -->
+              <div id="quality-dedup-pairs-container" style="margin-top: 1rem;">
+                <div style="text-align: center; color: #94a3b8; padding: 2rem;">Click "Scan Duplicate Candidates" to find potential duplicate records.</div>
+              </div>
+            </div>
+
+            <!-- Reviewed & Dismissed Pairs Card -->
+            <div class="admin-card" id="reviewed-pairs-card" style="margin-top: 1.5rem;">
+              <div class="card-title-bar" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                  <h3 style="margin: 0;"><i class="fa-solid fa-shield-check" style="color:#059669;"></i> Reviewed &amp; Dismissed Pairs</h3>
+                  <span id="reviewed-pairs-count-pill" style="font-size: 0.76rem; font-weight: 700; color: #166534; background: #dcfce7; padding: 0.18rem 0.55rem; border-radius: 999px;">
+                    0 pairs
+                  </span>
+                </div>
+                <button type="button" id="toggle-reviewed-pairs-btn" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+                  <i class="fa-solid fa-chevron-down"></i> Show Dismissed Pairs
+                </button>
+              </div>
+              <p class="helper-text">School pairs that were manually reviewed by administrators and confirmed as distinct institutions. These pairs are permanently excluded from future duplicate detection scans.</p>
+
+              <div id="reviewed-pairs-container" style="display: none; margin-top: 1rem;">
+                <div style="text-align: center; color: #94a3b8; padding: 1.5rem;">Loading reviewed pairs...</div>
               </div>
             </div>
 
@@ -1747,6 +2000,8 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
                     <button type="button" class="btn-insert-placeholder chip-btn" data-tag="{{region}}">{{region}}</button>
                     <button type="button" class="btn-insert-placeholder chip-btn" data-tag="{{postcode}}">{{postcode}}</button>
                     <button type="button" class="btn-insert-placeholder chip-btn" data-tag="{{website}}">{{website}}</button>
+                    <button type="button" class="btn-insert-placeholder chip-btn" data-tag="{{website_domain}}">{{website_domain}}</button>
+                    <button type="button" class="btn-insert-placeholder chip-btn" data-tag="{{search_queries}}">{{search_queries}}</button>
                     <button type="button" class="btn-insert-placeholder chip-btn" data-tag="{{school_type}}">{{school_type}}</button>
                     <button type="button" class="btn-insert-placeholder chip-btn" data-tag="{{urn}}">{{urn}}</button>
                     <button type="button" class="btn-insert-placeholder chip-btn" data-tag="{{address}}">{{address}}</button>
@@ -1876,12 +2131,182 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
                   <input type="range" id="weight-type" min="0" max="100" value="10" style="width: 100%; cursor: pointer;">
                 </div>
 
-                <div style="grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem;">
-                  <button type="submit" class="btn btn-primary" style="font-size: 0.88rem; padding: 0.6rem 1.25rem;">
-                    <i class="fa-solid fa-floppy-disk"></i> Save Algorithm Weights
+            <!-- School Data Completeness Scoring Weights & Formula Card -->
+            <div class="admin-card" style="margin-top: 1.5rem; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+              <div class="card-title-bar" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 1rem; margin-bottom: 1rem;">
+                <div>
+                  <h3 style="margin: 0; font-size: 1.15rem; font-weight: 800; color: #0f172a; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-chart-pie" style="color: #059669;"></i> School Data Completeness Scoring Weights
+                  </h3>
+                  <p class="helper-text" style="margin: 0.35rem 0 0; font-size: 0.82rem; color: #64748b;">
+                    Configure the relative point weightage for computing the 0–100% Data Completeness Score for each school. Key decision fields (Website, Exam Dates) receive higher weight, while auxiliary fields receive lower weight.
+                  </p>
+                </div>
+                <div style="display: flex; gap: 0.6rem; align-items: center;">
+                  <span id="completeness-weights-total-pill" style="font-size: 0.82rem; font-weight: 700; color: #166534; background: #dcfce7; border: 1px solid #bbf7d0; padding: 0.25rem 0.65rem; border-radius: 6px;">
+                    Total: 100 Points
+                  </span>
+                </div>
+              </div>
+
+              <!-- Distribution Overview Metrics -->
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem;">
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.65rem 0.85rem;">
+                  <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #64748b;">Avg Completeness</div>
+                  <div id="completeness-metric-avg" style="font-size: 1.2rem; font-weight: 800; color: #0f172a;">--%</div>
+                </div>
+                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 0.65rem 0.85rem;">
+                  <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #166534;">High (80-100%)</div>
+                  <div id="completeness-metric-excellent" style="font-size: 1.2rem; font-weight: 800; color: #15803d;">0</div>
+                </div>
+                <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 0.65rem 0.85rem;">
+                  <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #1e40af;">Good (60-79%)</div>
+                  <div id="completeness-metric-good" style="font-size: 1.2rem; font-weight: 800; color: #2563eb;">0</div>
+                </div>
+                <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 0.65rem 0.85rem;">
+                  <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #92400e;">Fair (40-59%)</div>
+                  <div id="completeness-metric-fair" style="font-size: 1.2rem; font-weight: 800; color: #d97706;">0</div>
+                </div>
+                <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 0.65rem 0.85rem;">
+                  <div style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #991b1b;">Incomplete (&lt;40%)</div>
+                  <div id="completeness-metric-poor" style="font-size: 1.2rem; font-weight: 800; color: #dc2626;">0</div>
+                </div>
+              </div>
+
+              <!-- Weights Grid -->
+              <form id="completeness-weights-form" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
+                
+                <!-- 1. Website (High Priority) -->
+                <div class="weight-control-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem;">
+                  <label style="font-size: 0.82rem; font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                    <span><i class="fa-solid fa-globe" style="color: #2563eb;"></i> Official Website URL</span>
+                    <span id="cweight-val-website" style="color: #2563eb; font-weight: 800;">20 Pts</span>
+                  </label>
+                  <input type="range" id="cweight-website" min="0" max="50" value="20" style="width: 100%; cursor: pointer;">
+                  <span style="font-size: 0.7rem; color: #64748b;">Highest priority: school domain &amp; portal link</span>
+                </div>
+
+                <!-- 2. Exam Dates (High Priority) -->
+                <div class="weight-control-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem;">
+                  <label style="font-size: 0.82rem; font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                    <span><i class="fa-solid fa-calendar-days" style="color: #ea580c;"></i> 11+ Admissions Dates</span>
+                    <span id="cweight-val-examDates" style="color: #ea580c; font-weight: 800;">25 Pts</span>
+                  </label>
+                  <input type="range" id="cweight-examDates" min="0" max="50" value="25" style="width: 100%; cursor: pointer;">
+                  <span style="font-size: 0.7rem; color: #64748b;">Highest priority: Reg open/close, exam &amp; results</span>
+                </div>
+
+                <!-- 3. Exam Format & Stages -->
+                <div class="weight-control-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem;">
+                  <label style="font-size: 0.82rem; font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                    <span><i class="fa-solid fa-file-signature" style="color: #7c3aed;"></i> Exam Board &amp; Format</span>
+                    <span id="cweight-val-examFormat" style="color: #7c3aed; font-weight: 800;">15 Pts</span>
+                  </label>
+                  <input type="range" id="cweight-examFormat" min="0" max="40" value="15" style="width: 100%; cursor: pointer;">
+                  <span style="font-size: 0.7rem; color: #64748b;">High priority: GL, CEM, ISEB, 2nd stage policy</span>
+                </div>
+
+                <!-- 4. School Type & Gender -->
+                <div class="weight-control-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem;">
+                  <label style="font-size: 0.82rem; font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                    <span><i class="fa-solid fa-school" style="color: #059669;"></i> Type &amp; Gender Policy</span>
+                    <span id="cweight-val-schoolClassification" style="color: #059669; font-weight: 800;">10 Pts</span>
+                  </label>
+                  <input type="range" id="cweight-schoolClassification" min="0" max="30" value="10" style="width: 100%; cursor: pointer;">
+                  <span style="font-size: 0.7rem; color: #64748b;">Grammar, Independent, Gender entry policy</span>
+                </div>
+
+                <!-- 5. Academic Performance & Ofsted -->
+                <div class="weight-control-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem;">
+                  <label style="font-size: 0.82rem; font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                    <span><i class="fa-solid fa-star" style="color: #eab308;"></i> Ofsted &amp; Academic Rank</span>
+                    <span id="cweight-val-academicOfsted" style="color: #eab308; font-weight: 800;">10 Pts</span>
+                  </label>
+                  <input type="range" id="cweight-academicOfsted" min="0" max="30" value="10" style="width: 100%; cursor: pointer;">
+                  <span style="font-size: 0.7rem; color: #64748b;">Ofsted rating, Attainment 8, National ranks</span>
+                </div>
+
+                <!-- 6. Contact Phone & Email -->
+                <div class="weight-control-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem;">
+                  <label style="font-size: 0.82rem; font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                    <span><i class="fa-solid fa-phone" style="color: #0284c7;"></i> Phone &amp; Email Contact</span>
+                    <span id="cweight-val-contactChannels" style="color: #0284c7; font-weight: 800;">8 Pts</span>
+                  </label>
+                  <input type="range" id="cweight-contactChannels" min="0" max="25" value="8" style="width: 100%; cursor: pointer;">
+                  <span style="font-size: 0.7rem; color: #64748b;">Standard priority: Admissions office contacts</span>
+                </div>
+
+                <!-- 7. Address & Geography -->
+                <div class="weight-control-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem;">
+                  <label style="font-size: 0.82rem; font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                    <span><i class="fa-solid fa-map-location-dot" style="color: #ef4444;"></i> Address &amp; Postcode</span>
+                    <span id="cweight-val-addressGeography" style="color: #ef4444; font-weight: 800;">6 Pts</span>
+                  </label>
+                  <input type="range" id="cweight-addressGeography" min="0" max="25" value="6" style="width: 100%; cursor: pointer;">
+                  <span style="font-size: 0.7rem; color: #64748b;">Lower priority: Street address, postcode, LA</span>
+                </div>
+
+                <!-- 8. Leadership & Capacity / Fees -->
+                <div class="weight-control-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem;">
+                  <label style="font-size: 0.82rem; font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                    <span><i class="fa-solid fa-user-tie" style="color: #64748b;"></i> Leadership &amp; Fees</span>
+                    <span id="cweight-val-leadershipCapacity" style="color: #64748b; font-weight: 800;">6 Pts</span>
+                  </label>
+                  <input type="range" id="cweight-leadershipCapacity" min="0" max="25" value="6" style="width: 100%; cursor: pointer;">
+                  <span style="font-size: 0.7rem; color: #64748b;">Lower priority: Headteacher, termly fees, pupils</span>
+                </div>
+
+                <div style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; padding-top: 0.75rem; border-top: 1px solid #e2e8f0;">
+                  <button type="button" class="btn btn-outline" id="btn-reset-completeness-weights" style="font-size: 0.82rem; padding: 0.5rem 1rem;">
+                    <i class="fa-solid fa-rotate-left"></i> Reset to Recommended Defaults
+                  </button>
+                  <button type="button" class="btn btn-primary" id="btn-save-recalc-completeness" style="background: #059669; border-color: #047857; font-size: 0.88rem; padding: 0.6rem 1.4rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.45rem;">
+                    <i class="fa-solid fa-arrows-rotate"></i> Save Weights &amp; Recalculate Master Scores
                   </button>
                 </div>
               </form>
+            </div>
+
+            <!-- Top 500 League Table Rankings Card -->
+            <div class="settings-card" id="settings-card-rankings" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.5rem; margin-top: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.75rem;">
+                <div>
+                  <h3 style="font-size: 1.15rem; font-weight: 700; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-trophy" style="color: #d97706;"></i> UK Top 500 Academic League Table Rankings
+                  </h3>
+                  <p style="color: #64748b; font-size: 0.85rem; margin: 0.25rem 0 0 0;">
+                    Official GCSE and A-Level rankings across England secondary schools (Grammars, Independents, and Academies). Preserves Top 100 data and synchronizes ranks 101 to 500.
+                  </p>
+                </div>
+                <button type="button" class="btn btn-primary" id="btn-sync-top-rankings" style="background: #d97706; border-color: #b45309; font-size: 0.88rem; padding: 0.6rem 1.4rem; font-weight: 700; display: inline-flex; align-items: center; gap: 0.45rem;">
+                  <i class="fa-solid fa-arrows-rotate"></i> Sync Top 500 National Rankings
+                </button>
+              </div>
+
+              <!-- Metrics Row -->
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 1rem; margin-bottom: 1rem; background: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; padding: 1rem;">
+                <div>
+                  <div style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #92400e;">Top 500 GCSE in DB</div>
+                  <div id="rankings-metric-gcse" style="font-size: 1.35rem; font-weight: 800; color: #b45309;">--</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #92400e;">Top 500 A-Level in DB</div>
+                  <div id="rankings-metric-alevel" style="font-size: 1.35rem; font-weight: 800; color: #b45309;">--</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #92400e;">National Overall Ranked</div>
+                  <div id="rankings-metric-national" style="font-size: 1.35rem; font-weight: 800; color: #b45309;">--</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #92400e;">Top 100 Preserved</div>
+                  <div id="rankings-metric-preserved" style="font-size: 1.35rem; font-weight: 800; color: #059669;">100%</div>
+                </div>
+              </div>
+
+              <!-- Top Ranked Preview -->
+              <div id="rankings-preview-list" style="font-size: 0.82rem; color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.75rem 1rem;">
+                <span style="font-weight: 700;">Rankings Coverage:</span> Top 100 (Queen Elizabeth's, St Paul's, Henrietta Barnett, Wilson's, Pate's, Guildford High) + Top 101–225 (English Grammar Schools) + Top 226–500 (Leading Independent Senior Colleges &amp; Outstanding Academies).
+              </div>
             </div>
 
           </div>
@@ -1971,6 +2396,60 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
     </div>
   </div>
 
+  <!-- Deduplication & Record Linkage Merge Review Modal -->
+  <div id="quality-dedup-merge-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card extra-large" style="max-width: 1100px; max-height: 90vh; display: flex; flex-direction: column;">
+      <button class="modal-close-btn" id="modal-close-quality-dedup-merge">&times;</button>
+      <div class="modal-header" style="padding-bottom: 0.75rem; border-bottom: 1px solid #e2e8f0;">
+        <h2><i class="fa-solid fa-code-merge" style="color: #8b5cf6;"></i> Deduplication &amp; Record Linkage Merge Review</h2>
+        <p>Review differences between Record A (Primary) and Record B (Candidate), choose preferred values, or manually edit attributes before merging.</p>
+      </div>
+
+      <div id="quality-dedup-merge-modal-content" style="flex: 1; overflow-y: auto; padding: 1rem 0;">
+        <!-- JS Populated Comparison & Edit Form -->
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 1rem 1.25rem; border-radius: 8px; border-top: 1px solid #e2e8f0; margin-top: 0.5rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div style="font-size: 0.82rem; color: #64748b;">
+          <i class="fa-solid fa-shield-halved" style="color: #8b5cf6;"></i> Merged data will update <strong>Primary Record A</strong>. Historical audit trail is preserved.
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" id="modal-cancel-quality-dedup-merge">Cancel</button>
+          <button type="button" class="btn btn-primary" id="modal-confirm-quality-dedup-merge" style="background: #8b5cf6; border-color: #8b5cf6;">
+            <i class="fa-solid fa-check-double"></i> Confirm &amp; Merge Records
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DfE GIAS Single URN Import & Field Selection Modal -->
+  <div id="gias-urn-import-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card extra-large" style="max-width: 1100px; max-height: 90vh; display: flex; flex-direction: column;">
+      <button class="modal-close-btn" id="modal-close-gias-import">&times;</button>
+      <div class="modal-header" style="padding-bottom: 0.75rem; border-bottom: 1px solid #e2e8f0;">
+        <h2><i class="fa-solid fa-landmark-dome" style="color: #0284c7;"></i> DfE GIAS Record Ingestion &amp; Field Selector</h2>
+        <p>Review fetched official DfE establishment details for URN <strong id="gias-modal-urn-badge">-</strong>. Select fields to import, edit values as needed, and confirm to save.</p>
+      </div>
+
+      <div id="gias-urn-import-modal-content" style="flex: 1; overflow-y: auto; padding: 1rem 0;">
+        <!-- JS Populated Side-by-Side Comparison & Editable Fields -->
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 1rem 1.25rem; border-radius: 8px; border-top: 1px solid #e2e8f0; margin-top: 0.5rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div style="font-size: 0.82rem; color: #64748b;">
+          <i class="fa-solid fa-shield-halved" style="color: #0284c7;"></i> Official DfE GIAS source attribution will be linked to this school record.
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-outline" id="modal-cancel-gias-import">Cancel</button>
+          <button type="button" class="btn btn-primary" id="modal-confirm-gias-import" style="background: #0284c7; border-color: #0284c7;">
+            <i class="fa-solid fa-check-double"></i> Save &amp; Apply to Database
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Specific School Version History & Manual Rollback Modal -->
   <div id="modal-school-version-history" class="modal-overlay">
     <div class="modal-card large" style="max-width: 850px;">
@@ -1988,6 +2467,59 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
 
       <div class="modal-footer" style="display: flex; justify-content: flex-end; padding: 0.75rem 1.25rem; border-top: 1px solid #e2e8f0; background: #f8fafc;">
         <button type="button" class="btn btn-outline" id="btn-close-school-version-history">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Website Health Aggregate Category Details Modal -->
+  <div id="modal-website-health-details" class="modal-overlay" onclick="if(event.target===this) closeWebsiteHealthCategoryModal()">
+    <div class="modal-card large" style="max-width: 920px;" onclick="event.stopPropagation()">
+      <button class="modal-close-btn" id="modal-close-website-health-details" onclick="closeWebsiteHealthCategoryModal()">&times;</button>
+      <div class="modal-header" style="border-bottom: 1px solid #e2e8f0; padding-bottom: 0.75rem;">
+        <h2 style="display: flex; align-items: center; gap: 0.5rem; color: #1e293b;">
+          <i class="fa-solid fa-heart-pulse" style="color: #ec4899;"></i>
+          <span id="webhealth-modal-title">Website Health Breakdown</span>
+        </h2>
+        <p id="webhealth-modal-subtitle" style="margin-top: 0.25rem; font-size: 0.85rem; color: #64748b;">
+          Detailed overview of schools belonging to this category.
+        </p>
+      </div>
+
+      <div style="padding: 1rem 1.25rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="font-size: 0.85rem; color: #475569; font-weight: 600;">
+            Showing <span id="webhealth-modal-count" style="font-weight: 800; color: #0f172a;">0</span> schools
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="text" id="webhealth-modal-search" placeholder="Filter by school name, website, postcode, LA..." style="font-size: 0.82rem; padding: 0.4rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; width: 320px;">
+          </div>
+        </div>
+
+        <div style="max-height: 55vh; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff;">
+          <table class="table" style="width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0;">
+            <thead style="background: #f8fafc; position: sticky; top: 0; z-index: 2; border-bottom: 2px solid #e2e8f0;">
+              <tr>
+                <th style="padding: 0.6rem 0.75rem; text-align: left; color: #475569;">School Name</th>
+                <th style="padding: 0.6rem 0.75rem; text-align: left; color: #475569;">Website</th>
+                <th style="padding: 0.6rem 0.75rem; text-align: center; color: #475569;">Status</th>
+                <th style="padding: 0.6rem 0.75rem; text-align: center; color: #475569;">Last Audited</th>
+                <th style="padding: 0.6rem 0.75rem; text-align: center; color: #475569;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="webhealth-modal-table-body">
+            </tbody>
+          </table>
+          <div id="webhealth-modal-load-more" style="text-align: center; padding: 0.75rem; display: none; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+            <button type="button" class="btn btn-outline" id="webhealth-btn-load-more" onclick="loadMoreWebHealthModalRows()" style="font-size: 0.8rem; padding: 0.35rem 0.85rem;">
+              <i class="fa-solid fa-angles-down"></i> Load More Schools
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.25rem; border-top: 1px solid #e2e8f0; background: #f8fafc;">
+        <span style="font-size: 0.75rem; color: #64748b;"><i class="fa-solid fa-circle-info"></i> Click any school name or "Edit" to inspect and update school data.</span>
+        <button type="button" class="btn btn-outline" id="btn-close-website-health-details" onclick="closeWebsiteHealthCategoryModal()">Close</button>
       </div>
     </div>
   </div>
@@ -2039,6 +2571,13 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
               <option value="Grammar">Grammar</option>
               <option value="Independent">Independent</option>
               <option value="Comprehensive">Comprehensive</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Operating Status *</label>
+            <select id="add-active">
+              <option value="true">Active (Open)</option>
+              <option value="false">Inactive / Closed</option>
             </select>
           </div>
           <div class="form-group">
@@ -2189,9 +2728,9 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
   </div>
 
   <!-- Login / Account Switcher Modal -->
-  <div id="auth-login-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-card" style="max-width: 440px;">
-      <button class="modal-close-btn" id="modal-close-login">&times;</button>
+  <div id="auth-login-modal" class="modal-overlay" style="display: none;" onclick="if(event.target===this) closeLoginModal()">
+    <div class="modal-card" style="max-width: 440px;" onclick="event.stopPropagation()">
+      <button class="modal-close-btn" id="modal-close-login" onclick="closeLoginModal()">&times;</button>
       <div class="modal-header">
         <h2><i class="fa-solid fa-right-to-bracket" style="color: #4f46e5;"></i> Account Login</h2>
         <p>Log in with your email or pick a demo profile to test role permissions.</p>
@@ -2204,8 +2743,9 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
         </label>
         <select id="quick-demo-account-select" class="role-dropdown" style="width: 100%; padding: 0.45rem 0.6rem; font-size: 0.85rem; font-weight: 600;">
           <option value="">-- Pick Demo Profile --</option>
+          <option value="aa@bb.cc|admin">Super Admin (aa@bb.cc)</option>
           <option value="sarah@gmail.com|user">Sarah Jenkins (Parent / User)</option>
-          <option value="david@gmail.com|user">David & Emma Miller (Parent / User)</option>
+          <option value="david@gmail.com|user">David &amp; Emma Miller (Parent / User)</option>
           <option value="priya@gmail.com|user">Priya Patel (Parent / User)</option>
           <option value="admin@edulondon.sch.uk|admin">System Admin (Manager / Admin)</option>
         </select>
@@ -2221,7 +2761,7 @@ IMPORTANT: Output ONLY the raw JSON array without any markdown commentary or tex
           <input type="password" id="login-password" placeholder="••••••••" required>
         </div>
         <div class="modal-footer" style="padding-top: 1rem;">
-          <button type="button" class="btn btn-outline" id="modal-cancel-login">Cancel</button>
+          <button type="button" class="btn btn-outline" id="modal-cancel-login" onclick="closeLoginModal()">Cancel</button>
           <button type="submit" class="btn btn-primary"><i class="fa-solid fa-right-to-bracket"></i> Log In</button>
         </div>
       </form>

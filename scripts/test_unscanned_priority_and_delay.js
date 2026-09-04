@@ -32,7 +32,7 @@ try {
 
   // 4. Test priority ordering: Unscanned / un-enriched schools must appear first
   console.log('\n[4. Testing Unscanned/Un-enriched Schools Priority Ordering]');
-  const londonBatch = db.getSchoolsForScannerBatch('LONDON_INDEPENDENT', 20);
+  const londonBatch = db.getSchoolsForScannerBatch('LONDON_INDEPENDENT', 20, null, true);
   assert(londonBatch.length > 0, 'Must return schools for LONDON_INDEPENDENT');
 
   // Verify that any unscanned school appears before already enriched/verified schools
