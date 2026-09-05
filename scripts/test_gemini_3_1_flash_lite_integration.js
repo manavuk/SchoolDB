@@ -17,8 +17,9 @@ async function testGemini31Integration() {
 
     // 2. Check public/index.html options
     console.log('\n[2. Verifying public/index.html Dropdown Options]');
-    const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
-    assert(html.includes('value="gemini-3.1-flash-lite"'), 'index.html must have gemini-3.1-flash-lite option');
+    const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+    const html = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+    assert(html.includes('value="gemini-3.1-flash-lite"'), 'index.html/admin.html must have gemini-3.1-flash-lite option');
     console.log('  ✓ public/index.html contains gemini-3.1-flash-lite option.');
 
     // 3. Check Settings Persistence & Retrieval

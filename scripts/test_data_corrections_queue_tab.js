@@ -7,7 +7,8 @@ console.log('=== RUNNING TESTS: Data Corrections Queue Integration ===\n');
 
 // 1. Verify UI markup in index.html
 console.log('[1. Testing Data Corrections HTML Markup in index.html]');
-const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+const indexHtml = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 
 assert(indexHtml.includes('id="admin-system-corrections-card"'), 'index.html must include admin-system-corrections-card');
 console.log('  ✓ Found admin-system-corrections-card');

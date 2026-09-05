@@ -21,7 +21,8 @@ function testGreaterLondonBatch() {
   console.log(`  ✓ Returned ${batch.length} Greater London schools across diverse types: ${batch.map(s => s.schoolType).slice(0, 5).join(', ')}...`);
 
   console.log('\n[2. Verifying public/index.html Dropdown Option]');
-  const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+  const html = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   assert(html.includes('value="GREATER_LONDON"'), 'index.html must contain GREATER_LONDON option in scanner dropdown');
   assert(html.includes('Greater London Region'), 'index.html must have label Greater London Region');
   console.log('  ✓ Verified GREATER_LONDON option in public/index.html scanner dropdown.');

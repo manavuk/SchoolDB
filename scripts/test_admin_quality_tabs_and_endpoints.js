@@ -7,7 +7,8 @@ console.log('=== RUNNING TESTS: Admin Quality & Scans Tabs (Pillars 2, 3, 4, 5) 
 
 // 1. Verify index.html side tabs and subpanes
 console.log('[1. Testing Admin Navigation Tabs & Subpanes in index.html]');
-const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+const indexHtml = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 
 const expectedTabs = [
   'data-target-tab="gias-backfill"',

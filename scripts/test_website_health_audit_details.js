@@ -42,7 +42,8 @@ console.log('=== RUNNING TESTS: Automated Website Health & Detailed Results ===\
 
   // 3. Testing UI elements and controller bindings
   console.log('\n[3. Testing Frontend Markup & Controller Functions]');
-  const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+  const indexHtml = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   assert(indexHtml.includes('id="website-health-table-wrapper"'), 'index.html must include website-health-table-wrapper');
   assert(indexHtml.includes('id="webhealth-filter-input"'), 'index.html must include search filter');
   assert(indexHtml.includes('id="webhealth-status-filter"'), 'index.html must include status filter');

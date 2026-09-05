@@ -2170,6 +2170,20 @@ function getFieldConfidenceStats(schoolId, userId = null) {
   return confidenceStats;
 }
 
+function autoSyncAllDateConfidenceScores() {
+  const sqlite = getDb();
+  try {
+    sqlite.prepare(`
+      UPDATE schools
+      SET confidence_score = 95
+      WHERE verification_status = 'auto_verified' AND (confidence_score IS NULL OR confidence_score < 90)
+    `).run();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // ----------------------------------------------------
 // Date Anomaly & Timeline Quality Analysis Engine
 // ----------------------------------------------------
@@ -3837,6 +3851,7 @@ module.exports = {
   markFieldAdminReviewed,
   getFieldConfidenceStats,
   saveSchoolVerificationResult,
+  autoSyncAllDateConfidenceScores,
   getSchoolsForScannerBatch,
   applyScannerFixes,
   getDataQualitySummary,

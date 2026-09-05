@@ -5,7 +5,8 @@ const path = require('path');
 console.log('--- Testing Collapsible Admin Portal Sidebar Integration ---');
 
 // 1. Check HTML Elements
-const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+const html = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 assert(html.includes('id="admin-portal-wrapper"'), 'index.html must have admin-portal-wrapper ID');
 assert(html.includes('id="admin-side-layout"'), 'index.html must have admin-side-layout ID');
 assert(html.includes('id="admin-side-nav"'), 'index.html must have admin-side-nav ID');
@@ -13,7 +14,7 @@ assert(html.includes('id="admin-side-content"'), 'index.html must have admin-sid
 assert(html.includes('id="admin-sidebar-toggle-btn"'), 'index.html must have admin-sidebar-toggle-btn');
 assert(html.includes('id="admin-side-nav-title"'), 'index.html must have admin-side-nav-title');
 assert(html.includes('title="Data Enrichment"'), 'Data Enrichment tab must have title');
-assert(html.includes('title="Merge & De-Duplicate"'), 'Merge & De-Duplicate tab must have title');
+assert(html.includes('title="Merge & De-Duplicate"') || html.includes('title="Deduplication"'), 'Deduplication/Merge tab must have title');
 console.log('✓ All DOM components and tooltip attributes verified in index.html.');
 
 // 2. Check CSS Rules

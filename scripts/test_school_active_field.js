@@ -64,8 +64,9 @@ console.log('\n[2. Testing DfE GIAS Active & Closed Detection]');
 
   // 3. Verify UI and Fields Integration
   console.log('\n[3. Testing UI & Fields in public/index.html & app.js]');
-  const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
-  assert(indexHtml.includes('id="add-active"'), 'index.html must include Operating Status dropdown');
+  const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+  const indexHtml = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  assert(indexHtml.includes('id="add-active"'), 'index.html/admin.html must include Operating Status dropdown');
   console.log('  ✓ Found Operating Status dropdown in index.html Add/Edit School modal');
 
   const appJs = fs.readFileSync(path.join(__dirname, '../public/js/app.js'), 'utf8');

@@ -67,6 +67,10 @@ function showToast(message, type = 'success', duration = 5000) {
   }
 }
 
+function isCurrentAdminPage() {
+  return window.location.pathname.startsWith('/admin') || document.getElementById('admin-portal-wrapper') !== null;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
 });
@@ -82,13 +86,20 @@ async function initApp() {
 
   // 2. Validate active session immediately before heavy data loading
   const authenticated = await checkActiveSession();
+  const isAdminPage = isCurrentAdminPage();
+  const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
 
-  if (authenticated) {
-    hideGatekeeperLoginScreen();
-    // Immediately apply UI permissions so admin portal is not delayed by heavy catalog loads
-    applyPermissionsUI();
+  if (isAdminPage) {
+    if (authenticated && canViewAdmin) {
+      hideGatekeeperLoginScreen();
+      applyPermissionsUI();
+    } else {
+      showGatekeeperLoginScreen();
+    }
   } else {
-    showGatekeeperLoginScreen();
+    // Parent Portal page
+    hideGatekeeperLoginScreen();
+    applyPermissionsUI();
   }
 
   // 3. Register DOM event listeners
@@ -99,8 +110,10 @@ async function initApp() {
     await fetchSystemSettings();
     await fetchStats();
     await loadSchools();
-    loadAdminSettings();
-    populateManualMergeDropdowns();
+    if (isAdminPage) {
+      loadAdminSettings();
+      populateManualMergeDropdowns();
+    }
   } catch (err) {
     console.error('Initial data load error:', err);
   }
@@ -116,27 +129,28 @@ async function initApp() {
     applyPermissionsUI();
   }
 
-  // 6. Fetch recommendations if currently viewing parent/recommendations tab
-  const activeTab = localStorage.getItem('app_active_primary_tab');
-  if (activeTab !== 'admin') {
+  // 6. Fetch recommendations on Parent Portal
+  if (!isAdminPage) {
     await fetchRecommendations();
     checkAutoLaunchPortfolioWizard();
   }
 
-  // 7. Check and restore active background scanner/crawler state immediately on load
-  checkAndPollScannerStatus();
+  // 7. Check and restore active background scanner/crawler state if on admin page
+  if (isAdminPage) {
+    checkAndPollScannerStatus();
 
-  // 8. Restore active crawling state when user returns to window/tab
-  if (!window._scannerVisibilityBound) {
-    window._scannerVisibilityBound = true;
-    window.addEventListener('focus', () => {
-      checkAndPollScannerStatus();
-    });
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) {
+    // 8. Restore active crawling state when user returns to window/tab
+    if (!window._scannerVisibilityBound) {
+      window._scannerVisibilityBound = true;
+      window.addEventListener('focus', () => {
         checkAndPollScannerStatus();
-      }
-    });
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          checkAndPollScannerStatus();
+        }
+      });
+    }
   }
 }
 
@@ -507,6 +521,7 @@ async function removeRecommendation(schoolId) {
 
 // Apply Permissions UI controls & tab visibility based on session capabilities
 function applyPermissionsUI() {
+  const isAdminPage = isCurrentAdminPage();
   const directoryTabBtn = document.getElementById('tab-directory-btn');
   const adminTabBtn = document.getElementById('tab-admin-btn');
   const parent2TabBtn = document.getElementById('tab-parent2-btn');
@@ -534,90 +549,47 @@ function applyPermissionsUI() {
     if (parent2TabBtn) parent2TabBtn.style.display = 'inline-flex';
   }
 
-  // Landing page hierarchy:
-  // 1. If user previously selected a primary tab, restore that tab if allowed
-  // 2. Otherwise: Admin lands on Admin Portal, Parent lands on Parent Portal 2.0 or Classic
-  const savedPrimaryTab = localStorage.getItem('app_active_primary_tab');
-  if (canViewAdmin) {
-    if (savedPrimaryTab && ['admin', 'recommend', 'parent2'].includes(savedPrimaryTab)) {
-      switchTab(savedPrimaryTab);
-    } else {
-      switchTab('admin');
+  if (isAdminPage) {
+    if (!canViewAdmin) {
+      showGatekeeperLoginScreen();
+      return;
     }
-  } else if (isP2Enabled && currentUserAccount) {
-    switchTab(savedPrimaryTab === 'recommend' ? 'recommend' : 'parent2');
+    hideGatekeeperLoginScreen();
+    const savedAdminSubtab = localStorage.getItem('admin_active_subtab') || 'directory';
+    initAdminSidebarCollapse();
+    switchAdminSubTab(savedAdminSubtab);
+    loadAdminFieldReports();
   } else {
-    switchTab('recommend');
+    // Parent Portal page: keep user on Parent Portal
+    const targetSubTab = localStorage.getItem('classic_active_subtab') || 'find';
+    switchClassicSubTab(targetSubTab);
   }
 }
 
-// Switch between Primary Views: Parent Portal 2.0 vs Classic Recommendations vs Directory vs Admin
+// Switch between Primary Views: Parent Portal vs Admin Portal
 function switchTab(tabName) {
-  const parent2TabBtn = document.getElementById('tab-parent2-btn');
-  const recommendTabBtn = document.getElementById('tab-recommend-btn');
-  const adminTabBtn = document.getElementById('tab-admin-btn');
-  const directoryTabBtn = document.getElementById('tab-directory-btn');
-
-  const parent2Content = document.getElementById('parent2-tab-content') || document.getElementById('parent2-content');
-  const recommendContent = document.getElementById('recommend-tab-content') || document.getElementById('recommend-content');
-  const adminContent = document.getElementById('admin-tab-content') || document.getElementById('admin-content');
-  const directoryContent = document.getElementById('directory-tab-content') || document.getElementById('directory-content');
-
-  const isP2Enabled = Boolean(systemSettings.parentPortal2Enabled);
+  const isAdminPage = isCurrentAdminPage();
   const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
 
-  // If tabName is parent2 but feature is disabled and not admin, route to Classic Portal
-  if (tabName === 'parent2' && !isP2Enabled && !canViewAdmin) {
-    tabName = 'recommend';
-  }
-
-  // Persist user selected primary tab
-  localStorage.setItem('app_active_primary_tab', tabName);
-
-  // Reset tab button states
-  [parent2TabBtn, recommendTabBtn, adminTabBtn, directoryTabBtn].forEach(btn => {
-    if (btn) btn.classList.remove('active');
-  });
-
-  // Hide all view containers
-  [parent2Content, recommendContent, adminContent, directoryContent].forEach(c => {
-    if (c) c.style.display = 'none';
-  });
-
-  if (tabName === 'parent2') {
-    if (parent2TabBtn) parent2TabBtn.classList.add('active');
-    if (parent2Content) parent2Content.style.display = 'block';
-    renderParent2Views();
-    fetchRecommendations();
-  } else if (tabName === 'recommend') {
-    if (recommendTabBtn) recommendTabBtn.classList.add('active');
-    if (recommendContent) recommendContent.style.display = 'block';
-    const targetSubTab = localStorage.getItem('classic_active_subtab') || 'find';
-    switchClassicSubTab(targetSubTab);
-  } else if (tabName === 'dashboard') {
-    if (recommendTabBtn) recommendTabBtn.classList.add('active');
-    if (recommendContent) recommendContent.style.display = 'block';
-    switchClassicSubTab('shortlist');
-  } else if ((tabName === 'admin' || tabName === 'directory') && canViewAdmin) {
-    if (adminTabBtn) adminTabBtn.classList.add('active');
-    if (adminContent) adminContent.style.display = 'block';
+  if (tabName === 'admin' || tabName === 'directory') {
+    if (!isAdminPage) {
+      window.location.href = '/admin';
+      return;
+    }
     const targetSubTab = tabName === 'directory' ? 'directory' : (localStorage.getItem('admin_active_subtab') || 'directory');
     initAdminSidebarCollapse();
     switchAdminSubTab(targetSubTab);
-    loadAdminFieldReports();
-  } else {
-    // Default fallback: If P2 enabled, parent2; otherwise recommend
-    if (isP2Enabled) {
-      if (parent2TabBtn) parent2TabBtn.classList.add('active');
-      if (parent2Content) parent2Content.style.display = 'block';
-      renderParent2Views();
-      fetchRecommendations();
-    } else {
-      if (recommendTabBtn) recommendTabBtn.classList.add('active');
-      if (recommendContent) recommendContent.style.display = 'block';
-      const targetSubTab = localStorage.getItem('classic_active_subtab') || 'find';
-      switchClassicSubTab(targetSubTab);
+    return;
+  }
+
+  if (tabName === 'recommend' || tabName === 'parent2' || tabName === 'dashboard') {
+    if (isAdminPage) {
+      window.location.href = '/';
+      return;
     }
+    const targetSubTab = tabName === 'dashboard' ? 'shortlist' : (localStorage.getItem('classic_active_subtab') || 'find');
+    switchClassicSubTab(targetSubTab);
+    return;
   }
 }
 

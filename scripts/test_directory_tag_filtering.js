@@ -143,7 +143,8 @@ async function runTests() {
 
   // 8. Test HTML & CSS DOM Elements
   console.log('\n[8. Verifying HTML & CSS DOM Integration]');
-  const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+  const html = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   assert(html.includes('id="tag-select"'), 'index.html must have #tag-select');
   assert(html.includes('id="region-select"'), 'index.html must have #region-select');
   assert(html.includes('id="second-stage-select"'), 'index.html must have #second-stage-select');

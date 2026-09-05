@@ -47,7 +47,8 @@ async function testCategoryStatsApi() {
 
 function testFrontendIntegration() {
   console.log('\n[2. Verifying DOM Elements & UI Navigation Functions]');
-  const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+  const html = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   assert(html.includes('id="enrichment-category-breakdown-card"'), 'Must contain breakdown card in index.html');
   assert(html.includes('id="enrichment-category-cards-grid"'), 'Must contain category cards grid in index.html');
   assert(html.includes('id="enrichment-attribute-chips"'), 'Must contain attribute chips container in index.html');

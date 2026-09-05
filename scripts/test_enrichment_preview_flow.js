@@ -60,7 +60,8 @@ try {
 }
 
 // 4. Test Frontend HTML, CSS, JS Elements
-const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+const html = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 assert(html.includes('id="admin-enrichment-preview-modal"'), 'index.html must have admin-enrichment-preview-modal');
 assert(html.includes('id="btn-accept-all-enrichment"'), 'index.html must have btn-accept-all-enrichment');
 assert(html.includes('id="btn-commit-selected-enrichment"'), 'index.html must have btn-commit-selected-enrichment');

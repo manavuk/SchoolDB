@@ -16,7 +16,8 @@ async function runTests() {
   try {
     // 1. Verify DOM components in public/index.html
     console.log('[1. DOM Structure & Tab Navigation Test]');
-    const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+    const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+    const html = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
     assert(html.includes('data-target-tab="data-enrichment"'), 'Sidebar must include data-enrichment tab');
     assert(html.includes('id="side-tab-btn-data-enrichment"'), 'Sidebar must have side-tab-btn-data-enrichment button');
     assert(html.includes('id="admin-subpane-data-enrichment"'), 'Subpane admin-subpane-data-enrichment must exist');

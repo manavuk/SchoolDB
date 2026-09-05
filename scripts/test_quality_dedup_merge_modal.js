@@ -7,7 +7,8 @@ console.log('=== RUNNING TESTS: Deduplication Comparison & Pick/Edit Merge Modal
 
 // 1. Verify index.html modal markup
 console.log('[1. Testing index.html modal markup]');
-const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+const indexHtml = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 assert(indexHtml.includes('id="quality-dedup-merge-modal"'), 'index.html must include quality-dedup-merge-modal');
 assert(indexHtml.includes('id="quality-dedup-merge-modal-content"'), 'index.html must include quality-dedup-merge-modal-content');
 assert(indexHtml.includes('id="modal-confirm-quality-dedup-merge"'), 'index.html must include modal-confirm-quality-dedup-merge button');

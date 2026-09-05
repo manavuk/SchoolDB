@@ -28,7 +28,8 @@ console.log('[1. Testing dfe_gias_lookup Module]');
 
   // 2. Verify public/index.html UI components
   console.log('\n[2. Testing public/index.html GIAS Elements]');
-  const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+  const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+  const indexHtml = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
   assert(indexHtml.includes('id="gias-lookup-urn-input"'), 'index.html must include gias-lookup-urn-input');
   assert(indexHtml.includes('id="gias-lookup-urn-btn"'), 'index.html must include gias-lookup-urn-btn');
   assert(indexHtml.includes('id="gias-urn-import-modal"'), 'index.html must include gias-urn-import-modal');

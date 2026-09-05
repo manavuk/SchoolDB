@@ -5,8 +5,9 @@ const db = require('../db');
 
 console.log('--- Testing Admin Portal Redesign Integrity & Flow ---');
 
-// 1. Check index.html markup
-const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+// 1. Check admin.html / index.html markup
+const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+const indexHtml = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 
 const requiredElements = [
   'admin-tab-content',
@@ -14,13 +15,13 @@ const requiredElements = [
   'side-tab-btn-directory',
   'side-tab-btn-bulk-edit',
   'side-tab-btn-corrections',
-  'side-tab-btn-merge',
+  (indexHtml.includes('side-tab-btn-deduplication') ? 'side-tab-btn-deduplication' : 'side-tab-btn-merge'),
   'side-tab-btn-import-export',
   'side-tab-btn-settings',
   'admin-subpane-directory',
   'admin-subpane-bulk-edit',
   'admin-subpane-corrections',
-  'admin-subpane-merge',
+  (indexHtml.includes('admin-subpane-deduplication') ? 'admin-subpane-deduplication' : 'admin-subpane-merge'),
   'admin-subpane-import-export',
   'admin-subpane-settings',
   'bulk-schools-table',

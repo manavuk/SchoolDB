@@ -31,7 +31,8 @@ console.log('  ✓ server.js includes category-schools drill-down route and unsc
 
 // 3. Verify public/index.html and public/js/app.js UI elements
 console.log('\n[3. Testing Frontend Markup & Modal Wiring]');
-const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+const indexHtml = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 assert(indexHtml.includes('id="modal-website-health-details"'), 'index.html must contain modal-website-health-details');
 assert(indexHtml.includes('id="webhealth-stat-unscanned-card"'), 'index.html must contain webhealth-stat-unscanned-card');
 assert(indexHtml.includes('webhealth-clickable-card'), 'index.html must contain clickable cards');

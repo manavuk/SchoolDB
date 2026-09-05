@@ -7,7 +7,8 @@ console.log('=== RUNNING TESTS: Data Enrichment Dropdown Batch Limits (200 & 500
 
 // 1. Verify HTML markup in index.html
 console.log('[1. Testing index.html Dropdown Options]');
-const indexHtml = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+const indexHtml = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 
 assert(indexHtml.includes('<option value="200">200 schools</option>'), 'index.html must include option value 200');
 console.log('  ✓ Found <option value="200">200 schools</option>');

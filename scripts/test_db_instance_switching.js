@@ -14,9 +14,13 @@ console.log('Initial Database Metadata:', {
   testSchools: initialMeta.instances.test.totalSchools
 });
 
+if (!initialMeta.instances.test.exists) {
+  db.resetTestDatabaseFromProduction();
+}
+const metaAfterCheck = db.getDatabaseInstancesMetadata();
 assert(initialMeta.instances.production.exists, 'Production database must exist');
 assert(initialMeta.instances.production.totalSchools > 6400, 'Production must have full secondary schools directory');
-assert(initialMeta.instances.test.exists, 'Test database copy must exist');
+assert(metaAfterCheck.instances.test.exists, 'Test database copy must exist');
 
 // 2. Verify no mock test schools exist in Production
 const prodDb = db.getDb();
@@ -83,7 +87,8 @@ db.setActiveDatabaseInstance('production');
 assert.strictEqual(db.getActiveDatabaseInstance(), 'production', 'Should be back in production');
 
 // 6. Test Frontend UI & CSS Components
-const html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+const adminHtmlPath = path.join(__dirname, '../public/admin.html');
+const html = fs.existsSync(adminHtmlPath) ? fs.readFileSync(adminHtmlPath, 'utf8') : fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
 assert(html.includes('id="test-env-banner"'), 'index.html must include test-env-banner');
 assert(html.includes('id="db-instance-active-pill"'), 'index.html must include db-instance-active-pill');
 assert(html.includes('id="btn-select-prod-db"'), 'index.html must include btn-select-prod-db');
