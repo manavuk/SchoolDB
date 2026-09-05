@@ -529,9 +529,12 @@ function applyPermissionsUI() {
 
   // Enforce tab access permissions: Admin Portal hidden unless session holds explicit permission
   const canViewAdmin = Array.isArray(currentPermissions) && currentPermissions.includes('admin:portal');
+  const navTabs = document.querySelector('.nav-tabs');
 
   if (directoryTabBtn) directoryTabBtn.style.display = 'none';
   if (adminTabBtn) adminTabBtn.style.display = canViewAdmin ? 'inline-flex' : 'none';
+  if (recommendTabBtn) recommendTabBtn.style.display = canViewAdmin ? 'inline-flex' : 'none';
+  if (navTabs) navTabs.style.display = canViewAdmin ? 'flex' : 'none';
 
   updateAuthUserBadge();
 
@@ -616,6 +619,10 @@ function switchClassicSubTab(subTabName) {
   });
 
   localStorage.setItem('classic_active_subtab', subTabName);
+
+  if (window.innerWidth <= 768) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   if (subTabName === 'find') {
     fetchRecommendations();
@@ -6767,11 +6774,16 @@ function updateUserSchoolsUI() {
   const container = document.getElementById('user-schools-chips');
   const countEl = document.getElementById('user-schools-count');
   const countTopEl = document.getElementById('user-schools-count-top');
-  const classicBadgeEl = document.getElementById('classic-shortlist-badge-count');
 
   if (countEl) countEl.textContent = userSelectedSchools.length;
   if (countTopEl) countTopEl.textContent = userSelectedSchools.length;
-  if (classicBadgeEl) classicBadgeEl.textContent = userSelectedSchools.length;
+  
+  document.querySelectorAll('.classic-shortlist-badge-count').forEach(el => {
+    el.textContent = userSelectedSchools.length;
+    if (el.id === 'mobile-shortlist-badge-count') {
+      el.style.display = userSelectedSchools.length > 0 ? 'inline-block' : 'none';
+    }
+  });
 
   renderUserDashboard();
 

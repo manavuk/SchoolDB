@@ -65,14 +65,14 @@
       </div>
 
       <!-- Navigation Tabs -->
-      <nav class="nav-tabs">
-        <button id="tab-recommend-btn" class="nav-tab-btn active">
+      <nav class="nav-tabs" style="display: none;">
+        <button id="tab-recommend-btn" class="nav-tab-btn active" style="display: none;">
           <i class="fa-solid fa-house-user"></i> <span id="recommend-tab-label">Parent Portal</span>
         </button>
         <a id="tab-admin-btn" href="/admin" class="nav-tab-btn" style="display: none; text-decoration: none;">
           <i class="fa-solid fa-user-shield"></i> Admin Portal
         </a>
-        </nav>
+      </nav>
 
       <div class="nav-actions">
         <!-- Authenticated User Profile Display -->
@@ -156,7 +156,7 @@
             <div class="admin-card" style="background: white; border-radius: 14px; border: 1px solid #e2e8f0; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; box-shadow: 0 4px 12px -2px rgba(0,0,0,0.05);">
               
               <!-- TIER 1: HORIZONTAL OMNI-SEARCH & FILTER BAR -->
-              <div style="display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(130px, 0.9fr) minmax(170px, 1.1fr) minmax(170px, 1.1fr) minmax(170px, 1.1fr); gap: 0.75rem; align-items: end; margin-bottom: 0.9rem;">
+              <div class="omni-filter-grid" style="display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(130px, 0.9fr) minmax(170px, 1.1fr) minmax(170px, 1.1fr) minmax(170px, 1.1fr); gap: 0.75rem; align-items: end; margin-bottom: 0.9rem;">
                 
                 <!-- 1. Postcode / Borough & Distance Radius -->
                 <div>
@@ -534,6 +534,38 @@
         </main>
       </div>
     </section>
+
+    <!-- MOBILE BOTTOM NAVIGATION BAR (Visible only on mobile screens <= 768px) -->
+    <nav class="mobile-bottom-nav" id="mobile-parent-bottom-nav" aria-label="Parent Portal Navigation">
+      <button type="button" class="mobile-bottom-tab classic-side-tab active" data-target-classic-tab="find" id="mobile-tab-find" title="Find Schools">
+        <div class="mobile-tab-icon-wrap">
+          <i class="fa-solid fa-magnifying-glass-location"></i>
+        </div>
+        <span class="mobile-tab-label">Find Schools</span>
+      </button>
+
+      <button type="button" class="mobile-bottom-tab classic-side-tab" data-target-classic-tab="shortlist" id="mobile-tab-shortlist" title="My Shortlist">
+        <div class="mobile-tab-icon-wrap">
+          <i class="fa-solid fa-list-check"></i>
+          <span class="mobile-tab-badge classic-shortlist-badge-count" id="mobile-shortlist-badge-count" style="display: none;">0</span>
+        </div>
+        <span class="mobile-tab-label">My Shortlist</span>
+      </button>
+
+      <button type="button" class="mobile-bottom-tab classic-side-tab" data-target-classic-tab="timeline" id="mobile-tab-timeline" title="Admission Timeline">
+        <div class="mobile-tab-icon-wrap">
+          <i class="fa-solid fa-calendar-days"></i>
+        </div>
+        <span class="mobile-tab-label">Timeline</span>
+      </button>
+
+      <button type="button" class="mobile-bottom-tab classic-side-tab" data-target-classic-tab="dualtrack" id="mobile-tab-dualtrack" title="Dual Tracking">
+        <div class="mobile-tab-icon-wrap">
+          <i class="fa-solid fa-layer-group"></i>
+        </div>
+        <span class="mobile-tab-label">Dual Track</span>
+      </button>
+    </nav>
   </div>
 
 
