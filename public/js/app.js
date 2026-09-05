@@ -201,18 +201,14 @@ async function checkActiveSession() {
   return false;
 }
 
-// Open Sign In Modal Directly
+// Open Sign In Portal Directly
 function openLoginModal(e) {
   if (e) {
     if (typeof e.preventDefault === 'function') e.preventDefault();
     if (typeof e.stopPropagation === 'function') e.stopPropagation();
   }
-  const modal = document.getElementById('auth-login-modal');
-  if (modal) {
-    modal.style.display = 'flex';
-    modal.style.zIndex = '25000';
-    modal.classList.add('active');
-  }
+  const currentPath = window.location.pathname + window.location.search;
+  window.location.href = `/login?redirect=${encodeURIComponent(currentPath || '/')}`;
 }
 
 // Close Sign In Modal Directly
@@ -374,8 +370,11 @@ async function logoutSession() {
   applyPermissionsUI();
   updateUserSchoolsUI();
 
-  showToast('Signed out successfully. Please log in to continue.', 'info');
-  showGatekeeperLoginScreen();
+  if (isCurrentAdminPage()) {
+    window.location.replace('/login?redirect=%2Fadmin');
+  } else {
+    showToast('Signed out successfully.', 'info');
+  }
 }
 
 // Update Header Authenticated User Badge & Status Indicator
@@ -551,7 +550,8 @@ function applyPermissionsUI() {
 
   if (isAdminPage) {
     if (!canViewAdmin) {
-      showGatekeeperLoginScreen();
+      const redirectUrl = encodeURIComponent(window.location.pathname + window.location.search || '/admin');
+      window.location.replace(`/login?redirect=${redirectUrl}`);
       return;
     }
     hideGatekeeperLoginScreen();
@@ -560,7 +560,8 @@ function applyPermissionsUI() {
     switchAdminSubTab(savedAdminSubtab);
     loadAdminFieldReports();
   } else {
-    // Parent Portal page: keep user on Parent Portal
+    // Parent Portal page: keep user on Parent Portal, allow guest browsing without interruption
+    hideGatekeeperLoginScreen();
     const targetSubTab = localStorage.getItem('classic_active_subtab') || 'find';
     switchClassicSubTab(targetSubTab);
   }

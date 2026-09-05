@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In | EduLondon High Schools DB</title>
+  <meta name="description" content="Sign in to your EduLondon High Schools account to manage your shortlist, access recommendations, and view admissions intelligence.">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    body.login-body {
+      background: radial-gradient(circle at 50% 10%, #1e1b4b 0%, #0f172a 60%, #020617 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      margin: 0;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: #f8fafc;
+      box-sizing: border-box;
+    }
+    .login-container {
+      width: 100%;
+      max-width: 460px;
+      background: rgba(30, 41, 59, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      padding: 2.25rem;
+      box-sizing: border-box;
+      position: relative;
+    }
+    .login-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+      justify-content: center;
+    }
+    .login-brand-icon {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.35rem;
+      color: white;
+      box-shadow: 0 8px 16px -4px rgba(99, 102, 241, 0.4);
+    }
+    .login-brand-text h1 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #ffffff;
+    }
+    .login-brand-text p {
+      margin: 0.15rem 0 0 0;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+    .login-nav-tabs {
+      display: flex;
+      gap: 0.5rem;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 0.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .login-nav-tab {
+      flex: 1;
+      text-align: center;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #94a3b8;
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .login-nav-tab.active {
+      background: #4f46e5;
+      color: #ffffff;
+      box-shadow: 0 4px 10px -2px rgba(79, 70, 229, 0.4);
+    }
+    .demo-selector-box {
+      background: rgba(15, 23, 42, 0.65);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .demo-selector-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #cbd5e1;
+      margin-bottom: 0.5rem;
+    }
+    .demo-select-input {
+      width: 100%;
+      background: #0f172a;
+      color: #f8fafc;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      padding: 0.6rem 0.75rem;
+      font-size: 0.88rem;
+      font-weight: 500;
+      cursor: pointer;
+      box-sizing: border-box;
+    }
+    .demo-select-input:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+    }
+    .form-group {
+      margin-bottom: 1.1rem;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin-bottom: 0.4rem;
+    }
+    .form-group input {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      color: #f8fafc;
+      font-size: 0.9rem;
+      box-sizing: border-box;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+    }
+    .form-group input::placeholder {
+      color: #64748b;
+    }
+    .btn-submit-login {
+      width: 100%;
+      background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      box-shadow: 0 8px 16px -4px rgba(79, 70, 229, 0.4);
+      transition: all 0.2s ease;
+    }
+    .btn-submit-login:hover {
+      background: linear-gradient(135deg, #4338ca 0%, #4f46e5 100%);
+      transform: translateY(-1px);
+    }
+    .btn-google-login {
+      width: 100%;
+      background: #ffffff;
+      color: #1e293b;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 0.68rem 1rem;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      margin-top: 1rem;
+      transition: background 0.2s ease;
+    }
+    .btn-google-login:hover {
+      background: #f8fafc;
+    }
+    .divider-or {
+      display: flex;
+      align-items: center;
+      margin: 1.25rem 0;
+      color: #64748b;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .divider-or::before, .divider-or::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .divider-or span {
+      padding: 0 0.75rem;
+    }
+    .login-footer-links {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 1.5rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.82rem;
+    }
+    .login-footer-links a {
+      color: #a5b4fc;
+      text-decoration: none;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: color 0.2s;
+    }
+    .login-footer-links a:hover {
+      color: #ffffff;
+      text-decoration: underline;
+    }
+    .login-msg-box {
+      padding: 0.7rem 0.9rem;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .login-msg-box.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }
+    .login-msg-box.success {
+      display: block;
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.4);
+      color: #86efac;
+    }
+    .admin-redirect-banner {
+      background: rgba(124, 58, 237, 0.15);
+      border: 1px solid rgba(167, 139, 250, 0.35);
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+      font-size: 0.8rem;
+      color: #e2e8f0;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+  </style>
+</head>
+<body class="login-body">
+
+  <div class="login-container">
+    <!-- Brand Logo -->
+    <div class="login-brand">
+      <div class="login-brand-icon">
+        <i class="fa-solid fa-graduation-cap"></i>
+      </div>
+      <div class="login-brand-text">
+        <h1>EduLondon DB</h1>
+        <p>High Schools Directory &amp; Admissions Intelligence</p>
+      </div>
+    </div>
+
+    <!-- Admin Redirect Notice if redirected from /admin -->
+    <div id="admin-redirect-banner" class="admin-redirect-banner" style="display: none;">
+      <i class="fa-solid fa-shield-halved" style="color: #a78bfa; font-size: 1.1rem;"></i>
+      <span>Please sign in with an <strong>Admin Account</strong> to access the Admin Portal.</span>
+    </div>
+
+    <!-- Sign In / Sign Up Tab Switcher -->
+    <div class="login-nav-tabs">
+      <button type="button" class="login-nav-tab active" id="tab-btn-signin" onclick="switchLoginMode('signin')">
+        <i class="fa-solid fa-right-to-bracket"></i> Sign In
+      </button>
+      <button type="button" class="login-nav-tab" id="tab-btn-signup" onclick="switchLoginMode('signup')">
+        <i class="fa-solid fa-user-plus"></i> Create Account
+      </button>
+    </div>
+
+    <!-- Alert / Message Banner -->
+    <div id="login-msg-box" class="login-msg-box"></div>
+
+    <!-- Quick Demo Account Selector (Sign In only) -->
+    <div id="demo-account-box" class="demo-selector-box">
+      <div class="demo-selector-label">
+        <span><i class="fa-solid fa-bolt" style="color: #fbbf24;"></i> Quick 1-Click Demo Login</span>
+        <span style="font-size: 0.7rem; color: #94a3b8; font-weight: 500;">Instant sign-in</span>
+      </div>
+      <select id="quick-demo-account-select" class="demo-select-input" onchange="handleQuickDemoSelect(this.value)">
+        <option value="">-- Pick Demo Account --</option>
+        <option value="aa@bb.cc|admin">Super Admin (aa@bb.cc)</option>
+        <option value="sarah@gmail.com|user">Sarah Jenkins (Parent / User)</option>
+        <option value="david@gmail.com|user">David &amp; Emma Miller (Parent / User)</option>
+        <option value="priya@gmail.com|user">Priya Patel (Parent / User)</option>
+        <option value="admin@edulondon.sch.uk|admin">System Admin (Manager / Admin)</option>
+      </select>
+    </div>
+
+    <!-- Sign In Form -->
+    <form id="auth-login-form" onsubmit="handleLoginFormSubmit(event)">
+      <div class="form-group">
+        <label for="login-email"><i class="fa-solid fa-envelope"></i> Email Address</label>
+        <input type="email" id="login-email" placeholder="e.g. sarah@gmail.com" required autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label for="login-password"><i class="fa-solid fa-lock"></i> Password</label>
+        <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn-submit-login" id="btn-submit-login">
+        <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In to Account
+      </button>
+    </form>
+
+    <!-- Sign Up Form (Hidden by default) -->
+    <form id="auth-signup-form" style="display: none;" onsubmit="handleSignupFormSubmit(event)">
+      <div class="form-group">
+        <label for="signup-name"><i class="fa-solid fa-user"></i> Full Name</label>
+        <input type="text" id="signup-name" placeholder="e.g. Sarah Jenkins" required autocomplete="name">
+      </div>
+      <div class="form-group">
+        <label for="signup-email"><i class="fa-solid fa-envelope"></i> Email Address</label>
+        <input type="email" id="signup-email" placeholder="e.g. sarah@gmail.com" required autocomplete="email">
+      </div>
+      <div class="form-group">
+        <label for="signup-password"><i class="fa-solid fa-lock"></i> Password</label>
+        <input type="password" id="signup-password" placeholder="••••••••" required autocomplete="new-password">
+      </div>
+      <button type="submit" class="btn-submit-login" id="btn-submit-signup">
+        <i class="fa-solid fa-user-plus"></i> Create Parent Account
+      </button>
+    </form>
+
+    <div class="divider-or">
+      <span>or connect with</span>
+    </div>
+
+    <!-- Google Single Sign-On Button -->
+    <button type="button" class="btn-google-login" id="btn-google-sso" onclick="handleGoogleSsoClick()">
+      <svg class="google-icon-svg" viewBox="0 0 24 24" style="width: 18px; height: 18px;">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+      </svg>
+      Continue with Google Account
+    </button>
+
+    <!-- Footer Links: Back to Parent Portal -->
+    <div class="login-footer-links">
+      <a href="/"><i class="fa-solid fa-arrow-left"></i> Return to Parent Portal</a>
+      <span style="color: #64748b; font-size: 0.75rem;">Guest access enabled</span>
+    </div>
+  </div>
+
+  <script>
+    // Extract query parameters for redirection
+    const urlParams = new URLSearchParams(window.location.search);
+    const redirectUrl = urlParams.get('redirect') || '/';
+
+    // Show admin banner if redirected from /admin
+    if (redirectUrl.includes('/admin')) {
+      const adminBanner = document.getElementById('admin-redirect-banner');
+      if (adminBanner) adminBanner.style.display = 'flex';
+    }
+
+    function showMsg(text, type = 'error') {
+      const box = document.getElementById('login-msg-box');
+      if (!box) return;
+      box.textContent = text;
+      box.className = `login-msg-box ${type}`;
+      box.style.display = 'block';
+    }
+
+    function switchLoginMode(mode) {
+      const signinTab = document.getElementById('tab-btn-signin');
+      const signupTab = document.getElementById('tab-btn-signup');
+      const signinForm = document.getElementById('auth-login-form');
+      const signupForm = document.getElementById('auth-signup-form');
+      const demoBox = document.getElementById('demo-account-box');
+      const msgBox = document.getElementById('login-msg-box');
+      if (msgBox) msgBox.style.display = 'none';
+
+      if (mode === 'signup') {
+        signinTab.classList.remove('active');
+        signupTab.classList.add('active');
+        signinForm.style.display = 'none';
+        signupForm.style.display = 'block';
+        if (demoBox) demoBox.style.display = 'none';
+      } else {
+        signupTab.classList.remove('active');
+        signinTab.classList.add('active');
+        signupForm.style.display = 'none';
+        signinForm.style.display = 'block';
+        if (demoBox) demoBox.style.display = 'block';
+      }
+    }
+
+    function applySessionAndRedirect(sessionData) {
+      if (sessionData && sessionData.sessionId) {
+        localStorage.setItem('school_db_session_id', sessionData.sessionId);
+        document.cookie = `school_db_session_id=${sessionData.sessionId}; Path=/; Max-Age=2592000; SameSite=Lax`;
+      }
+      showMsg('Authentication successful. Redirecting...', 'success');
+      setTimeout(() => {
+        const user = sessionData?.user;
+        const canAdmin = Array.isArray(user?.permissions) && user.permissions.includes('admin:portal');
+        let destination = redirectUrl;
+        if (destination === '/' && canAdmin && redirectUrl.includes('/admin')) {
+          destination = '/admin';
+        }
+        window.location.href = destination;
+      }, 350);
+    }
+
+    async function handleQuickDemoSelect(val) {
+      if (!val) return;
+      const [email] = val.split('|');
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: 'demo' })
+        });
+        const data = await res.json();
+        if (res.ok && data.sessionId) {
+          applySessionAndRedirect(data);
+        } else {
+          showMsg(data.error || 'Failed to sign in with selected demo account.');
+        }
+      } catch (err) {
+        showMsg('Network error connecting to authentication service.');
+      }
+    }
+
+    async function handleLoginFormSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+      if (!email || !password) return;
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.sessionId) {
+          applySessionAndRedirect(data);
+        } else {
+          showMsg(data.error || 'Invalid email or password.');
+        }
+      } catch (err) {
+        showMsg('Network error submitting credentials.');
+      }
+    }
+
+    async function handleSignupFormSubmit(e) {
+      e.preventDefault();
+      const name = document.getElementById('signup-name').value.trim();
+      const email = document.getElementById('signup-email').value.trim();
+      const password = document.getElementById('signup-password').value;
+      if (!name || !email || !password) return;
+
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.sessionId) {
+          applySessionAndRedirect(data);
+        } else {
+          showMsg(data.error || 'Could not complete registration.');
+        }
+      } catch (err) {
+        showMsg('Network error submitting registration.');
+      }
+    }
+
+    async function handleGoogleSsoClick() {
+      try {
+        const cfgRes = await fetch('/api/auth/google/config');
+        if (cfgRes.ok) {
+          const cfg = await cfgRes.json();
+          if (cfg.configured && cfg.authUrl) {
+            window.location.href = cfg.authUrl;
+            return;
+          }
+        }
+      } catch (e) {}
+
+      // Fallback Google prompt for demo/dev mode
+      const email = prompt('Google Account Email (Demo SSO):', 'sarah@gmail.com');
+      if (!email) return;
+      try {
+        const res = await fetch('/api/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, name: email.split('@')[0] })
+        });
+        const data = await res.json();
+        if (res.ok && data.sessionId) {
+          applySessionAndRedirect(data);
+        } else {
+          showMsg(data.error || 'Google SSO failed.');
+        }
+      } catch (err) {
+        showMsg('Network error during Google authentication.');
+      }
+    }
+
+    // Check if user is already authenticated with appropriate permissions
+    (async function checkExistingSession() {
+      try {
+        const token = localStorage.getItem('school_db_session_id');
+        const res = await fetch('/api/auth/me', {
+          headers: token ? { 'x-session-id': token } : {}
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.user) {
+            const canAdmin = Array.isArray(data.user.permissions) && data.user.permissions.includes('admin:portal');
+            if (redirectUrl.includes('/admin')) {
+              if (canAdmin) {
+                window.location.replace(redirectUrl);
+              }
+            } else {
+              window.location.replace(redirectUrl);
+            }
+          }
+        }
+      } catch (e) {}
+    })();
+  </script>
+</body>
+</html>
