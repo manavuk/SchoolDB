@@ -81,6 +81,141 @@ function writeData(data) {
   }
 }
 
+// Pre-computed location suggestions index for fast typeahead
+let cachedLocationsIndex = null;
+function getLocationSuggestionsIndex() {
+  if (cachedLocationsIndex) return cachedLocationsIndex;
+  const schools = readData();
+  const locationMap = new Map();
+
+  // 1. Local Authorities / London Boroughs
+  schools.forEach(s => {
+    if (s.la && s.la.trim()) {
+      const key = s.la.trim();
+      const lower = key.toLowerCase();
+      if (!locationMap.has(lower)) {
+        locationMap.set(lower, {
+          name: key,
+          type: 'Borough',
+          category: 'borough',
+          subtitle: s.region || 'Greater London',
+          priority: 1
+        });
+      }
+    }
+  });
+
+  // 2. Outcodes / Postal Districts
+  schools.forEach(s => {
+    if (s.postcode && s.postcode.trim()) {
+      const outcode = s.postcode.trim().split(' ')[0].toUpperCase();
+      const lower = outcode.toLowerCase();
+      if (outcode && !locationMap.has(lower)) {
+        locationMap.set(lower, {
+          name: outcode,
+          type: 'Postcode Area',
+          category: 'postcode',
+          subtitle: s.la ? `${s.la} (${s.region || 'London'})` : (s.region || 'UK'),
+          priority: 3
+        });
+      }
+    }
+  });
+
+  // 3. Common Key Towns / Neighborhoods
+  const keyAreas = [
+    { name: 'Wimbledon', subtitle: 'Merton, SW19' },
+    { name: 'Kingston', subtitle: 'Kingston upon Thames, KT1' },
+    { name: 'Richmond', subtitle: 'Richmond upon Thames, TW9' },
+    { name: 'Putney', subtitle: 'Wandsworth, SW15' },
+    { name: 'Battersea', subtitle: 'Wandsworth, SW11' },
+    { name: 'Clapham', subtitle: 'Lambeth / Wandsworth, SW4' },
+    { name: 'Dulwich', subtitle: 'Southwark, SE21' },
+    { name: 'Hampstead', subtitle: 'Camden, NW3' },
+    { name: 'Highgate', subtitle: 'Camden / Haringey, N6' },
+    { name: 'Chelsea', subtitle: 'Kensington and Chelsea, SW3' },
+    { name: 'Kensington', subtitle: 'Kensington and Chelsea, W8' },
+    { name: 'Islington', subtitle: 'Islington, N1' },
+    { name: 'Camden', subtitle: 'Camden, NW1' },
+    { name: 'Greenwich', subtitle: 'Greenwich, SE10' },
+    { name: 'Blackheath', subtitle: 'Lewisham / Greenwich, SE3' },
+    { name: 'Bromley', subtitle: 'Bromley, BR1' },
+    { name: 'Croydon', subtitle: 'Croydon, CR0' },
+    { name: 'Sutton', subtitle: 'Sutton, SM1' },
+    { name: 'Wallington', subtitle: 'Sutton, SM6' },
+    { name: 'Cheam', subtitle: 'Sutton, SM3' },
+    { name: 'Epsom', subtitle: 'Surrey Commuter Belt, KT17' },
+    { name: 'Twickenham', subtitle: 'Richmond upon Thames, TW1' },
+    { name: 'Teddington', subtitle: 'Richmond upon Thames, TW11' },
+    { name: 'Hampton', subtitle: 'Richmond upon Thames, TW12' },
+    { name: 'Surbiton', subtitle: 'Kingston upon Thames, KT6' },
+    { name: 'New Malden', subtitle: 'Kingston upon Thames, KT3' },
+    { name: 'Wembley', subtitle: 'Brent, HA9' },
+    { name: 'Harrow', subtitle: 'Harrow, HA1' },
+    { name: 'Stanmore', subtitle: 'Harrow, HA7' },
+    { name: 'Edgware', subtitle: 'Barnet, HA8' },
+    { name: 'Barnet', subtitle: 'Barnet, EN5' },
+    { name: 'Finchley', subtitle: 'Barnet, N3' },
+    { name: 'Hendon', subtitle: 'Barnet, NW4' },
+    { name: 'Golders Green', subtitle: 'Barnet, NW11' },
+    { name: 'Muswell Hill', subtitle: 'Haringey, N10' },
+    { name: 'Southgate', subtitle: 'Enfield, N14' },
+    { name: 'Enfield', subtitle: 'Enfield, EN1' },
+    { name: 'Stratford', subtitle: 'Newham, E15' },
+    { name: 'Ilford', subtitle: 'Redbridge, IG1' },
+    { name: 'Romford', subtitle: 'Havering, RM1' },
+    { name: 'Watford', subtitle: 'Hertfordshire, WD17' },
+    { name: 'Bexley', subtitle: 'Bexley, DA5' },
+    { name: 'Orpington', subtitle: 'Bromley, BR6' }
+  ];
+
+  keyAreas.forEach(a => {
+    const lower = a.name.toLowerCase();
+    if (!locationMap.has(lower) || locationMap.get(lower).type === 'Postcode Area') {
+      locationMap.set(lower, {
+        name: a.name,
+        type: 'Area / Town',
+        category: 'area',
+        subtitle: a.subtitle,
+        priority: 2
+      });
+    }
+  });
+
+  cachedLocationsIndex = Array.from(locationMap.values());
+  return cachedLocationsIndex;
+}
+
+// GET /api/locations/suggest - Interactive Typeahead Location Suggestions
+app.get('/api/locations/suggest', (req, res) => {
+  const q = (req.query.q || '').trim().toLowerCase();
+  if (!q || q.length < 1) {
+    return res.json({ query: q, suggestions: [] });
+  }
+
+  const index = getLocationSuggestionsIndex();
+  const startsWith = [];
+  const contains = [];
+
+  for (const item of index) {
+    const nameLower = item.name.toLowerCase();
+    if (nameLower.startsWith(q)) {
+      startsWith.push(item);
+    } else if (nameLower.includes(q) || (item.subtitle && item.subtitle.toLowerCase().includes(q))) {
+      contains.push(item);
+    }
+  }
+
+  startsWith.sort((a, b) => (a.priority - b.priority) || (a.name.length - b.name.length) || a.name.localeCompare(b.name));
+  contains.sort((a, b) => (a.priority - b.priority) || (a.name.length - b.name.length) || a.name.localeCompare(b.name));
+
+  const combined = [...startsWith, ...contains].slice(0, 10);
+  res.json({
+    query: req.query.q,
+    suggestions: combined
+  });
+});
+
 // GET /api/schools - Search & Filter
 app.get('/api/schools', (req, res) => {
   let schools = readData();

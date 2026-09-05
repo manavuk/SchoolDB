@@ -163,8 +163,13 @@
                   <label style="font-size: 0.78rem; font-weight: 700; color: #334155; display: block; margin-bottom: 0.3rem;">
                     <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i> Home Postcode / Borough
                   </label>
-                  <div style="display: flex; gap: 0.35rem;">
-                    <input type="text" id="rec-target-locations" placeholder="e.g. SW19 4TT, EN5, W6..." style="flex: 1; min-width: 0; padding: 0.52rem 0.65rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.84rem; background: #f8fafc;">
+                  <div style="display: flex; gap: 0.35rem; align-items: stretch;">
+                    <div id="rec-locations-chip-box" class="location-chip-box" style="flex: 1; min-width: 0;">
+                      <div id="rec-locations-chips" class="location-chips-container"></div>
+                      <input type="text" id="rec-locations-input" class="location-chip-input" placeholder="Type area/postcode & press Enter..." autocomplete="off">
+                      <input type="hidden" id="rec-target-locations" value="">
+                      <div id="rec-locations-suggestions" class="location-typeahead-dropdown"></div>
+                    </div>
                     <select id="rec-max-distance-select" title="Max Distance Radius" style="width: 100px; padding: 0.52rem 0.35rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.78rem; background: #f8fafc; color: #334155; font-weight: 600; cursor: pointer;">
                       <option value="">Any Dist</option>
                       <option value="3">≤ 3 miles</option>
@@ -659,13 +664,18 @@
               <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i>
               <span>Where will your child travel from?</span>
             </div>
-            <div class="pw-section-desc">Enter your home postcode or key areas of interest (comma-separated).</div>
+            <div class="pw-section-desc">Type your home postcode or key boroughs/areas and press <strong>Enter</strong> to add each location.</div>
             
             <div style="position: relative;">
-              <input type="text" id="pw-input-locations" placeholder="e.g. SW19 4TT, Wimbledon, Kingston" style="width: 100%; padding: 0.65rem 0.85rem; border: 1.5px solid #cbd5e1; border-radius: 10px; font-size: 0.92rem; font-weight: 600; color: #0f172a; background: #ffffff;">
+              <div id="pw-locations-chip-box" class="location-chip-box wizard-theme" style="width: 100%;">
+                <div id="pw-locations-chips" class="location-chips-container"></div>
+                <input type="text" id="pw-locations-input" class="location-chip-input" placeholder="e.g. SW19 4TT, Wimbledon, Barnet..." autocomplete="off">
+                <input type="hidden" id="pw-input-locations" value="">
+                <div id="pw-locations-suggestions" class="location-typeahead-dropdown"></div>
+              </div>
               <div style="font-size: 0.74rem; color: #64748b; margin-top: 0.35rem; display: flex; align-items: center; gap: 0.3rem;">
                 <i class="fa-solid fa-circle-info" style="color: #3b82f6;"></i>
-                <span>You can list multiple postcodes or boroughs separated by commas.</span>
+                <span>Select from autocomplete or press <strong>Enter</strong> to save multiple travel origins.</span>
               </div>
             </div>
           </div>

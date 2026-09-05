@@ -1342,8 +1342,12 @@ function setupEventListeners() {
   const resetRecWizardBtn = document.getElementById('btn-reset-rec-wizard');
   if (resetRecWizardBtn) {
     resetRecWizardBtn.addEventListener('click', () => {
-      const locInput = document.getElementById('rec-target-locations');
-      if (locInput) locInput.value = '';
+      if (window.omniLocationChipInput) {
+        window.omniLocationChipInput.clear();
+      } else {
+        const locInput = document.getElementById('rec-target-locations');
+        if (locInput) locInput.value = '';
+      }
       const genderSelect = document.getElementById('rec-gender');
       if (genderSelect) genderSelect.value = 'NA';
       document.querySelectorAll('.rec-gender-chk').forEach(c => c.checked = (c.value === 'NA'));
@@ -1401,6 +1405,16 @@ function setupEventListeners() {
       triggerAutoRecommend(0);
     });
   }
+
+  // Initialize Omni-Discovery Location Chip Input with typeahead
+  window.omniLocationChipInput = createLocationChipInput({
+    boxId: 'rec-locations-chip-box',
+    chipsId: 'rec-locations-chips',
+    inputId: 'rec-locations-input',
+    hiddenId: 'rec-target-locations',
+    suggestionsId: 'rec-locations-suggestions',
+    onChange: () => triggerAutoRecommend(0)
+  });
 
   // Auto-recommend on text input change
   const locInputEl = document.getElementById('rec-target-locations');
@@ -6299,6 +6313,7 @@ async function loadUserRecProfile() {
 
     const locInput = document.getElementById('rec-target-locations');
     if (locInput) locInput.value = locations;
+    if (window.omniLocationChipInput) window.omniLocationChipInput.setChips(locations);
 
     const proxSlider = document.getElementById('rec-qual-prox-slider');
     if (proxSlider) proxSlider.value = getSliderStepFromValue(proximity) ?? 1;
@@ -7558,6 +7573,257 @@ async function saveParent2WizardProfile() {
    PORTFOLIO ONBOARDING WIZARD & MATCHMAKER CONTROLLER
    ========================================================================== */
 
+/**
+ * Generic Location Chip Input with Typeahead Autocomplete
+ */
+function createLocationChipInput(config) {
+  const {
+    boxId,
+    chipsId,
+    inputId,
+    hiddenId,
+    suggestionsId,
+    onChange,
+    onEnterOrSelect
+  } = config;
+
+  const boxEl = document.getElementById(boxId);
+  const chipsEl = document.getElementById(chipsId);
+  const inputEl = document.getElementById(inputId);
+  const hiddenEl = document.getElementById(hiddenId);
+  const suggestionsEl = document.getElementById(suggestionsId);
+
+  if (!boxEl || !chipsEl || !inputEl || !hiddenEl || !suggestionsEl) {
+    return null;
+  }
+
+  function _esc(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[c]));
+  }
+
+  let chips = [];
+  let currentSuggestions = [];
+  let highlightedIndex = -1;
+  let debounceTimeout = null;
+
+  function renderChips() {
+    chipsEl.innerHTML = '';
+    chips.forEach((chip, index) => {
+      const chipEl = document.createElement('span');
+      chipEl.className = 'location-chip';
+      chipEl.innerHTML = `
+        <span>${_esc(chip)}</span>
+        <button type="button" class="location-chip-remove" data-index="${index}" title="Remove ${_esc(chip)}" aria-label="Remove">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      `;
+      chipsEl.appendChild(chipEl);
+    });
+    hiddenEl.value = chips.join(', ');
+  }
+
+  function addChip(val) {
+    if (!val) return;
+    const clean = String(val).trim().replace(/^[,\s]+|[,\s]+$/g, '');
+    if (!clean) return;
+    const exists = chips.some(c => c.toLowerCase() === clean.toLowerCase());
+    if (!exists) {
+      chips.push(clean);
+      renderChips();
+      try {
+        hiddenEl.dispatchEvent(new Event('input', { bubbles: true }));
+        hiddenEl.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (e) {}
+      if (typeof onChange === 'function') onChange(chips);
+      if (typeof onEnterOrSelect === 'function') onEnterOrSelect(clean, chips);
+    }
+    inputEl.value = '';
+    hideSuggestions();
+  }
+
+  function removeChip(index) {
+    if (index >= 0 && index < chips.length) {
+      chips.splice(index, 1);
+      renderChips();
+      try {
+        hiddenEl.dispatchEvent(new Event('input', { bubbles: true }));
+        hiddenEl.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (e) {}
+      if (typeof onChange === 'function') onChange(chips);
+    }
+  }
+
+  function setChips(newChips) {
+    if (Array.isArray(newChips)) {
+      chips = newChips.map(c => String(c).trim()).filter(Boolean);
+    } else if (typeof newChips === 'string') {
+      chips = newChips.split(',').map(s => s.trim()).filter(Boolean);
+    } else {
+      chips = [];
+    }
+    const seen = new Set();
+    chips = chips.filter(c => {
+      const lower = c.toLowerCase();
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+      return true;
+    });
+    renderChips();
+  }
+
+  function getChips() {
+    return [...chips];
+  }
+
+  function hideSuggestions() {
+    suggestionsEl.classList.remove('show');
+    suggestionsEl.innerHTML = '';
+    currentSuggestions = [];
+    highlightedIndex = -1;
+  }
+
+  async function fetchSuggestions(query) {
+    if (!query || query.trim().length < 1) {
+      hideSuggestions();
+      return;
+    }
+    try {
+      const res = await fetch(`/api/locations/suggest?q=${encodeURIComponent(query.trim())}`);
+      if (!res.ok) {
+        hideSuggestions();
+        return;
+      }
+      const data = await res.json();
+      currentSuggestions = data.suggestions || [];
+      renderSuggestions();
+    } catch (e) {
+      hideSuggestions();
+    }
+  }
+
+  function renderSuggestions() {
+    if (!currentSuggestions || currentSuggestions.length === 0) {
+      hideSuggestions();
+      return;
+    }
+    suggestionsEl.innerHTML = '';
+    currentSuggestions.forEach((item, idx) => {
+      const row = document.createElement('div');
+      row.className = 'location-typeahead-item' + (idx === highlightedIndex ? ' active' : '');
+      row.dataset.index = idx;
+
+      let iconClass = 'fa-location-dot';
+      let badgeClass = 'borough';
+      let badgeLabel = item.type || 'Location';
+
+      if (item.type === 'outcode') {
+        badgeClass = 'outcode';
+        iconClass = 'fa-envelopes-bulk';
+      } else if (item.type === 'town') {
+        badgeClass = 'town';
+        iconClass = 'fa-city';
+      }
+
+      row.innerHTML = `
+        <div class="location-typeahead-item-main">
+          <i class="fa-solid ${iconClass} location-typeahead-item-icon"></i>
+          <div>
+            <div>${_esc(item.name)}</div>
+            ${item.subtitle ? `<div style="font-size: 0.72rem; color: #64748b; font-weight: 400;">${_esc(item.subtitle)}</div>` : ''}
+          </div>
+        </div>
+        <span class="location-typeahead-badge ${badgeClass}">${_esc(badgeLabel)}</span>
+      `;
+
+      row.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        addChip(item.name);
+        inputEl.focus();
+      });
+
+      suggestionsEl.appendChild(row);
+    });
+    suggestionsEl.classList.add('show');
+  }
+
+  boxEl.addEventListener('click', (e) => {
+    if (e.target.closest('.location-chip-remove')) {
+      const btn = e.target.closest('.location-chip-remove');
+      const idx = parseInt(btn.dataset.index, 10);
+      removeChip(idx);
+      inputEl.focus();
+    } else {
+      inputEl.focus();
+    }
+  });
+
+  inputEl.addEventListener('input', () => {
+    const val = inputEl.value;
+    if (val.includes(',')) {
+      const parts = val.split(',');
+      parts.slice(0, -1).forEach(p => addChip(p));
+      inputEl.value = parts[parts.length - 1].trimStart();
+    }
+    clearTimeout(debounceTimeout);
+    debounceTimeout = setTimeout(() => {
+      fetchSuggestions(inputEl.value);
+    }, 160);
+  });
+
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      if (highlightedIndex >= 0 && currentSuggestions[highlightedIndex]) {
+        addChip(currentSuggestions[highlightedIndex].name);
+      } else if (inputEl.value.trim()) {
+        addChip(inputEl.value);
+      }
+    } else if (e.key === 'Backspace') {
+      if (!inputEl.value && chips.length > 0) {
+        removeChip(chips.length - 1);
+      }
+    } else if (e.key === 'ArrowDown') {
+      if (currentSuggestions.length > 0) {
+        e.preventDefault();
+        highlightedIndex = (highlightedIndex + 1) % currentSuggestions.length;
+        renderSuggestions();
+      }
+    } else if (e.key === 'ArrowUp') {
+      if (currentSuggestions.length > 0) {
+        e.preventDefault();
+        highlightedIndex = (highlightedIndex - 1 + currentSuggestions.length) % currentSuggestions.length;
+        renderSuggestions();
+      }
+    } else if (e.key === 'Escape') {
+      hideSuggestions();
+    }
+  });
+
+  inputEl.addEventListener('blur', () => {
+    setTimeout(hideSuggestions, 200);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!boxEl.contains(e.target)) {
+      hideSuggestions();
+    }
+  });
+
+  return {
+    getChips,
+    setChips,
+    addChip,
+    removeChip,
+    clear: () => setChips([])
+  };
+}
+
 const DISTANCE_STEPS = ['< 1 mile', '3 miles', '5 miles', '10 miles', '15 miles', 'Any distance'];
 
 let wizardState = {
@@ -7600,7 +7866,9 @@ function openPortfolioWizard(options = {}) {
     }
 
     // 3. Locations
-    const currentLoc = document.getElementById('rec-target-locations')?.value || localStorage.getItem('user_home_postcode') || '';
+    const currentLoc = (window.omniLocationChipInput ? window.omniLocationChipInput.getChips().join(', ') : '') ||
+      document.getElementById('rec-target-locations')?.value ||
+      localStorage.getItem('user_home_postcode') || '';
     wizardState.locations = currentLoc;
 
     // 4. Distance
@@ -7669,6 +7937,9 @@ function syncWizardUiToState() {
   // Page 2: Location and Distance
   const locInput = document.getElementById('pw-input-locations');
   if (locInput) locInput.value = wizardState.locations;
+  if (window.wizardLocationChipInput) {
+    window.wizardLocationChipInput.setChips(wizardState.locations);
+  }
 
   const slider = document.getElementById('pw-slider-distance');
   if (slider) slider.value = wizardState.distanceIndex;
@@ -7766,8 +8037,16 @@ function handleWizardNext() {
   if (step === 1) {
     updateWizardStepView(2);
   } else if (step === 2) {
-    const locInput = document.getElementById('pw-input-locations');
-    if (locInput) wizardState.locations = locInput.value.trim();
+    if (window.wizardLocationChipInput) {
+      const leftover = document.getElementById('pw-locations-input')?.value.trim();
+      if (leftover) {
+        window.wizardLocationChipInput.addChip(leftover);
+      }
+      wizardState.locations = window.wizardLocationChipInput.getChips().join(', ');
+    } else {
+      const locInput = document.getElementById('pw-input-locations');
+      if (locInput) wizardState.locations = locInput.value.trim();
+    }
     updateWizardStepView(3);
   } else if (step === 3) {
     // Validate sector selection
@@ -7819,6 +8098,9 @@ function applyWizardToFiltersAndSearch() {
   // 2. Locations
   const locInput = document.getElementById('rec-target-locations');
   if (locInput) locInput.value = wizardState.locations;
+  if (window.omniLocationChipInput) {
+    window.omniLocationChipInput.setChips(wizardState.locations);
+  }
   const filterPc = document.getElementById('filter-user-postcode');
   if (filterPc) filterPc.value = wizardState.locations;
   if (wizardState.locations) {
@@ -7954,7 +8236,18 @@ function initPortfolioWizardListeners() {
     });
   }
 
-  // Location input
+  // Location input: Chip container with typeahead
+  window.wizardLocationChipInput = createLocationChipInput({
+    boxId: 'pw-locations-chip-box',
+    chipsId: 'pw-locations-chips',
+    inputId: 'pw-locations-input',
+    hiddenId: 'pw-input-locations',
+    suggestionsId: 'pw-locations-suggestions',
+    onChange: (chips) => {
+      wizardState.locations = chips.join(', ');
+    }
+  });
+
   const locInput = document.getElementById('pw-input-locations');
   if (locInput) {
     locInput.addEventListener('input', () => {

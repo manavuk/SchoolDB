@@ -3533,4 +3533,178 @@ body {
   text-decoration: underline;
 }
 
+/* Location Chip Input & Typeahead Autocomplete */
+.location-chip-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.3rem 0.5rem;
+  min-height: 38px;
+  cursor: text;
+  position: relative;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.location-chip-box:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.location-chip-box.wizard-theme {
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.45rem 0.65rem;
+  min-height: 44px;
+}
+
+.location-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.location-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  user-select: none;
+  animation: fadeInChip 0.15s ease-out;
+}
+
+@keyframes fadeInChip {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.location-chip-remove {
+  cursor: pointer;
+  color: #3b82f6;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.location-chip-remove:hover {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.location-chip-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  flex: 1;
+  min-width: 120px;
+  font-size: 0.84rem;
+  color: #0f172a;
+  padding: 0.15rem 0.2rem;
+  font-family: inherit;
+}
+
+.location-chip-box.wizard-theme .location-chip-input {
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.location-typeahead-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0,0,0,0.15), 0 4px 6px -2px rgba(0,0,0,0.05);
+  max-height: 250px;
+  overflow-y: auto;
+  z-index: 1050;
+  display: none;
+  padding: 0.35rem 0;
+}
+
+.location-typeahead-dropdown.show {
+  display: block;
+}
+
+.location-typeahead-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.location-typeahead-item:hover,
+.location-typeahead-item.active {
+  background: #f1f5f9;
+}
+
+.location-typeahead-item-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #1e293b;
+  font-weight: 600;
+  font-size: 0.84rem;
+}
+
+.location-typeahead-item-icon {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.location-typeahead-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.location-typeahead-badge.borough {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.location-typeahead-badge.outcode {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.location-typeahead-badge.town {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.location-typeahead-empty {
+  padding: 0.6rem 0.75rem;
+  font-size: 0.8rem;
+  color: #64748b;
+  text-align: center;
+}
+
+
 

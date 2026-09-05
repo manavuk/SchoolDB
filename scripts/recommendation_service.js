@@ -274,13 +274,29 @@ function evaluateRecommendations({
   // STAGE 2: LATENT USER PROFILE EXTRACTION
   // -------------------------------------------------------------
 
-  // Geographic anchor: User input location or centroid of user's saved schools
-  let userCoords = null;
-  let targetLocationClean = (binaryFilters.locations || preferencesOverride?.targetPostcode || preferencesOverride?.targetBorough || targetLocation || '').trim();
-
-  if (targetLocationClean && isValidUkPostcode(targetLocationClean)) {
-    userCoords = getPostcodeCoordinatesSync(targetLocationClean);
+  // Geographic anchors: User input location chips or centroid of user's saved schools
+  let locationTokens = [];
+  if (Array.isArray(binaryFilters.locations)) {
+    locationTokens = binaryFilters.locations.map(s => String(s).trim()).filter(Boolean);
+  } else if (Array.isArray(targetLocation)) {
+    locationTokens = targetLocation.map(s => String(s).trim()).filter(Boolean);
+  } else {
+    const rawLoc = String(binaryFilters.locations || preferencesOverride?.targetPostcode || preferencesOverride?.targetBorough || targetLocation || '').trim();
+    if (rawLoc) {
+      locationTokens = rawLoc.split(',').map(s => s.trim()).filter(Boolean);
+    }
   }
+
+  const userCoordsList = [];
+  locationTokens.forEach(tok => {
+    if (isValidUkPostcode(tok)) {
+      const c = getPostcodeCoordinatesSync(tok);
+      if (c) userCoordsList.push(c);
+    }
+  });
+
+  let userCoords = userCoordsList[0] || null;
+  let targetLocationClean = locationTokens.join(', ');
 
   // If user didn't provide a valid postcode but has saved schools, calculate centroid of saved schools
   if (!userCoords && userSchools.length > 0) {
@@ -329,37 +345,56 @@ function evaluateRecommendations({
     const reasons = [];
 
     // --- Component 1: Distance & Proximity Curve ---
-    if (userCoords && candidate.postcode) {
-      const dist = calculateDistanceToSchool(userCoords, candidate.postcode);
-      if (dist) {
-        distanceMiles = dist.miles;
-        distanceKm = dist.km;
-
-        if (dist.miles <= 3.0) {
-          proximityScore = 1.00;
-          reasons.push(`${dist.miles.toFixed(1)} miles away • Very close commute`);
-        } else if (dist.miles <= 6.0) {
-          proximityScore = 0.88;
-          reasons.push(`${dist.miles.toFixed(1)} miles away • Within local radius`);
-        } else if (dist.miles <= 10.0) {
-          proximityScore = 0.72;
-          reasons.push(`~${dist.miles.toFixed(1)} miles away`);
-        } else if (dist.miles <= 15.0) {
-          proximityScore = 0.52;
-        } else if (dist.miles <= 25.0) {
-          proximityScore = 0.32;
-        } else {
-          proximityScore = 0.12;
+    let bestDist = null;
+    if (userCoordsList.length > 0 && candidate.postcode) {
+      for (const uc of userCoordsList) {
+        const d = calculateDistanceToSchool(uc, candidate.postcode);
+        if (d && (!bestDist || d.miles < bestDist.miles)) {
+          bestDist = d;
         }
       }
-    } else if (targetLocationClean) {
-      // Fallback borough / text match
-      const tok = targetLocationClean.toLowerCase();
+    } else if (userCoords && candidate.postcode) {
+      bestDist = calculateDistanceToSchool(userCoords, candidate.postcode);
+    }
+
+    if (bestDist) {
+      distanceMiles = bestDist.miles;
+      distanceKm = bestDist.km;
+
+      if (bestDist.miles <= 3.0) {
+        proximityScore = 1.00;
+        reasons.push(`${bestDist.miles.toFixed(1)} miles away • Very close commute`);
+      } else if (bestDist.miles <= 6.0) {
+        proximityScore = 0.88;
+        reasons.push(`${bestDist.miles.toFixed(1)} miles away • Within local radius`);
+      } else if (bestDist.miles <= 10.0) {
+        proximityScore = 0.72;
+        reasons.push(`~${bestDist.miles.toFixed(1)} miles away`);
+      } else if (bestDist.miles <= 15.0) {
+        proximityScore = 0.52;
+      } else if (bestDist.miles <= 25.0) {
+        proximityScore = 0.32;
+      } else {
+        proximityScore = 0.12;
+      }
+    }
+
+    // Check borough / area name matches from location tokens
+    if (locationTokens.length > 0) {
       const la = (candidate.la || '').toLowerCase();
       const pc = (candidate.postcode || '').toLowerCase();
-      if (la.includes(tok) || pc.includes(tok)) {
-        proximityScore = 0.85;
-        reasons.push(`Located in ${candidate.la}`);
+      const addr = (candidate.address || '').toLowerCase();
+      const matchedToken = locationTokens.find(tok => {
+        const t = tok.toLowerCase();
+        return la.includes(t) || pc.includes(t) || addr.includes(t);
+      });
+      if (matchedToken) {
+        if (!proximityScore || proximityScore < 0.85) {
+          proximityScore = 0.85;
+        }
+        if (!reasons.some(r => r.includes('miles away'))) {
+          reasons.push(`Located in ${candidate.la || matchedToken}`);
+        }
       }
     }
 
