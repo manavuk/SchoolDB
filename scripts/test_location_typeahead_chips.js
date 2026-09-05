@@ -37,15 +37,19 @@ async function runTests() {
   console.log('\n--- 2. Testing CSS in public/css/styles.css ---');
   const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'styles.css'), 'utf-8');
   assert(css.includes('.location-chip-box'), '.location-chip-box rule defined');
+  assert(css.includes('.location-chip-box.compact-mode'), '.location-chip-box.compact-mode rule defined for fixed height');
   assert(css.includes('.location-chip'), '.location-chip badge style defined');
   assert(css.includes('.location-chip-remove'), '.location-chip-remove delete button style defined');
   assert(css.includes('.location-typeahead-dropdown'), '.location-typeahead-dropdown autocomplete popup defined');
   assert(css.includes('.location-typeahead-badge'), '.location-typeahead-badge category tag defined');
+  assert(css.includes('.location-chips-more-btn'), '.location-chips-more-btn +more badge style defined');
+  assert(css.includes('.location-chips-more-popover'), '.location-chips-more-popover hover/click popup defined');
 
   console.log('\n--- 3. Testing Client Logic in public/js/app.js ---');
   const appJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf-8');
   assert(appJs.includes('function createLocationChipInput'), 'createLocationChipInput helper function is defined');
   assert(appJs.includes('window.omniLocationChipInput = createLocationChipInput'), 'omniLocationChipInput is initialized');
+  assert(appJs.includes('compactMode: true'), 'omniLocationChipInput config specifies compactMode: true');
   assert(appJs.includes('window.wizardLocationChipInput = createLocationChipInput'), 'wizardLocationChipInput is initialized');
   assert(appJs.includes('fetch(`/api/locations/suggest?q='), 'app.js fetches suggestions from /api/locations/suggest');
   assert(appJs.includes('window.wizardLocationChipInput.setChips(wizardState.locations)'), 'syncWizardUiToState sets wizard chips');

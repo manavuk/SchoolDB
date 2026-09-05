@@ -1413,6 +1413,7 @@ function setupEventListeners() {
     inputId: 'rec-locations-input',
     hiddenId: 'rec-target-locations',
     suggestionsId: 'rec-locations-suggestions',
+    compactMode: true,
     onChange: () => triggerAutoRecommend(0)
   });
 
@@ -7583,6 +7584,7 @@ function createLocationChipInput(config) {
     inputId,
     hiddenId,
     suggestionsId,
+    compactMode = false,
     onChange,
     onEnterOrSelect
   } = config;
@@ -7595,6 +7597,10 @@ function createLocationChipInput(config) {
 
   if (!boxEl || !chipsEl || !inputEl || !hiddenEl || !suggestionsEl) {
     return null;
+  }
+
+  if (compactMode) {
+    boxEl.classList.add('compact-mode');
   }
 
   function _esc(s) {
@@ -7614,17 +7620,86 @@ function createLocationChipInput(config) {
 
   function renderChips() {
     chipsEl.innerHTML = '';
-    chips.forEach((chip, index) => {
+
+    if (!compactMode || chips.length <= 1) {
+      chips.forEach((chip, index) => {
+        const chipEl = document.createElement('span');
+        chipEl.className = 'location-chip';
+        chipEl.innerHTML = `
+          <span>${_esc(chip)}</span>
+          <button type="button" class="location-chip-remove" data-index="${index}" title="Remove ${_esc(chip)}" aria-label="Remove">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        `;
+        chipsEl.appendChild(chipEl);
+      });
+      if (inputEl) {
+        inputEl.placeholder = chips.length > 0 ? '+ Add...' : (config.placeholder || 'Type area/postcode & press Enter...');
+      }
+    } else {
+      // compactMode && chips.length > 1
+      // Show the most recently selected chip (last one in chips)
+      const recentIndex = chips.length - 1;
+      const recentChip = chips[recentIndex];
       const chipEl = document.createElement('span');
       chipEl.className = 'location-chip';
       chipEl.innerHTML = `
-        <span>${_esc(chip)}</span>
-        <button type="button" class="location-chip-remove" data-index="${index}" title="Remove ${_esc(chip)}" aria-label="Remove">
+        <span>${_esc(recentChip)}</span>
+        <button type="button" class="location-chip-remove" data-index="${recentIndex}" title="Remove ${_esc(recentChip)}" aria-label="Remove">
           <i class="fa-solid fa-xmark"></i>
         </button>
       `;
       chipsEl.appendChild(chipEl);
-    });
+
+      // Render +more link badge & interactive popover on mouseover/click
+      const remainingCount = chips.length - 1;
+      const moreWrap = document.createElement('div');
+      moreWrap.className = 'location-chips-more-wrap';
+
+      const moreBtn = document.createElement('button');
+      moreBtn.type = 'button';
+      moreBtn.className = 'location-chips-more-btn';
+      moreBtn.textContent = `+${remainingCount} more`;
+      moreBtn.title = 'View all other selected locations';
+
+      const popover = document.createElement('div');
+      popover.className = 'location-chips-more-popover';
+      popover.innerHTML = `
+        <div class="location-chips-more-header">
+          <span>Other Locations (${remainingCount})</span>
+        </div>
+        <div class="location-chips-more-list"></div>
+      `;
+
+      const popoverList = popover.querySelector('.location-chips-more-list');
+      // Render remaining chips (indices 0 to chips.length - 2)
+      for (let i = 0; i < recentIndex; i++) {
+        const otherChip = chips[i];
+        const otherEl = document.createElement('span');
+        otherEl.className = 'location-chip';
+        otherEl.innerHTML = `
+          <span>${_esc(otherChip)}</span>
+          <button type="button" class="location-chip-remove" data-index="${i}" title="Remove ${_esc(otherChip)}" aria-label="Remove">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        `;
+        popoverList.appendChild(otherEl);
+      }
+
+      moreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        popover.classList.toggle('show');
+      });
+
+      moreWrap.appendChild(moreBtn);
+      moreWrap.appendChild(popover);
+      chipsEl.appendChild(moreWrap);
+
+      if (inputEl) {
+        inputEl.placeholder = '+ Add...';
+      }
+    }
+
     hiddenEl.value = chips.join(', ');
   }
 
@@ -7754,10 +7829,15 @@ function createLocationChipInput(config) {
 
   boxEl.addEventListener('click', (e) => {
     if (e.target.closest('.location-chip-remove')) {
+      e.stopPropagation();
       const btn = e.target.closest('.location-chip-remove');
       const idx = parseInt(btn.dataset.index, 10);
       removeChip(idx);
       inputEl.focus();
+    } else if (e.target.closest('.location-chips-more-btn')) {
+      // Toggle handled by moreBtn listener
+    } else if (e.target.closest('.location-chips-more-popover')) {
+      e.stopPropagation();
     } else {
       inputEl.focus();
     }
@@ -7802,6 +7882,8 @@ function createLocationChipInput(config) {
       }
     } else if (e.key === 'Escape') {
       hideSuggestions();
+      const popovers = boxEl.querySelectorAll('.location-chips-more-popover.show');
+      popovers.forEach(p => p.classList.remove('show'));
     }
   });
 
@@ -7812,6 +7894,8 @@ function createLocationChipInput(config) {
   document.addEventListener('click', (e) => {
     if (!boxEl.contains(e.target)) {
       hideSuggestions();
+      const popovers = boxEl.querySelectorAll('.location-chips-more-popover.show');
+      popovers.forEach(p => p.classList.remove('show'));
     }
   });
 

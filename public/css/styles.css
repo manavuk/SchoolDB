@@ -3706,5 +3706,126 @@ body {
   text-align: center;
 }
 
+/* Compact Mode for Omni-Discovery Bar (Fixed Height, Single-Line, No Vertical Expansion) */
+.location-chip-box.compact-mode {
+  flex-wrap: nowrap;
+  height: 38px;
+  max-height: 38px;
+  min-height: 38px;
+  padding: 0.15rem 0.4rem;
+  overflow: visible;
+}
+
+.location-chip-box.compact-mode .location-chips-container {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  max-width: 75%;
+}
+
+.location-chip-box.compact-mode .location-chip {
+  font-size: 0.76rem;
+  padding: 0.12rem 0.38rem;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.location-chip-box.compact-mode .location-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 90px;
+  display: inline-block;
+}
+
+.location-chip-box.compact-mode .location-chip-input {
+  min-width: 45px;
+  font-size: 0.8rem;
+  padding: 0.1rem 0.2rem;
+  flex: 1;
+}
+
+/* +More badge and interactive popover */
+.location-chips-more-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.location-chips-more-btn {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.12rem 0.38rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  line-height: 1.3;
+}
+
+.location-chips-more-btn:hover,
+.location-chips-more-btn.active {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.location-chips-more-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0,0,0,0.15), 0 4px 6px -2px rgba(0,0,0,0.05);
+  padding: 0.5rem;
+  z-index: 1060;
+  display: none;
+  min-width: 200px;
+  max-width: 280px;
+  animation: fadeInPopover 0.12s ease-out;
+}
+
+@keyframes fadeInPopover {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.location-chips-more-wrap:hover .location-chips-more-popover,
+.location-chips-more-popover.show {
+  display: block;
+}
+
+.location-chips-more-header {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.location-chips-more-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
 
 
